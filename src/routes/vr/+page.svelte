@@ -16,6 +16,9 @@ import {
 	isSpeedCommand,
 } from "$lib/ws/protocol";
 
+const _fallbackPos = new THREE.Vector3();
+const _fallbackRot = new THREE.Euler();
+
 let canvas: HTMLCanvasElement;
 let renderer: THREE.WebGLRenderer;
 let scene: THREE.Scene;
@@ -36,11 +39,10 @@ onMount(() => {
 	const dummyCamera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
 
 	renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-	renderer.setPixelRatio(window.devicePixelRatio);
+	renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 	renderer.setSize(window.innerWidth, window.innerHeight);
 	renderer.xr.enabled = true;
-	renderer.shadowMap.enabled = true;
-	renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+	renderer.shadowMap.enabled = false;
 
 	vrButton = VRButton.createButton(renderer);
 	document.body.appendChild(vrButton);
@@ -96,8 +98,8 @@ onMount(() => {
 					delta,
 					elapsed: clock.elapsedTime,
 					camera: renderCamera,
-					playerPosition: renderCamera.parent?.position ?? new THREE.Vector3(),
-					playerRotation: renderCamera.parent?.rotation ?? new THREE.Euler(),
+					playerPosition: renderCamera.parent?.position ?? _fallbackPos,
+					playerRotation: renderCamera.parent?.rotation ?? _fallbackRot,
 				});
 				exp.state = result.state;
 				if (result.outputs?.score !== undefined) {
