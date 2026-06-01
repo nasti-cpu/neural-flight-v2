@@ -26,6 +26,7 @@ function webSocketPlugin(): Plugin {
 
 export default defineConfig({
 	plugins: [sveltekit(), webSocketPlugin()],
+	assetsInclude: ["**/*.obj"],
 	server: {
 		https: {
 			key: fs.readFileSync("localhost-key.pem"),
