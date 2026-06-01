@@ -148,9 +148,16 @@ export function createSeagrassMeadow(type: SeagrassType, terrainHeight: (x: numb
 
 	const bladeGeos = new Map<string, THREE.BufferGeometry>();
 
-	// Distribute blades in a grid with jitter (meadow-like)
-	const gridSize = Math.ceil(Math.sqrt(cfg.count));
-	const spacing = cfg.spread / gridSize;
+	// Generate cluster centers for natural distribution
+	const clusterCount = Math.max(4, Math.floor(cfg.count / 25));
+	const clusters: { x: number; z: number; tightness: number }[] = [];
+	for (let c = 0; c < clusterCount; c++) {
+		clusters.push({
+			x: (Math.random() - 0.5) * cfg.spread,
+			z: (Math.random() - 0.5) * cfg.spread,
+			tightness: 0.3 + Math.random() * 1.2,
+		});
+	}
 
 	for (let i = 0; i < cfg.count; i++) {
 		const len = cfg.lengthRange[0] + Math.random() * (cfg.lengthRange[1] - cfg.lengthRange[0]);
@@ -171,13 +178,13 @@ export function createSeagrassMeadow(type: SeagrassType, terrainHeight: (x: numb
 		const mesh = new THREE.Mesh(geo, mat);
 		mesh.frustumCulled = true;
 
-		// Grid position with jitter
-		const gx = i % gridSize;
-		const gz = Math.floor(i / gridSize);
-		const jx = (Math.random() - 0.5) * spacing * cfg.density;
-		const jz = (Math.random() - 0.5) * spacing * cfg.density;
-		const wx = (gx / gridSize - 0.5) * cfg.spread + jx;
-		const wz = (gz / gridSize - 0.5) * cfg.spread + jz;
+		// Cluster-based position: tight = nah am Zentrum, loose = weiter weg
+		const ci = Math.floor(Math.random() * clusters.length);
+		const cl = clusters[ci];
+		const dist = (0.2 + Math.random() * 0.8) * cl.tightness * (cfg.spread / clusterCount);
+		const ca = Math.random() * Math.PI * 2;
+		const wx = cl.x + Math.cos(ca) * dist;
+		const wz = cl.z + Math.sin(ca) * dist;
 		const wy = terrainHeight(wx, wz);
 
 		// Random rotation around Y
