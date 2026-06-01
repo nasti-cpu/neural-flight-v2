@@ -177,9 +177,10 @@ export function createCity(variant: CityVariant): CityResult {
 	bldgMesh.instanceColor = new THREE.InstancedBufferAttribute(colArr, 3);
 	structureGroup.add(bldgMesh);
 
-	// ── Windows: thin boxes at world positions on all 4 faces ──
+	// ── Windows: quads on all 4 faces, rotated with the building ──
 	const windowMat = new THREE.MeshBasicMaterial({
 		color: cfg.windowColor,
+		side: THREE.DoubleSide,
 	});
 	const windowGeos: THREE.BufferGeometry[] = [];
 
@@ -195,29 +196,40 @@ export function createCity(variant: CityVariant): CityResult {
 		const cosR = Math.cos(b.rot);
 		const sinR = Math.sin(b.rot);
 
-		for (let r = 0; r < rows; r++) {
-			for (let c = 0; c < cols; c++) {
-				for (let fi = 0; fi < 4; fi++) {
+		for (let fi = 0; fi < 4; fi++) {
+			let fnx = 0, fnz = 0, fRot = 0;
+			if (fi === 0) { fnx = 1; fRot = Math.PI / 2; }
+			else if (fi === 1) { fnx = -1; fRot = -Math.PI / 2; }
+			else if (fi === 2) { fnz = 1; fRot = 0; }
+			else { fnz = -1; fRot = Math.PI; }
+
+			for (let r = 0; r < rows; r++) {
+				for (let c = 0; c < cols; c++) {
 					let ox: number, oz: number;
-					if (fi === 0) { ox = b.w / 2; oz = gapX + c * (ww + gapX) - b.d / 2 + ww / 2; }
-					else if (fi === 1) { ox = -b.w / 2; oz = gapX + c * (ww + gapX) - b.d / 2 + ww / 2; }
-					else if (fi === 2) { ox = gapX + c * (ww + gapX) - b.w / 2 + ww / 2; oz = b.d / 2; }
-					else { ox = gapX + c * (ww + gapX) - b.w / 2 + ww / 2; oz = -b.d / 2; }
+					if (fi < 2) {
+						ox = fnx * b.w / 2;
+						oz = gapX + c * (ww + gapX) - b.d / 2 + ww / 2;
+					} else {
+						ox = gapX + c * (ww + gapX) - b.w / 2 + ww / 2;
+						oz = fnz * b.d / 2;
+					}
 
 					const wx = b.x + ox * cosR - oz * sinR;
 					const wz = b.z + ox * sinR + oz * cosR;
 					const wy = gapY + r * (hh + gapY);
 
-					const box = new THREE.BoxGeometry(ww * 0.8, hh * 0.7, 0.08);
-					box.translate(wx, wy, wz);
-					windowGeos.push(box);
+					const quad = new THREE.PlaneGeometry(ww * 0.8, hh * 0.7);
+					quad.rotateY(fRot);
+					quad.rotateY(b.rot);
+					quad.translate(wx, wy, wz);
+					windowGeos.push(quad);
 				}
 			}
 		}
 	}
 
 	if (windowGeos.length > 0) {
-		const merged = mergeGeometries(windowGeos);
+		const merged = mergeGeometries(windowGeos, false);
 		const windowMesh = new THREE.Mesh(merged, windowMat);
 		structureGroup.add(windowMesh);
 	}
