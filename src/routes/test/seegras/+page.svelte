@@ -13,7 +13,7 @@ interface ModeDef {
 }
 
 const MODES: ModeDef[] = [
-	{ id: "short", label: "Kurzes Seegras", description: "Wie Turtle-Grass — breite, kurze Blätter" },
+	{ id: "algae", label: "Algen", description: "Breite, krause Algenfiedern" },
 	{ id: "long", label: "Langes Seegras", description: "Wie Eelgrass — lange, schmale Bänder" },
 	{ id: "bushy", label: "Buschiges Seegras", description: "Dichte Büschel, verzweigt" },
 ];
@@ -26,7 +26,7 @@ let sand: DuneSandResult | null = null;
 let meadow: SeagrassMeadow | null = null;
 let elapsed = 0;
 
-let currentMode = $state<SeagrassType>("short");
+let currentMode = $state<SeagrassType>("algae");
 let building = $state(false);
 
 function rebuild(type: SeagrassType): void {
@@ -61,7 +61,7 @@ onMount(() => {
 	sand = createDuneSand();
 	scene.add(sand.terrain);
 
-	meadow = createSeagrassMeadow("short", getSandHeight);
+	meadow = createSeagrassMeadow("algae", getSandHeight);
 	scene.add(meadow.group);
 
 	renderer.setAnimationLoop(() => {

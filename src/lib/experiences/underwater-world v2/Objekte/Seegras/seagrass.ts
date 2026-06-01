@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-export type SeagrassType = "short" | "long" | "bushy";
+export type SeagrassType = "algae" | "long" | "bushy";
 
 // ── Single blade geometry (ribbon, base at origin) ──
 
@@ -34,6 +34,41 @@ function createBladeGeometry(length: number, width: number, curveAmt: number): T
 	return geo;
 }
 
+// ── Algae frond geometry (wide, ruffled, irregular) ──
+
+function createAlgaeGeometry(length: number, width: number, ruffles: number): THREE.BufferGeometry {
+	const segs = 14;
+	const positions: number[] = [];
+	const indices: number[] = [];
+	const uvs: number[] = [];
+
+	for (let i = 0; i <= segs; i++) {
+		const t = i / segs;
+		const y = t * length;
+		const taper = 1 - t * 0.65;
+		const ruffle = 1 + Math.sin(t * Math.PI * 3.7 + ruffles * 4) * 0.2 * taper + Math.sin(t * Math.PI * 7.3) * 0.08;
+		const w = width * taper * ruffle;
+		const cx = Math.sin(t * Math.PI * 4 + ruffles * 2) * width * 0.12 * taper;
+		const bend = Math.sin(t * Math.PI) * (ruffles * 0.3 + 0.2);
+
+		positions.push(-w / 2 + cx, y, bend, w / 2 + cx, y, bend);
+		uvs.push(0, t, 1, t);
+
+		if (i < segs) {
+			const a = i * 2, b = i * 2 + 1;
+			indices.push(a, a + 2, a + 1);
+			indices.push(a + 1, a + 2, a + 3);
+		}
+	}
+
+	const geo = new THREE.BufferGeometry();
+	geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+	geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+	geo.setIndex(indices);
+	geo.computeVertexNormals();
+	return geo;
+}
+
 // ── Types ──
 
 interface SeagrassConfig {
@@ -48,15 +83,15 @@ interface SeagrassConfig {
 }
 
 const CONFIG: Record<SeagrassType, SeagrassConfig> = {
-	short: {
-		count: 300,
-		lengthRange: [1.5, 3.5],
-		widthRange: [0.25, 0.5],
-		curveRange: [0.1, 0.4],
-		color: 0x55aa55,
-		spread: 30,
-		density: 0.4,
-		speed: 1.2,
+	algae: {
+		count: 220,
+		lengthRange: [2, 5],
+		widthRange: [0.3, 0.7],
+		curveRange: [0.2, 0.7],
+		color: 0x668844,
+		spread: 28,
+		density: 0.5,
+		speed: 1.4,
 	},
 	long: {
 		count: 200,
@@ -125,7 +160,11 @@ export function createSeagrassMeadow(type: SeagrassType, terrainHeight: (x: numb
 		const key = `${len.toFixed(1)}_${w.toFixed(2)}_${curve.toFixed(2)}`;
 		let geo = bladeGeos.get(key);
 		if (!geo) {
-			geo = createBladeGeometry(len, w, curve);
+			if (type === "algae") {
+				geo = createAlgaeGeometry(len, w, curve);
+			} else {
+				geo = createBladeGeometry(len, w, curve);
+			}
 			bladeGeos.set(key, geo);
 		}
 
