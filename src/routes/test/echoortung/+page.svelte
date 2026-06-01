@@ -23,7 +23,7 @@ let emitTimer = 0;
 let lastMX = 0;
 let lastMY = 0;
 
-const EMIT_INTERVAL = 1.8;
+const EMIT_INTERVAL = 2.3;
 
 const variantKeys: EchoVariant[] = ["scan", "puls", "welle"];
 const variantColors: Record<EchoVariant, number> = {
@@ -32,7 +32,53 @@ const variantColors: Record<EchoVariant, number> = {
 	welle: 0xaa77ff,
 };
 
+const SOUND_PATHS: Record<EchoVariant, string> = {
+	scan: "/sounds/echo%201.mp3",
+	puls: "/sounds/echo%203.mp3",
+	welle: "/sounds/echo%202.mp3",
+};
+
+let audioCtx: AudioContext | null = null;
+const audioBuffers = new Map<EchoVariant, AudioBuffer>();
+
+function initAudio() {
+	if (!audioCtx) {
+		audioCtx = new AudioContext();
+	}
+	if (audioCtx.state === "suspended") {
+		audioCtx.resume();
+	}
+}
+
+async function loadAudio() {
+	if (audioBuffers.size > 0) return;
+	initAudio();
+	if (!audioCtx) return;
+	for (const vk of variantKeys) {
+		try {
+			const res = await fetch(SOUND_PATHS[vk]);
+			if (!res.ok) { console.warn("audio fetch failed", res.status); continue; }
+			const buf = await res.arrayBuffer();
+			const decoded = await audioCtx.decodeAudioData(buf);
+			audioBuffers.set(vk, decoded);
+		} catch (e) {
+			console.warn("audio load error for", vk, e);
+		}
+	}
+	if (system) {
+		setSystemAudio(system, currentVariant);
+	}
+}
+
+function setSystemAudio(sys: EchoVariantSystem, variant: EchoVariant) {
+	if (audioCtx && audioBuffers.has(variant)) {
+		sys.setAudio(audioCtx, audioBuffers.get(variant)!);
+	}
+}
+
 function rebuild(variant: EchoVariant) {
+	initAudio();
+	loadAudio();
 	if (system) {
 		scene.remove(system.group);
 		system.dispose();
@@ -40,6 +86,7 @@ function rebuild(variant: EchoVariant) {
 	const config = ECHO_VARIANTS[variant];
 	system = createEchoVariant(config);
 	scene.add(system.group);
+	setSystemAudio(system, variant);
 	emitTimer = 0;
 }
 
@@ -220,6 +267,8 @@ onDestroy(() => {
 	onpointerdown={(e) => {
 		lastMX = e.clientX;
 		lastMY = e.clientY;
+		initAudio();
+		loadAudio();
 	}}
 	onpointermove={(e) => {
 		if (e.buttons === 0) return;

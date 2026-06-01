@@ -11,6 +11,10 @@ export interface EchoConfig {
 	burstDelay: number;
 	maxOpacity: number;
 	initialScale: number;
+	ringInner: number;
+	ringOuter: number;
+	wavy: boolean;
+	soundGain: number;
 	label: string;
 	description: string;
 }
@@ -18,39 +22,51 @@ export interface EchoConfig {
 export const ECHO_VARIANTS: Record<EchoVariant, EchoConfig> = {
 	scan: {
 		color: 0x00e5ff,
-		expandSpeed: 14,
-		lifetime: 2.5,
+		expandSpeed: 10,
+		lifetime: 1.2,
 		poolSize: 30,
 		burstCount: 1,
 		burstDelay: 0,
-		maxOpacity: 0.75,
-		initialScale: 0.3,
+		maxOpacity: 0.8,
+		initialScale: 0.2,
+		ringInner: 0.96,
+		ringOuter: 1.0,
+		wavy: false,
+		soundGain: 0.7,
 		label: "Scan-Ring",
 		description: "Ein einzelner dünner Ring — schneller Ping, kurz & klar",
 	},
 	puls: {
 		color: 0xffaa44,
-		expandSpeed: 7,
-		lifetime: 3.5,
+		expandSpeed: 5,
+		lifetime: 2.0,
 		poolSize: 40,
-		burstCount: 4,
+		burstCount: 3,
 		burstDelay: 0.18,
 		maxOpacity: 0.6,
-		initialScale: 0.25,
+		initialScale: 0.2,
+		ringInner: 0.94,
+		ringOuter: 1.0,
+		wavy: false,
+		soundGain: 0.7,
 		label: "Puls-Ring",
-		description: "4 konzentrische Ringe — mehrstufiger Puls zur Tiefenmessung",
+		description: "3 konzentrische Ringe — mehrstufiger Puls zur Tiefenmessung",
 	},
 	welle: {
 		color: 0xaa77ff,
-		expandSpeed: 4,
-		lifetime: 5,
+		expandSpeed: 3,
+		lifetime: 2.8,
 		poolSize: 25,
-		burstCount: 1,
-		burstDelay: 0,
+		burstCount: 2,
+		burstDelay: 0.4,
 		maxOpacity: 0.35,
-		initialScale: 0.4,
+		initialScale: 0.25,
+		ringInner: 0.95,
+		ringOuter: 1.0,
+		wavy: true,
+		soundGain: 1.2,
 		label: "Wellen-Ring",
-		description: "Gewellter Ring — breitet sich langsam aus, flächige Erkundung",
+		description: "2 gewellte Ringe — breitet sich langsam aus, flächige Erkundung",
 	},
 };
 
@@ -78,10 +94,10 @@ function createWavyRingGeometry(
 }
 
 function createRingGeometry(config: EchoConfig): THREE.BufferGeometry {
-	if (config.burstCount <= 1 && config.expandSpeed <= 5) {
-		return createWavyRingGeometry(0.9, 1.0, 64, 12, 0.03);
+	if (config.wavy) {
+		return createWavyRingGeometry(config.ringInner, config.ringOuter, 64, 12, 0.03);
 	}
-	return new THREE.RingGeometry(0.9, 1.0, 48);
+	return new THREE.RingGeometry(config.ringInner, config.ringOuter, 48);
 }
 
 interface EchoRingData {
@@ -104,6 +120,7 @@ export interface EchoVariantSystem {
 	config: EchoConfig;
 	emit: (x: number, y: number, z: number) => void;
 	update: (delta: number) => void;
+	setAudio: (ctx: AudioContext, buffer: AudioBuffer) => void;
 	dispose: () => void;
 }
 
@@ -112,6 +129,38 @@ export function createEchoVariant(config: EchoConfig): EchoVariantSystem {
 	const pool: EchoRingData[] = [];
 	const burstQueue: BurstJob[] = [];
 	const baseGeo = createRingGeometry(config);
+
+	let audioCtx: AudioContext | null = null;
+	let audioBuffer: AudioBuffer | null = null;
+
+	function playSound() {
+		if (!audioCtx) { console.warn("playSound: no audioCtx"); return; }
+		if (audioCtx.state === "suspended") audioCtx.resume();
+		try {
+			const now = audioCtx.currentTime;
+			const gain = audioCtx.createGain();
+			gain.gain.setValueAtTime(config.soundGain, now);
+			gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+			gain.connect(audioCtx.destination);
+
+			if (audioBuffer) {
+				const src = audioCtx.createBufferSource();
+				src.buffer = audioBuffer;
+				src.playbackRate.value = 0.7 + Math.random() * 0.15;
+				src.connect(gain);
+				src.start(now);
+			} else {
+				const osc = audioCtx.createOscillator();
+				osc.type = "sine";
+				osc.frequency.value = 600;
+				osc.connect(gain);
+				osc.start(now);
+				osc.stop(now + 0.08);
+			}
+		} catch (e) {
+			console.warn("playSound error", e);
+		}
+	}
 
 	for (let i = 0; i < config.poolSize; i++) {
 		const geo = baseGeo.clone();
@@ -148,7 +197,10 @@ export function createEchoVariant(config: EchoConfig): EchoVariantSystem {
 
 	function doEmit(x: number, y: number, z: number) {
 		const ring = acquireRing();
-		if (ring) activateRing(ring, x, y, z);
+		if (ring) {
+			activateRing(ring, x, y, z);
+			playSound();
+		}
 	}
 
 	function queueBurst(x: number, y: number, z: number, count: number) {
@@ -165,6 +217,10 @@ export function createEchoVariant(config: EchoConfig): EchoVariantSystem {
 		config,
 		emit(x, y, z) {
 			queueBurst(x, y, z, config.burstCount);
+		},
+		setAudio(ctx: AudioContext, buf: AudioBuffer) {
+			audioCtx = ctx;
+			audioBuffer = buf;
 		},
 		update(delta: number) {
 			for (let i = burstQueue.length - 1; i >= 0; i--) {
