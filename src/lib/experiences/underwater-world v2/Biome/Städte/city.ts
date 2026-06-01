@@ -177,11 +177,9 @@ export function createCity(variant: CityVariant): CityResult {
 	bldgMesh.instanceColor = new THREE.InstancedBufferAttribute(colArr, 3);
 	structureGroup.add(bldgMesh);
 
-	// ── Windows: merged quads on all 4 faces of each building ──
+	// ── Windows: thin boxes at world positions on all 4 faces ──
 	const windowMat = new THREE.MeshBasicMaterial({
 		color: cfg.windowColor,
-		transparent: true,
-		opacity: 0.9,
 	});
 	const windowGeos: THREE.BufferGeometry[] = [];
 
@@ -190,41 +188,29 @@ export function createCity(variant: CityVariant): CityResult {
 
 		const cols = 2 + Math.floor(Math.random() * 2);
 		const rows = Math.max(2, Math.floor(b.h / 5));
-		const wWin = b.w * 0.12;
-		const hWin = 1.2;
-		const gapX = (b.w - wWin * cols) / (cols + 1);
-		const gapY = (b.h - hWin * rows) / (rows + 1);
-
+		const ww = b.w * 0.12;
+		const hh = 1.2;
+		const gapX = (b.w - ww * cols) / (cols + 1);
+		const gapY = (b.h - hh * rows) / (rows + 1);
 		const cosR = Math.cos(b.rot);
 		const sinR = Math.sin(b.rot);
 
-		for (let fi = 0; fi < 4; fi++) {
-			let fnx = 0, fnz = 0, fRot = 0;
-			if (fi === 0) { fnx = 1; fRot = Math.PI / 2; }       // +X face
-			else if (fi === 1) { fnx = -1; fRot = -Math.PI / 2; } // -X face
-			else if (fi === 2) { fnz = 1; fRot = 0; }             // +Z face
-			else { fnz = -1; fRot = Math.PI; }                     // -Z face
+		for (let r = 0; r < rows; r++) {
+			for (let c = 0; c < cols; c++) {
+				for (let fi = 0; fi < 4; fi++) {
+					let ox: number, oz: number;
+					if (fi === 0) { ox = b.w / 2; oz = gapX + c * (ww + gapX) - b.d / 2 + ww / 2; }
+					else if (fi === 1) { ox = -b.w / 2; oz = gapX + c * (ww + gapX) - b.d / 2 + ww / 2; }
+					else if (fi === 2) { ox = gapX + c * (ww + gapX) - b.w / 2 + ww / 2; oz = b.d / 2; }
+					else { ox = gapX + c * (ww + gapX) - b.w / 2 + ww / 2; oz = -b.d / 2; }
 
-			for (let r = 0; r < rows; r++) {
-				for (let c = 0; c < cols; c++) {
-					let lx: number, lz: number;
-					if (fnx !== 0) {
-						lx = fnx * b.w / 2;
-						lz = gapX + c * (wWin + gapX) - b.d / 2 + wWin / 2;
-					} else {
-						lx = gapX + c * (wWin + gapX) - b.w / 2 + wWin / 2;
-						lz = fnz * b.d / 2;
-					}
-					const wy = gapY + r * (hWin + gapY);
+					const wx = b.x + ox * cosR - oz * sinR;
+					const wz = b.z + ox * sinR + oz * cosR;
+					const wy = gapY + r * (hh + gapY);
 
-					const wx = b.x + lx * cosR - lz * sinR;
-					const wz = b.z + lx * sinR + lz * cosR;
-
-					const winGeo = new THREE.PlaneGeometry(wWin * 0.8, hWin * 0.7);
-					winGeo.rotateY(fRot);
-					winGeo.rotateY(b.rot);
-					winGeo.translate(wx, wy, wz);
-					windowGeos.push(winGeo);
+					const box = new THREE.BoxGeometry(ww * 0.8, hh * 0.7, 0.08);
+					box.translate(wx, wy, wz);
+					windowGeos.push(box);
 				}
 			}
 		}
