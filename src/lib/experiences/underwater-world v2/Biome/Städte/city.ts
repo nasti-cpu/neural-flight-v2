@@ -133,10 +133,25 @@ export function createCity(variant: CityVariant): CityResult {
 	dome.position.y = 0;
 	structureGroup.add(dome);
 
+	// ── Generate building data (used for both InstancedMesh and windows) ──
+	const buildings: { x: number; z: number; w: number; d: number; h: number; rot: number; color: number }[] = [];
+	for (let i = 0; i < cfg.buildingCount; i++) {
+		const angle = Math.random() * Math.PI * 2;
+		const dist = 3 + Math.random() * (cfg.spread - 3);
+		buildings.push({
+			x: Math.cos(angle) * dist,
+			z: Math.sin(angle) * dist,
+			w: cfg.widthRange[0] + Math.random() * (cfg.widthRange[1] - cfg.widthRange[0]),
+			d: cfg.widthRange[0] + Math.random() * (cfg.widthRange[1] - cfg.widthRange[0]),
+			h: cfg.heightRange[0] + Math.random() * (cfg.heightRange[1] - cfg.heightRange[0]),
+			rot: Math.random() * Math.PI * 2,
+			color: cfg.buildingColors[Math.floor(Math.random() * cfg.buildingColors.length)],
+		});
+	}
+
 	// ── Buildings: InstancedMesh ──
 	const unitBox = new THREE.BoxGeometry(1, 1, 1);
 	const bldgMat = new THREE.MeshStandardMaterial({
-		vertexColors: false,
 		roughness: 0.7,
 		flatShading: true,
 	});
@@ -145,24 +160,15 @@ export function createCity(variant: CityVariant): CityResult {
 	const colArr = new Float32Array(cfg.buildingCount * 3);
 	const dummy = new THREE.Object3D();
 
-	for (let i = 0; i < cfg.buildingCount; i++) {
-		const angle = Math.random() * Math.PI * 2;
-		const dist = 3 + Math.random() * (cfg.spread - 3);
-		const bx = Math.cos(angle) * dist;
-		const bz = Math.sin(angle) * dist;
-		const bw = cfg.widthRange[0] + Math.random() * (cfg.widthRange[1] - cfg.widthRange[0]);
-		const bd = cfg.widthRange[0] + Math.random() * (cfg.widthRange[1] - cfg.widthRange[0]);
-		const bh = cfg.heightRange[0] + Math.random() * (cfg.heightRange[1] - cfg.heightRange[0]);
-
-		dummy.position.set(bx, bh / 2, bz);
-		dummy.scale.set(bw, bh, bd);
-		dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
+	for (let i = 0; i < buildings.length; i++) {
+		const b = buildings[i];
+		dummy.position.set(b.x, b.h / 2, b.z);
+		dummy.scale.set(b.w, b.h, b.d);
+		dummy.rotation.set(0, b.rot, 0);
 		dummy.updateMatrix();
 		bldgMesh.setMatrixAt(i, dummy.matrix);
 
-		// Per-instance color
-		const ci = Math.floor(Math.random() * cfg.buildingColors.length);
-		tmpCol.setHex(cfg.buildingColors[ci]);
+		tmpCol.setHex(b.color);
 		colArr[i * 3] = tmpCol.r;
 		colArr[i * 3 + 1] = tmpCol.g;
 		colArr[i * 3 + 2] = tmpCol.b;
@@ -171,56 +177,52 @@ export function createCity(variant: CityVariant): CityResult {
 	bldgMesh.instanceColor = new THREE.InstancedBufferAttribute(colArr, 3);
 	structureGroup.add(bldgMesh);
 
-	// ── Windows: merged quads on all 4 building faces ──
+	// ── Windows: merged quads on all 4 faces of each building ──
 	const windowMat = new THREE.MeshBasicMaterial({
 		color: cfg.windowColor,
 		transparent: true,
 		opacity: 0.9,
 	});
 	const windowGeos: THREE.BufferGeometry[] = [];
-	const tmpPos = new THREE.Vector3();
 
-	for (let i = 0; i < cfg.buildingCount; i++) {
-		const angle = Math.random() * Math.PI * 2;
-		const dist = 3 + Math.random() * (cfg.spread - 3);
-		const bx = Math.cos(angle) * dist;
-		const bz = Math.sin(angle) * dist;
-		const bw = cfg.widthRange[0] + Math.random() * (cfg.widthRange[1] - cfg.widthRange[0]);
-		const bd = cfg.widthRange[0] + Math.random() * (cfg.widthRange[1] - cfg.widthRange[0]);
-		const bh = cfg.heightRange[0] + Math.random() * (cfg.heightRange[1] - cfg.heightRange[0]);
-		const rot = Math.random() * Math.PI * 2;
+	for (let i = 0; i < buildings.length; i++) {
+		const b = buildings[i];
 
-		// 2-3 columns per face
 		const cols = 2 + Math.floor(Math.random() * 2);
-		// rows based on height
-		const rows = Math.max(2, Math.floor(bh / 5));
-		const wWin = bw * 0.12;
+		const rows = Math.max(2, Math.floor(b.h / 5));
+		const wWin = b.w * 0.12;
 		const hWin = 1.2;
-		const gapX = (bw - wWin * cols) / (cols + 1);
-		const gapY = (bh - hWin * rows) / (rows + 1);
+		const gapX = (b.w - wWin * cols) / (cols + 1);
+		const gapY = (b.h - hWin * rows) / (rows + 1);
 
-		// Face normals: +X, -X, +Z, -Z
-		const faces: { nx: number; nz: number }[] = [
-			{ nx: 1, nz: 0 }, { nx: -1, nz: 0 },
-			{ nx: 0, nz: 1 }, { nx: 0, nz: -1 },
-		];
+		const cosR = Math.cos(b.rot);
+		const sinR = Math.sin(b.rot);
 
-		for (const f of faces) {
+		for (let fi = 0; fi < 4; fi++) {
+			let fnx = 0, fnz = 0, fRot = 0;
+			if (fi === 0) { fnx = 1; fRot = Math.PI / 2; }       // +X face
+			else if (fi === 1) { fnx = -1; fRot = -Math.PI / 2; } // -X face
+			else if (fi === 2) { fnz = 1; fRot = 0; }             // +Z face
+			else { fnz = -1; fRot = Math.PI; }                     // -Z face
+
 			for (let r = 0; r < rows; r++) {
 				for (let c = 0; c < cols; c++) {
-					const wx = (f.nx !== 0)
-						? bx + f.nx * bw / 2
-						: bx + gapX + c * (wWin + gapX) - bw / 2 + wWin / 2;
-					const wz = (f.nz !== 0)
-						? bz + f.nz * bd / 2
-						: bz + gapX + c * (wWin + gapX) - bd / 2 + wWin / 2;
+					let lx: number, lz: number;
+					if (fnx !== 0) {
+						lx = fnx * b.w / 2;
+						lz = gapX + c * (wWin + gapX) - b.d / 2 + wWin / 2;
+					} else {
+						lx = gapX + c * (wWin + gapX) - b.w / 2 + wWin / 2;
+						lz = fnz * b.d / 2;
+					}
 					const wy = gapY + r * (hWin + gapY);
 
+					const wx = b.x + lx * cosR - lz * sinR;
+					const wz = b.z + lx * sinR + lz * cosR;
+
 					const winGeo = new THREE.PlaneGeometry(wWin * 0.8, hWin * 0.7);
-					// Orient face
-					if (f.nx !== 0) {
-						winGeo.rotateY(Math.PI / 2);
-					}
+					winGeo.rotateY(fRot);
+					winGeo.rotateY(b.rot);
 					winGeo.translate(wx, wy, wz);
 					windowGeos.push(winGeo);
 				}
@@ -231,7 +233,6 @@ export function createCity(variant: CityVariant): CityResult {
 	if (windowGeos.length > 0) {
 		const merged = mergeGeometries(windowGeos);
 		const windowMesh = new THREE.Mesh(merged, windowMat);
-		windowMesh.position.set(0, 0, 0);
 		structureGroup.add(windowMesh);
 	}
 
