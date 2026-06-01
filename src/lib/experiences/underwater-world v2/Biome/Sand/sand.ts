@@ -46,6 +46,11 @@ export interface DuneSandResult {
 
 // ── Create ──
 
+export function getSandHeight(x: number, z: number): number {
+	const n = fbm(x * NOISE_FREQ, z * NOISE_FREQ, OCTAVES);
+	return (n - 0.5) * TERRAIN_AMP;
+}
+
 export function createDuneSand(): DuneSandResult {
 	const segs = 80;
 	const size = 70;
