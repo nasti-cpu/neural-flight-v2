@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 
-export type CoralBiome = "shallow" | "rocky" | "deep";
+export type CoralBiome = "shallow" | "deep";
 
 // ── OBJ URLs (loaded from Objekte/Korallen/) ──
 
@@ -156,7 +156,6 @@ function createRockGeometry(): THREE.BufferGeometry {
 
 // ── Config per biome variant (based on real reef types) ──
 //   shallow → Fringing Reef (lagoon / reef flat — warm, diverse, gentle)
-//   rocky   → Barrier Reef (reef crest — heavy surge, massive, robust)
 //   deep    → Fore Reef (reef slope — deep drop-off, tall/soft corals)
 
 interface CoralVariantConfig {
@@ -184,19 +183,6 @@ const BIOME_CONFIG: Record<CoralBiome, CoralVariantConfig> = {
 		rockMax: 5.0,
 		colors: [0xff6644, 0xdd8855, 0xdd77aa, 0xff9966, 0xee7766, 0xffaa44, 0x77ccaa, 0xff8844, 0xee5599, 0x66ddaa],
 		typeOrder: [0, 1, 2, 3, 4],
-		rocksPerPeak: 8,
-		coralsPerRock: 3,
-	},
-	rocky: {
-		label: "Barriereriff (Barrier Reef)",
-		peakCount: 26,
-		spread: 34,
-		terrainAmp: 5.5,
-		coralSize: [0.08, 0.18],
-		rockMin: 0.5,
-		rockMax: 12.0,
-		colors: [0x886644, 0x775533, 0x996644, 0x887755, 0x664433, 0x556644],
-		typeOrder: [0, 2, 4],
 		rocksPerPeak: 8,
 		coralsPerRock: 3,
 	},

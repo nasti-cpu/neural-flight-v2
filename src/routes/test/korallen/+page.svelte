@@ -12,7 +12,6 @@ interface ModeDef {
 
 const MODES: ModeDef[] = [
 	{ id: "shallow", label: "Flachriff", description: "Bunt, viele Arten" },
-	{ id: "rocky", label: "Felsriff", description: "Groß, felsig, robust" },
 	{ id: "deep", label: "Tiefseeriff", description: "Dunkel, ruhig" },
 ];
 
