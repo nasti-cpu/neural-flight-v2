@@ -110,7 +110,7 @@ function getHeight(x: number, z: number, amp: number): number {
 
 // ── Procedural coral fallback ──
 
-function createProceduralCoralGeometry(type: number): THREE.BufferGeometry {
+export function createProceduralCoralGeometry(type: number): THREE.BufferGeometry {
 	const geo = new THREE.IcosahedronGeometry(0.5, 2);
 	const pos = geo.attributes.position;
 	for (let i = 0; i < pos.count; i++) {
@@ -136,7 +136,7 @@ function createProceduralCoralGeometry(type: number): THREE.BufferGeometry {
 
 // ── Rock geometry (jagged boulder) ──
 
-function createRockGeometry(): THREE.BufferGeometry {
+export function createRockGeometry(): THREE.BufferGeometry {
 	const geo = new THREE.IcosahedronGeometry(0.5, 2);
 	const pos = geo.attributes.position;
 	for (let i = 0; i < pos.count; i++) {
@@ -214,7 +214,7 @@ export interface CoralReef {
 
 // ── Create ──
 
-async function loadAllGeometries(): Promise<(THREE.BufferGeometry | null)[]> {
+export async function loadAllGeometries(): Promise<(THREE.BufferGeometry | null)[]> {
 	return await Promise.all([
 		loadObjGeometry(_brainUrl),
 		loadObjGeometry(_treeUrl),
