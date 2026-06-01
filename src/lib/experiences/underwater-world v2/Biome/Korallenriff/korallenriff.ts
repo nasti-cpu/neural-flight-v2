@@ -15,6 +15,32 @@ const _genericUrl = new URL("../../Objekte/Korallen/Coral_v1_L3.123c0f57868f-362
 
 // ── Load helpers ──
 
+function autoFixOrientation(geo: THREE.BufferGeometry): void {
+	geo.computeBoundingBox();
+	if (!geo.boundingBox) return;
+	const sx = geo.boundingBox.max.x - geo.boundingBox.min.x;
+	const sy = geo.boundingBox.max.y - geo.boundingBox.min.y;
+	const sz = geo.boundingBox.max.z - geo.boundingBox.min.z;
+	const pos = geo.attributes.position;
+	if (sz > sy && sz >= sx) {
+		// Z is longest → rotate -PI/2 around X: (x,y,z) → (x, z, -y)
+		for (let i = 0; i < pos.count; i++) {
+			const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+			pos.setXYZ(i, x, z, -y);
+		}
+		pos.needsUpdate = true;
+		geo.computeVertexNormals();
+	} else if (sx > sy && sx >= sz) {
+		// X is longest → rotate +PI/2 around Z: (x,y,z) → (-y, x, z)
+		for (let i = 0; i < pos.count; i++) {
+			const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+			pos.setXYZ(i, -y, x, z);
+		}
+		pos.needsUpdate = true;
+		geo.computeVertexNormals();
+	}
+}
+
 async function loadObjGeometry(url: string): Promise<THREE.BufferGeometry | null> {
 	try {
 		const obj = await new Promise<THREE.Group>((resolve, reject) => {
@@ -29,6 +55,9 @@ async function loadObjGeometry(url: string): Promise<THREE.BufferGeometry | null
 		geo.deleteAttribute("JOINTS_0");
 		geo.deleteAttribute("WEIGHTS_0");
 		geo.deleteAttribute("TEXCOORD_0");
+
+		autoFixOrientation(geo);
+
 		geo.computeBoundingBox();
 		if (geo.boundingBox) {
 			const minY = geo.boundingBox.min.y;
@@ -125,7 +154,10 @@ function createRockGeometry(): THREE.BufferGeometry {
 	return geo;
 }
 
-// ── Config per biome variant ──
+// ── Config per biome variant (based on real reef types) ──
+//   shallow → Fringing Reef (lagoon / reef flat — warm, diverse, gentle)
+//   rocky   → Barrier Reef (reef crest — heavy surge, massive, robust)
+//   deep    → Fore Reef (reef slope — deep drop-off, tall/soft corals)
 
 interface CoralVariantConfig {
 	label: string;
@@ -137,41 +169,49 @@ interface CoralVariantConfig {
 	rockMax: number;
 	colors: number[];
 	typeOrder: number[];
+	rocksPerPeak: number;
+	coralsPerRock: number;
 }
 
 const BIOME_CONFIG: Record<CoralBiome, CoralVariantConfig> = {
 	shallow: {
-		label: "Flachriff",
-		peakCount: 20,
-		spread: 22,
-		terrainAmp: 2.5,
-		coralSize: [0.08, 0.2],
-		rockMin: 0.3,
-		rockMax: 7.0,
-		colors: [0xff6644, 0xdd8855, 0xdd77aa, 0xcc8866, 0xff9966, 0xee7766, 0xffaa44, 0x77ccaa],
+		label: "Saumriff (Fringing Reef)",
+		peakCount: 30,
+		spread: 32,
+		terrainAmp: 1.8,
+		coralSize: [0.03, 0.09],
+		rockMin: 0.2,
+		rockMax: 5.0,
+		colors: [0xff6644, 0xdd8855, 0xdd77aa, 0xff9966, 0xee7766, 0xffaa44, 0x77ccaa, 0xff8844, 0xee5599, 0x66ddaa],
 		typeOrder: [0, 1, 2, 3, 4],
+		rocksPerPeak: 8,
+		coralsPerRock: 3,
 	},
 	rocky: {
-		label: "Felsriff",
-		peakCount: 16,
-		spread: 24,
-		terrainAmp: 4.5,
-		coralSize: [0.12, 0.28],
-		rockMin: 0.4,
-		rockMax: 10.0,
-		colors: [0x886644, 0x775533, 0x996644, 0x887755, 0x664433],
+		label: "Barriereriff (Barrier Reef)",
+		peakCount: 26,
+		spread: 34,
+		terrainAmp: 5.5,
+		coralSize: [0.08, 0.18],
+		rockMin: 0.5,
+		rockMax: 12.0,
+		colors: [0x886644, 0x775533, 0x996644, 0x887755, 0x664433, 0x556644],
 		typeOrder: [0, 2, 4],
+		rocksPerPeak: 8,
+		coralsPerRock: 3,
 	},
 	deep: {
-		label: "Tiefseeriff",
-		peakCount: 14,
-		spread: 26,
-		terrainAmp: 3.5,
-		coralSize: [0.1, 0.25],
+		label: "Hangriff (Fore Reef)",
+		peakCount: 18,
+		spread: 34,
+		terrainAmp: 4.0,
+		coralSize: [0.06, 0.15],
 		rockMin: 0.3,
-		rockMax: 8.0,
-		colors: [0x335566, 0x445577, 0x336677, 0x224466, 0x557788],
+		rockMax: 9.0,
+		colors: [0x335566, 0x445577, 0x336677, 0x224466, 0x557788, 0x4488aa],
 		typeOrder: [1, 3],
+		rocksPerPeak: 8,
+		coralsPerRock: 3,
 	},
 };
 
@@ -239,7 +279,7 @@ export async function createCoralReef(biome: CoralBiome, geoOverride?: THREE.Buf
 	// Gather rock positions so corals can reference them
 	const rockPositions: { x: number; y: number; z: number; height: number }[] = [];
 
-	const totalRocks = cfg.peakCount * 5;
+	const totalRocks = cfg.peakCount * cfg.rocksPerPeak;
 	const rockMesh = new THREE.InstancedMesh(rockGeo, rockMat, totalRocks);
 	rockMesh.frustumCulled = true;
 	const rockColorsAttr = new Float32Array(totalRocks * 3);
@@ -314,11 +354,10 @@ export async function createCoralReef(biome: CoralBiome, geoOverride?: THREE.Buf
 		const srcGeo = geos[typeIdx] ?? createProceduralCoralGeometry(typeIdx);
 		const geo = srcGeo.clone();
 
-		// Distribute corals across rock positions
-		const coralsOnRock = Math.max(1, Math.floor(rockPositions.length / typeSet.length));
-		const start = ti * coralsOnRock;
-		const end = Math.min(start + coralsOnRock, rockPositions.length);
-		const n = end - start;
+		// Distribute corals across rock positions, multiple per rock
+		const rocksPerType = Math.max(1, Math.floor(rockPositions.length / typeSet.length));
+		const start = ti * rocksPerType;
+		const n = rocksPerType * cfg.coralsPerRock;
 		if (n <= 0) break;
 
 		const mat = new THREE.MeshStandardMaterial({
@@ -335,7 +374,8 @@ export async function createCoralReef(biome: CoralBiome, geoOverride?: THREE.Buf
 		const dummy = new THREE.Object3D();
 
 		for (let i = 0; i < n; i++) {
-			const rp = rockPositions[start + i];
+			const rockIdx = start + Math.floor(i / cfg.coralsPerRock);
+			const rp = rockPositions[rockIdx];
 			const size = cfg.coralSize[0] + Math.random() * (cfg.coralSize[1] - cfg.coralSize[0]);
 			const ci = Math.floor(Math.random() * cfg.colors.length);
 			tmpCol.setHex(cfg.colors[ci]);
@@ -343,10 +383,10 @@ export async function createCoralReef(biome: CoralBiome, geoOverride?: THREE.Buf
 			colors[i * 3 + 1] = tmpCol.g;
 			colors[i * 3 + 2] = tmpCol.b;
 
-			// Coral sits on top of the rock
-			const cx = rp.x + (Math.random() - 0.5) * rp.height * 0.3;
-			const cz = rp.z + (Math.random() - 0.5) * rp.height * 0.3;
-			const cy = rp.y + 0.05;
+			// Coral sits on top of the rock with platform sunk inside the rock body
+			const cx = rp.x + (Math.random() - 0.5) * rp.height * 0.5;
+			const cz = rp.z + (Math.random() - 0.5) * rp.height * 0.5;
+			const cy = rp.y - rp.height * 0.15;
 
 			dummy.position.set(cx, cy, cz);
 			dummy.scale.setScalar(size);
