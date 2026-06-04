@@ -130,6 +130,8 @@
 			cityScene.rotation.y = -Math.PI / 4;
 			scene.add(cityScene);
 
+			meadow.clearArea(18, 0, 6);
+
 			loading = false;
 		}
 

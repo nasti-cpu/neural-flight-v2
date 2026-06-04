@@ -138,6 +138,24 @@ export class GrassMeadow {
 		this.grassMesh.instanceMatrix.needsUpdate = true;
 	}
 
+	clearArea(cx: number, cz: number, radius: number): void {
+		if (!this.grassMesh) return;
+		const dummy = new THREE.Object3D();
+		for (let i = 0; i < this.swayData.length; i++) {
+			const d = this.swayData[i];
+			const dx = d.baseX - cx;
+			const dz = d.baseZ - cz;
+			if (dx * dx + dz * dz < radius * radius) {
+				dummy.position.set(d.baseX, -100, d.baseZ);
+				dummy.scale.setScalar(1);
+				dummy.rotation.set(0, 0, 0);
+				dummy.updateMatrix();
+				this.grassMesh.setMatrixAt(i, dummy.matrix);
+			}
+		}
+		this.grassMesh.instanceMatrix.needsUpdate = true;
+	}
+
 	dispose(): void {
 		if (this.grassMesh) {
 			this.scene.remove(this.grassMesh);
