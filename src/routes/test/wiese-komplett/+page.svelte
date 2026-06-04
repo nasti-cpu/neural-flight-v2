@@ -114,8 +114,8 @@
 			scatterFlower(spiderParts, 1.7, [0.6, 1.6], 25);
 			scatterFlower(lungwortParts, 0.025, [0.5, 1.5], 25);
 
-			cityScene.scale.setScalar(0.0005);
-			cityScene.position.set(18, -0.02, 0);
+			cityScene.scale.setScalar(0.00025);
+			cityScene.position.set(18, -0.81, 0);
 			cityScene.rotation.y = -Math.PI / 4;
 			scene.add(cityScene);
 
