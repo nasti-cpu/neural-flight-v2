@@ -1,0 +1,17 @@
+export const SCHMETTERLINGE = {
+	MODEL: "/models/schmetterlinge/Meshy_AI_Blue_Ulysses_Butterfl_0604160804_texture.glb",
+	COUNT: 10,
+	SCALE: 0.069,
+	FLY_RADIUS_MIN: 1.5,
+	FLY_RADIUS_MAX: 4,
+	SPEED_MIN: 0.2,
+	SPEED_MAX: 0.5,
+	HEIGHT_BASE_MIN: 1,
+	HEIGHT_BASE_MAX: 2.5,
+	HEIGHT_RANGE_MIN: 0.4,
+	HEIGHT_RANGE_MAX: 0.8,
+	SPAWN_DIST_MIN: 3,
+	SPAWN_DIST_MAX: 10,
+	SPAWN_HEIGHT_MIN: 1.2,
+	SPAWN_HEIGHT_MAX: 3.5,
+} as const;

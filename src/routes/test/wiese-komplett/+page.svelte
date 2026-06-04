@@ -8,6 +8,7 @@
 	import { SkyScene, SKY_VARIANTS } from "$lib/experiences/insect-world/Biome/blauer Himmel/sky-test";
 	import { CITY } from "$lib/experiences/insect-world/Objekte/Stadt/city";
 	import { BIENEN } from "$lib/experiences/insect-world/Objekte/Bienen/bienen";
+	import { SCHMETTERLINGE } from "$lib/experiences/insect-world/Objekte/Schmetterlinge/schmetterlinge";
 
 	let canvas: HTMLCanvasElement;
 	let renderer: THREE.WebGLRenderer;
@@ -19,6 +20,7 @@
 	let animationId: number;
 	let loading = $state(true);
 	let bees: Bee[] = [];
+	let butterflies: Bee[] = [];
 
 	const dummy = new THREE.Object3D();
 	const keys = { w: false, a: false, s: false, d: false };
@@ -112,12 +114,13 @@
 		}
 
 		async function loadAll() {
-			const [armeriaScene, spiderScene, lungwortScene, cityScene, beeScene] = await Promise.all([
+			const [armeriaScene, spiderScene, lungwortScene, cityScene, beeScene, butterflyScene] = await Promise.all([
 				loadGLB("/models/blumen/glb_Alba_Armeria_Spring_Pink.glb"),
 				loadGLB("/models/blumen/spider_lily_lycoris_radiata.glb"),
 				loadGLB("/models/blumen/Lungwort Spring.glb"),
 				loadGLB(CITY.MODEL),
 				loadGLB(BIENEN.MODEL),
+				loadGLB(SCHMETTERLINGE.MODEL),
 			]);
 
 			const spiderParts: { geo: THREE.BufferGeometry; mat: THREE.Material }[] = [];
@@ -220,6 +223,42 @@
 				});
 			}
 
+			const butterflyTemplate = new THREE.Group();
+			butterflyScene.traverse((child) => {
+				if (child instanceof THREE.Mesh) {
+					const clone = child.clone();
+					clone.castShadow = true;
+					clone.receiveShadow = true;
+					butterflyTemplate.add(clone);
+				}
+			});
+
+			for (let i = 0; i < SCHMETTERLINGE.COUNT; i++) {
+				const group = new THREE.Group();
+				group.add(butterflyTemplate.clone(true));
+
+				const angle = Math.random() * Math.PI * 2;
+				const dist = SCHMETTERLINGE.SPAWN_DIST_MIN + Math.random() * (SCHMETTERLINGE.SPAWN_DIST_MAX - SCHMETTERLINGE.SPAWN_DIST_MIN);
+				const baseX = Math.cos(angle) * dist;
+				const baseZ = Math.sin(angle) * dist;
+
+				group.position.set(baseX, SCHMETTERLINGE.SPAWN_HEIGHT_MIN + Math.random() * (SCHMETTERLINGE.SPAWN_HEIGHT_MAX - SCHMETTERLINGE.SPAWN_HEIGHT_MIN), baseZ);
+				group.scale.setScalar(SCHMETTERLINGE.SCALE);
+				group.rotation.y = Math.random() * Math.PI * 2;
+
+				scene.add(group);
+
+				butterflies.push({
+					group,
+					orbitCenter: new THREE.Vector3(baseX, 0, baseZ),
+					orbitRadius: SCHMETTERLINGE.FLY_RADIUS_MIN + Math.random() * (SCHMETTERLINGE.FLY_RADIUS_MAX - SCHMETTERLINGE.FLY_RADIUS_MIN),
+					speed: SCHMETTERLINGE.SPEED_MIN + Math.random() * (SCHMETTERLINGE.SPEED_MAX - SCHMETTERLINGE.SPEED_MIN),
+					phase: Math.random() * Math.PI * 2,
+					heightBase: SCHMETTERLINGE.HEIGHT_BASE_MIN + Math.random() * (SCHMETTERLINGE.HEIGHT_BASE_MAX - SCHMETTERLINGE.HEIGHT_BASE_MIN),
+					heightRange: SCHMETTERLINGE.HEIGHT_RANGE_MIN + Math.random() * (SCHMETTERLINGE.HEIGHT_RANGE_MAX - SCHMETTERLINGE.HEIGHT_RANGE_MIN),
+				});
+			}
+
 			loading = false;
 		}
 
@@ -273,6 +312,25 @@
 				bee.group.rotation.x = Math.sin(t * 2 + 1) * 0.03;
 			}
 
+			for (const butterfly of butterflies) {
+				const t = elapsed * butterfly.speed + butterfly.phase;
+				const x = butterfly.orbitCenter.x + Math.cos(t * 0.7) * butterfly.orbitRadius;
+				const z = butterfly.orbitCenter.z + Math.sin(t * 0.7) * butterfly.orbitRadius;
+				const y = butterfly.orbitCenter.y + butterfly.heightBase + Math.sin(t * 1.5) * butterfly.heightRange;
+
+				const dx = x - butterfly.group.position.x;
+				const dz = z - butterfly.group.position.z;
+
+				butterfly.group.position.set(x, y, z);
+
+				if (Math.abs(dx) > 0.001 || Math.abs(dz) > 0.001) {
+					butterfly.group.rotation.y = Math.atan2(dx, dz);
+				}
+
+				butterfly.group.rotation.z = Math.sin(t * 2) * 0.08;
+				butterfly.group.rotation.x = Math.sin(t * 1.5 + 1) * 0.05;
+			}
+
 			controls.update();
 			renderer.render(scene, camera);
 			animationId = requestAnimationFrame(animate);
@@ -299,6 +357,9 @@
 		sky?.dispose();
 		for (const bee of bees) {
 			bee.group.parent?.remove(bee.group);
+		}
+		for (const butterfly of butterflies) {
+			butterfly.group.parent?.remove(butterfly.group);
 		}
 	});
 </script>
