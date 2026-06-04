@@ -17,10 +17,24 @@
 	let meadow: GrassMeadow;
 	let animationId: number;
 	let loading = $state(true);
+	let bees: Bee[] = [];
 
 	const dummy = new THREE.Object3D();
 	const keys = { w: false, a: false, s: false, d: false };
 	const SPEED = 5;
+
+	const BEE_COUNT = 15;
+	const BEE_SCALE = 0.03;
+
+	interface Bee {
+		group: THREE.Group;
+		orbitCenter: THREE.Vector3;
+		orbitRadius: number;
+		speed: number;
+		phase: number;
+		heightBase: number;
+		heightRange: number;
+	}
 
 	function loadGLB(url: string): Promise<THREE.Group> {
 		return new Promise((resolve, reject) => {
@@ -100,11 +114,12 @@
 		}
 
 		async function loadAll() {
-			const [armeriaScene, spiderScene, lungwortScene, cityScene] = await Promise.all([
+			const [armeriaScene, spiderScene, lungwortScene, cityScene, beeScene] = await Promise.all([
 				loadGLB("/models/blumen/glb_Alba_Armeria_Spring_Pink.glb"),
 				loadGLB("/models/blumen/spider_lily_lycoris_radiata.glb"),
 				loadGLB("/models/blumen/Lungwort Spring.glb"),
 				loadGLB(CITY.MODEL),
+				loadGLB("/models/bienen/Meshy_AI_Honeybee_0604154325_texture.glb"),
 			]);
 
 			const spiderParts: { geo: THREE.BufferGeometry; mat: THREE.Material }[] = [];
@@ -171,6 +186,42 @@
 			clearInstancesInRect(flowerMeshes, CITY.CLEAR.CENTER.x, CITY.CLEAR.CENTER.z, CITY.CLEAR.RECT.hw,
 				CITY.CLEAR.RECT.hd, CITY.CLEAR.RECT.angle, CITY.CLEAR.RECT.border);
 
+			const beeTemplate = new THREE.Group();
+			beeScene.traverse((child) => {
+				if (child instanceof THREE.Mesh) {
+					const clone = child.clone();
+					clone.castShadow = true;
+					clone.receiveShadow = true;
+					beeTemplate.add(clone);
+				}
+			});
+
+			for (let i = 0; i < BEE_COUNT; i++) {
+				const group = new THREE.Group();
+				group.add(beeTemplate.clone(true));
+
+				const angle = Math.random() * Math.PI * 2;
+				const dist = 2 + Math.random() * 8;
+				const baseX = Math.cos(angle) * dist;
+				const baseZ = Math.sin(angle) * dist;
+
+				group.position.set(baseX, 1 + Math.random() * 2, baseZ);
+				group.scale.setScalar(BEE_SCALE);
+				group.rotation.y = Math.random() * Math.PI * 2;
+
+				scene.add(group);
+
+				bees.push({
+					group,
+					orbitCenter: new THREE.Vector3(baseX, 0, baseZ),
+					orbitRadius: 1 + Math.random() * 3,
+					speed: 0.3 + Math.random() * 0.7,
+					phase: Math.random() * Math.PI * 2,
+					heightBase: 0.8 + Math.random() * 1.5,
+					heightRange: 0.3 + Math.random() * 0.5,
+				});
+			}
+
 			loading = false;
 		}
 
@@ -186,6 +237,7 @@
 
 		function animate(time: number) {
 			const dt = clock.getDelta();
+			const elapsed = clock.getElapsedTime();
 			const forward = new THREE.Vector3();
 			camera.getWorldDirection(forward);
 			forward.y = 0;
@@ -202,6 +254,25 @@
 				move.normalize().multiplyScalar(SPEED * dt);
 				camera.position.add(move);
 				controls.target.add(move);
+			}
+
+			for (const bee of bees) {
+				const t = elapsed * bee.speed + bee.phase;
+				const x = bee.orbitCenter.x + Math.cos(t) * bee.orbitRadius;
+				const z = bee.orbitCenter.z + Math.sin(t) * bee.orbitRadius;
+				const y = bee.orbitCenter.y + bee.heightBase + Math.sin(t * 2) * bee.heightRange;
+
+				const dx = x - bee.group.position.x;
+				const dz = z - bee.group.position.z;
+
+				bee.group.position.set(x, y, z);
+
+				if (Math.abs(dx) > 0.001 || Math.abs(dz) > 0.001) {
+					bee.group.rotation.y = Math.atan2(dx, dz);
+				}
+
+				bee.group.rotation.z = Math.sin(t * 3) * 0.05;
+				bee.group.rotation.x = Math.sin(t * 2 + 1) * 0.03;
 			}
 
 			controls.update();
@@ -228,6 +299,9 @@
 		controls?.dispose();
 		meadow?.dispose();
 		sky?.dispose();
+		for (const bee of bees) {
+			bee.group.parent?.remove(bee.group);
+		}
 	});
 </script>
 
