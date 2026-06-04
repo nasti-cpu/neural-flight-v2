@@ -1,11 +1,11 @@
 import * as THREE from "three";
 
 export const VARIANTS = [
-	{ name: "Hexagonal (spitz)", desc: "Sechseckraster wie ein Insektenauge" },
-	{ name: "Hexagonal (flach)", desc: "Flache Sechsecke, breiteres Sichtfeld" },
-	{ name: "Pixel-Mosaik", desc: "Klassische quadratische Pixelung" },
-	{ name: "Ommatidien-Linsen", desc: "Runde Linsen mit dunklen Rändern" },
-	{ name: "Waben-Glühen", desc: "Sechsecke mit hell leuchtenden Kanten" },
+	{ name: "Hex-Gitter", desc: "Feines Sechseck-Gitter wie ein Facettenauge" },
+	{ name: "Linsen-Array", desc: "Runde Linsen mit Vignettierung pro Zelle" },
+	{ name: "Waben-Schimmer", desc: "Farbige Schimmer-Verschiebung pro Wabe" },
+	{ name: "Ommatidien-Blick", desc: "Lichtreflexe auf jeder Linse" },
+	{ name: "Bienen-Sicht", desc: "Chromatische Aberration + Wabenmuster" },
 ];
 
 const vertexShader = `
@@ -30,21 +30,23 @@ const fragmentShader = `
 	const float PI = 3.14159265359;
 	const float SQRT3 = 1.73205080757;
 
-	// ── HEX GRID HELPERS ──────────────────────────────────────────
+	// ── HEX GRID ──────────────────────────────────────────────────
 
-	// Pointy-top hex: width = 2, height = SQRT3
-	vec2 pointyHexCenter(vec2 p) {
+	struct HexInfo {
+		vec2 center;
+		float dist;
+	};
+
+	HexInfo getHex(vec2 p) {
 		float w = 2.0;
 		float h = SQRT3;
 		vec2 grid = vec2(w, h);
 
 		vec2 hexId = floor(p / grid);
-
 		float rowOff = mod(hexId.y, 2.0) * 0.5;
 		vec2 center = (hexId + vec2(rowOff, 0.5)) * grid;
-
-		vec2 best = center;
 		float bestD = distance(p, center);
+		vec2 best = center;
 
 		for (int dy = -1; dy <= 1; dy++) {
 			for (int dx = -1; dx <= 1; dx++) {
@@ -55,100 +57,106 @@ const fragmentShader = `
 				if (d < bestD) { bestD = d; best = nCenter; }
 			}
 		}
-		return best;
+		return HexInfo(best, bestD);
 	}
 
-	// Flat-top hex: width = SQRT3, height = 2
-	vec2 flatHexCenter(vec2 p) {
-		float w = SQRT3;
-		float h = 2.0;
-		vec2 grid = vec2(w, h);
+	// ── GRID LINES ────────────────────────────────────────────────
 
-		vec2 hexId = floor(p / grid);
-
-		float colOff = mod(hexId.x, 2.0) * 0.5;
-		vec2 center = (hexId + vec2(0.5, colOff)) * grid;
-
-		vec2 best = center;
-		float bestD = distance(p, center);
-
-		for (int dy = -1; dy <= 1; dy++) {
-			for (int dx = -1; dx <= 1; dx++) {
-				vec2 nId = hexId + vec2(float(dx), float(dy));
-				float nOff = mod(nId.x, 2.0) * 0.5;
-				vec2 nCenter = (nId + vec2(0.5, nOff)) * grid;
-				float d = distance(p, nCenter);
-				if (d < bestD) { bestD = d; best = nCenter; }
-			}
-		}
-		return best;
+	float hexEdge(vec2 p, float size, float thickness) {
+		HexInfo h = getHex(p);
+		return 1.0 - smoothstep(size - thickness - 0.5, size - thickness + 0.5, h.dist);
 	}
 
-	// ── SAMPLING VARIANTS ────────────────────────────────────────
+	// ── VARIANTS ──────────────────────────────────────────────────
 
-	vec4 sampleHexPointy(vec2 uv, float size) {
-		vec2 p = uv * uResolution / size;
-		vec2 c = pointyHexCenter(p);
-		vec2 sampleUv = c * size / uResolution;
-		return texture2D(tScene, sampleUv);
-	}
-
-	vec4 sampleHexFlat(vec2 uv, float size) {
-		vec2 p = uv * uResolution / size;
-		vec2 c = flatHexCenter(p);
-		vec2 sampleUv = c * size / uResolution;
-		return texture2D(tScene, sampleUv);
-	}
-
-	vec4 samplePixelated(vec2 uv, float size) {
-		vec2 grid = floor(uv * uResolution / size) * size / uResolution;
-		return texture2D(tScene, grid + size * 0.5 / uResolution);
-	}
-
-	vec4 sampleOmmatidia(vec2 uv, float size) {
-		vec2 p = uv * uResolution / size;
-		vec2 c = pointyHexCenter(p);
-		vec2 sampleUv = c * size / uResolution;
-		vec4 color = texture2D(tScene, sampleUv);
-
-		float dist = distance(p, c);
-		float radius = 0.85;
-		float border = smoothstep(radius, radius - 0.1, dist);
-		color.rgb *= border * 0.8 + 0.2;
+	// 0 — Hex-Gitter: clear image + subtle dark hex grid overlay
+	vec4 variantGrid(vec2 uv, vec2 p, float size) {
+		vec4 color = texture2D(tScene, uv);
+		HexInfo h = getHex(p);
+		float edge = smoothstep(size - 1.0, size - 0.2, h.dist);
+		float gridLine = 1.0 - edge;
+		color.rgb *= 1.0 - gridLine * 0.25;
 		return color;
 	}
 
-	vec4 sampleHoneycomb(vec2 uv, float size) {
-		vec2 p = uv * uResolution / size;
-		vec2 c = pointyHexCenter(p);
-		vec2 sampleUv = c * size / uResolution;
-		vec4 color = texture2D(tScene, sampleUv);
+	// 1 — Linsen-Array: clear image + circular vignette per cell
+	vec4 variantLenses(vec2 uv, vec2 p, float size) {
+		vec4 color = texture2D(tScene, uv);
+		HexInfo h = getHex(p);
+		float lensRim = smoothstep(size * 0.82, size * 0.7, h.dist);
+		float lensCenter = 1.0 - smoothstep(0.0, size * 0.3, h.dist);
+		color.rgb *= 0.85 + lensRim * 0.15 + lensCenter * 0.06;
+		return color;
+	}
 
-		float dist = distance(p, c);
-		float glow = exp(-dist * 6.0) * 0.5;
-		float edge = smoothstep(0.9, 0.7, dist);
-		color.rgb += vec3(0.6, 0.7, 1.0) * glow;
-		color.rgb *= edge * 0.6 + 0.4;
+	// 2 — Waben-Schimmer: per-cell hue shift
+	vec4 variantShimmer(vec2 uv, vec2 p, float size) {
+		vec4 color = texture2D(tScene, uv);
+		HexInfo h = getHex(p);
+
+		float shift = sin(h.center.x * 1.7 + h.center.y * 2.3 + uTime * 0.3) * 0.04;
+		color.r += shift;
+		color.b -= shift;
+
+		float edge = smoothstep(size - 1.5, size - 0.3, h.dist);
+		color.rgb *= 1.0 - (1.0 - edge) * 0.18;
+
+		return color;
+	}
+
+	// 3 — Ommatidien-Blick: bright specular highlight on each lens
+	vec4 variantOmmatidia(vec2 uv, vec2 p, float size) {
+		vec4 color = texture2D(tScene, uv);
+		HexInfo h = getHex(p);
+
+		float lightAngle = uTime * 0.2;
+		vec2 lightDir = vec2(cos(lightAngle), sin(lightAngle));
+		float spec = max(0.0, dot(normalize(h.center - p), lightDir));
+		float highlight = pow(spec, 8.0) * 0.3;
+
+		float vignette = 1.0 - smoothstep(0.0, size * 0.9, h.dist) * 0.1;
+		float rim = smoothstep(size * 0.85, size * 0.7, h.dist) * 0.08;
+
+		color.rgb += highlight;
+		color.rgb *= vignette + rim;
+		return color;
+	}
+
+	// 4 — Bienen-Sicht: chromatic aberration + honeycomb
+	vec4 variantBeeVision(vec2 uv, vec2 p, float size) {
+		HexInfo h = getHex(p);
+
+		float chromaOffset = 2.0 / uResolution.x;
+		float r = texture2D(tScene, uv + vec2(chromaOffset, 0.0)).r;
+		float g = texture2D(tScene, uv).g;
+		float b = texture2D(tScene, uv - vec2(chromaOffset, 0.0)).b;
+		vec4 color = vec4(r, g, b, 1.0);
+
+		float edge = smoothstep(size - 1.2, size - 0.3, h.dist);
+		color.rgb *= 1.0 - (1.0 - edge) * 0.2;
+
+		float glow = exp(-h.dist * 4.0 / size) * 0.06;
+		color.rgb += vec3(0.9, 0.95, 1.0) * glow;
+
 		return color;
 	}
 
 	// ── MAIN ─────────────────────────────────────────────────────
 
 	void main() {
-		vec4 color;
+		vec2 p = vUv * uResolution / uCellSize;
 
+		vec4 color;
 		if (uVariant == 0) {
-			color = sampleHexPointy(vUv, uCellSize);
+			color = variantGrid(vUv, p, uCellSize);
 		} else if (uVariant == 1) {
-			color = sampleHexFlat(vUv, uCellSize);
+			color = variantLenses(vUv, p, uCellSize);
 		} else if (uVariant == 2) {
-			color = samplePixelated(vUv, uCellSize);
+			color = variantShimmer(vUv, p, uCellSize);
 		} else if (uVariant == 3) {
-			color = sampleOmmatidia(vUv, uCellSize);
-		} else if (uVariant == 4) {
-			color = sampleHoneycomb(vUv, uCellSize);
+			color = variantOmmatidia(vUv, p, uCellSize);
 		} else {
-			color = sampleHexPointy(vUv, uCellSize);
+			color = variantBeeVision(vUv, p, uCellSize);
 		}
 
 		gl_FragColor = color;
@@ -177,7 +185,7 @@ export class CompoundEyeEffect {
 			uniforms: {
 				tScene: { value: this.renderTarget.texture },
 				uResolution: { value: new THREE.Vector2(width, height) },
-				uCellSize: { value: 12.0 },
+				uCellSize: { value: 24.0 },
 				uVariant: { value: 0 },
 				uTime: { value: 0 },
 			},
@@ -195,7 +203,7 @@ export class CompoundEyeEffect {
 	}
 
 	setCellSize(size: number): void {
-		this.material.uniforms.uCellSize.value = Math.max(2, size);
+		this.material.uniforms.uCellSize.value = Math.max(4, size);
 	}
 
 	resize(width: number, height: number): void {

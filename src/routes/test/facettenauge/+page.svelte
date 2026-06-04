@@ -24,7 +24,7 @@
 	let bees: Bee[] = [];
 	let butterflies: Bee[] = [];
 	let currentVariant = $state(0);
-	let cellSize = $state(12);
+	let cellSize = $state(24);
 
 	const dummy = new THREE.Object3D();
 	const keys = { w: false, a: false, s: false, d: false };
@@ -400,7 +400,7 @@
 		</div>
 		<div class="slider-row">
 			<label for="cellSizeSlider">Zellgröße: {cellSize}px</label>
-			<input id="cellSizeSlider" type="range" min="3" max="40" value={cellSize} oninput={changeCellSize} />
+			<input id="cellSizeSlider" type="range" min="8" max="80" value={cellSize} oninput={changeCellSize} />
 		</div>
 		<p class="hint">Ziehen zum Drehen • Scrollen zum Zoomen • WASD zum Bewegen • ← → für Varianten</p>
 	</div>
