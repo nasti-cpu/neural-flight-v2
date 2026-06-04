@@ -17,7 +17,13 @@
 	let animationId: number;
 	let loading = $state(true);
 
-	const FLOWER_COUNT = 30;
+	const FLOWER_COUNT = 25;
+
+	function loadGLB(url: string): Promise<THREE.Group> {
+		return new Promise((resolve, reject) => {
+			new GLTFLoader().load(url, (gltf) => resolve(gltf.scene), () => {}, reject);
+		});
+	}
 
 	onMount(() => {
 		scene = new THREE.Scene();
@@ -46,61 +52,75 @@
 		const variant = SKY_VARIANTS[0];
 		scene.fog = new THREE.Fog(variant.skyBottom, 25, 60);
 
-		const loader = new GLTFLoader();
-		const meshes: { geo: THREE.BufferGeometry; mat: THREE.Material; pos: THREE.Vector3 }[] = [];
+		const dummy = new THREE.Object3D();
 
-		loader.load(
-			"/models/blumen/glb_Alba_Armeria_Spring_Pink.glb",
-			(gltf) => {
-				gltf.scene.traverse((child) => {
-					if (child instanceof THREE.Mesh) {
-						meshes.push({
-							geo: child.geometry,
-							mat: child.material,
-							pos: child.position.clone(),
-						});
-					}
-				});
+		async function loadFlowers() {
+			const [armeriaScene, spiderScene] = await Promise.all([
+				loadGLB("/models/blumen/glb_Alba_Armeria_Spring_Pink.glb"),
+				loadGLB("/models/blumen/spider_lily_lycoris_radiata.glb"),
+			]);
 
-				const GROUP_SCALE = 0.025;
-				const dummy = new THREE.Object3D();
-
-				for (const { geo: geometry, mat: material, pos: offset } of meshes) {
-					const mesh = new THREE.InstancedMesh(geometry, material, FLOWER_COUNT);
-					mesh.castShadow = true;
-					mesh.receiveShadow = true;
-
-					for (let i = 0; i < FLOWER_COUNT; i++) {
-						const angle = Math.random() * Math.PI * 2;
-						const dist = 2 + Math.random() * 18;
-						const x = Math.cos(angle) * dist;
-						const z = Math.sin(angle) * dist;
-						const y = 0.05;
-						const s = 0.5 + Math.random() * 1.0;
-
-						dummy.position.set(
-							x + offset.x * GROUP_SCALE * s,
-							y + offset.y * GROUP_SCALE * s,
-							z + offset.z * GROUP_SCALE * s,
-						);
-						dummy.scale.setScalar(GROUP_SCALE * s);
-						dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
-						dummy.updateMatrix();
-						mesh.setMatrixAt(i, dummy.matrix);
-					}
-
-					mesh.instanceMatrix.needsUpdate = true;
-					scene.add(mesh);
+			const spiderParts: { geo: THREE.BufferGeometry; mat: THREE.Material }[] = [];
+			spiderScene.updateWorldMatrix(true, false);
+			spiderScene.traverse((child) => {
+				if (child instanceof THREE.Mesh) {
+					child.updateWorldMatrix(true, false);
+					const geo = child.geometry.clone();
+					geo.applyMatrix4(child.matrixWorld);
+					spiderParts.push({ geo, mat: child.material });
 				}
+			});
 
-				loading = false;
-			},
-			() => {},
-			(error) => {
-				console.error("Fehler beim Laden des Blumen-Modells:", error);
-				loading = false;
-			},
-		);
+			const armeriaParts: { geo: THREE.BufferGeometry; mat: THREE.Material }[] = [];
+			armeriaScene.traverse((child) => {
+				if (child instanceof THREE.Mesh) {
+					armeriaParts.push({ geo: child.geometry, mat: child.material });
+				}
+			});
+
+			for (const { geo, mat } of armeriaParts) {
+				const mesh = new THREE.InstancedMesh(geo, mat, FLOWER_COUNT);
+				mesh.castShadow = true;
+				mesh.receiveShadow = true;
+				for (let i = 0; i < FLOWER_COUNT; i++) {
+					const angle = Math.random() * Math.PI * 2;
+					const dist = 2 + Math.random() * 18;
+					const s = 0.5 + Math.random() * 1.0;
+					dummy.position.set(Math.cos(angle) * dist, 0.05, Math.sin(angle) * dist);
+					dummy.scale.setScalar(0.025 * s);
+					dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
+					dummy.updateMatrix();
+					mesh.setMatrixAt(i, dummy.matrix);
+				}
+				mesh.instanceMatrix.needsUpdate = true;
+				scene.add(mesh);
+			}
+
+			for (const { geo, mat } of spiderParts) {
+				const mesh = new THREE.InstancedMesh(geo, mat, FLOWER_COUNT);
+				mesh.castShadow = true;
+				mesh.receiveShadow = true;
+				for (let i = 0; i < FLOWER_COUNT; i++) {
+					const angle = Math.random() * Math.PI * 2;
+					const dist = 2 + Math.random() * 18;
+					const s = 0.6 + Math.random() * 1.2;
+					dummy.position.set(Math.cos(angle) * dist, 0.05, Math.sin(angle) * dist);
+					dummy.scale.setScalar(0.035 * s);
+					dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
+					dummy.updateMatrix();
+					mesh.setMatrixAt(i, dummy.matrix);
+				}
+				mesh.instanceMatrix.needsUpdate = true;
+				scene.add(mesh);
+			}
+
+			loading = false;
+		}
+
+		loadFlowers().catch((err) => {
+			console.error("Fehler beim Laden der Blumen:", err);
+			loading = false;
+		});
 
 		function animate(time: number) {
 			controls.update();
@@ -136,7 +156,7 @@
 	<div class="ui-overlay">
 		<h1>🌸 Wiese mit Blumen</h1>
 		{#if loading}
-			<p class="loading">Lade Blumen-Modell …</p>
+			<p class="loading">Lade Blumen-Modelle …</p>
 		{/if}
 		<p class="hint">Ziehen zum Drehen • Scrollen zum Zoomen</p>
 	</div>
