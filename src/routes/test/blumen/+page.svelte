@@ -105,7 +105,7 @@
 					const dist = 2 + Math.random() * 18;
 					const s = 0.6 + Math.random() * 1.0;
 					dummy.position.set(Math.cos(angle) * dist, 0.05, Math.sin(angle) * dist);
-					dummy.scale.setScalar(1.0 * s);
+					dummy.scale.setScalar(1.7 * s);
 					dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
 					dummy.updateMatrix();
 					mesh.setMatrixAt(i, dummy.matrix);
