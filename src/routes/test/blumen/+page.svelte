@@ -55,9 +55,10 @@
 		const dummy = new THREE.Object3D();
 
 		async function loadFlowers() {
-			const [armeriaScene, spiderScene] = await Promise.all([
+			const [armeriaScene, spiderScene, lungwortScene] = await Promise.all([
 				loadGLB("/models/blumen/glb_Alba_Armeria_Spring_Pink.glb"),
 				loadGLB("/models/blumen/spider_lily_lycoris_radiata.glb"),
+				loadGLB("/models/blumen/Lungwort Spring.glb"),
 			]);
 
 			const spiderParts: { geo: THREE.BufferGeometry; mat: THREE.Material }[] = [];
@@ -78,41 +79,41 @@
 				}
 			});
 
-			for (const { geo, mat } of armeriaParts) {
-				const mesh = new THREE.InstancedMesh(geo, mat, FLOWER_COUNT);
-				mesh.castShadow = true;
-				mesh.receiveShadow = true;
-				for (let i = 0; i < FLOWER_COUNT; i++) {
-					const angle = Math.random() * Math.PI * 2;
-					const dist = 2 + Math.random() * 18;
-					const s = 0.5 + Math.random() * 1.0;
-					dummy.position.set(Math.cos(angle) * dist, 0.05, Math.sin(angle) * dist);
-					dummy.scale.setScalar(0.025 * s);
-					dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
-					dummy.updateMatrix();
-					mesh.setMatrixAt(i, dummy.matrix);
+			const lungwortParts: { geo: THREE.BufferGeometry; mat: THREE.Material }[] = [];
+			lungwortScene.traverse((child) => {
+				if (child instanceof THREE.Mesh) {
+					lungwortParts.push({ geo: child.geometry, mat: child.material });
 				}
-				mesh.instanceMatrix.needsUpdate = true;
-				scene.add(mesh);
+			});
+
+			function scatterFlower(
+				parts: { geo: THREE.BufferGeometry; mat: THREE.Material }[],
+				baseScale: number,
+				scaleRange: [number, number],
+				count: number,
+			) {
+				for (const { geo, mat } of parts) {
+					const mesh = new THREE.InstancedMesh(geo, mat, count);
+					mesh.castShadow = true;
+					mesh.receiveShadow = true;
+					for (let i = 0; i < count; i++) {
+						const angle = Math.random() * Math.PI * 2;
+						const dist = 2 + Math.random() * 18;
+						const s = scaleRange[0] + Math.random() * (scaleRange[1] - scaleRange[0]);
+						dummy.position.set(Math.cos(angle) * dist, 0.05, Math.sin(angle) * dist);
+						dummy.scale.setScalar(baseScale * s);
+						dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
+						dummy.updateMatrix();
+						mesh.setMatrixAt(i, dummy.matrix);
+					}
+					mesh.instanceMatrix.needsUpdate = true;
+					scene.add(mesh);
+				}
 			}
 
-			for (const { geo, mat } of spiderParts) {
-				const mesh = new THREE.InstancedMesh(geo, mat, FLOWER_COUNT);
-				mesh.castShadow = true;
-				mesh.receiveShadow = true;
-				for (let i = 0; i < FLOWER_COUNT; i++) {
-					const angle = Math.random() * Math.PI * 2;
-					const dist = 2 + Math.random() * 18;
-					const s = 0.6 + Math.random() * 1.0;
-					dummy.position.set(Math.cos(angle) * dist, 0.05, Math.sin(angle) * dist);
-					dummy.scale.setScalar(1.7 * s);
-					dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
-					dummy.updateMatrix();
-					mesh.setMatrixAt(i, dummy.matrix);
-				}
-				mesh.instanceMatrix.needsUpdate = true;
-				scene.add(mesh);
-			}
+			scatterFlower(armeriaParts, 0.025, [0.5, 1.5], FLOWER_COUNT);
+			scatterFlower(spiderParts, 1.7, [0.6, 1.6], FLOWER_COUNT);
+			scatterFlower(lungwortParts, 0.025, [0.5, 1.5], FLOWER_COUNT);
 
 			loading = false;
 		}
