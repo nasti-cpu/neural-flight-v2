@@ -19,6 +19,8 @@ export interface FishSchool {
 	migrateDir: number;
 	migrateTimer: number;
 	migrateLastChangeAt: number;
+	spawnTime: number;
+	dirChangeTimer: number;
 }
 
 // ── Factory ──
@@ -77,6 +79,19 @@ const FISH_COLORS: [number, number, number][] = [
 	[1.0, 0.4, 0.4], [0.2, 0.8, 1.0],
 ];
 
+export interface StandardSchoolConfig {
+	count: number;
+	spread: number;
+	heightRange: number;
+	swimMode: SwimMode;
+}
+
+export const STANDARD_SCHOOL_CONFIGS: StandardSchoolConfig[] = [
+	{ count: 120, spread: 55, heightRange: 30, swimMode: "schooling" },
+	{ count: 80, spread: 80, heightRange: 40, swimMode: "scattered" },
+	{ count: 50, spread: 70, heightRange: 25, swimMode: "migrating" },
+];
+
 export function createFishSchool(
 	count: number,
 	modelGeo?: THREE.BufferGeometry,
@@ -98,12 +113,13 @@ export function createFishSchool(
 		positions[i * 3 + 1] = y;
 		positions[i * 3 + 2] = z;
 		heights[i] = y;
-		velocities[i * 3] = (Math.random() - 0.5) * 2;
+		const r = Math.random() * Math.PI * 2;
+		rotations[i] = r;
+		velocities[i * 3] = Math.sin(r) * 1;
 		velocities[i * 3 + 1] = 0;
-		velocities[i * 3 + 2] = (Math.random() - 0.5) * 2;
+		velocities[i * 3 + 2] = -Math.cos(r) * 1;
 		phases[i] = Math.random() * Math.PI * 2;
 		scales[i] = 0.5 + Math.random() * 0.8;
-		rotations[i] = Math.random() * Math.PI * 2;
 	}
 
 	const geo = modelGeo ?? createProceduralFishGeometry();
@@ -125,7 +141,11 @@ export function createFishSchool(
 		});
 	}
 
-	const mesh = new THREE.InstancedMesh(geo, _cachedFishMat, count);
+	const mat = _cachedFishMat.clone();
+	mat.transparent = true;
+	mat.opacity = 0;
+
+	const mesh = new THREE.InstancedMesh(geo, mat, count);
 	mesh.frustumCulled = true;
 
 	const dummy = new THREE.Object3D();
@@ -139,10 +159,12 @@ export function createFishSchool(
 	mesh.instanceMatrix.needsUpdate = true;
 
 	return {
-		mesh, positions, velocities, phases, scales, rotations, heights, count, material: _cachedFishMat,
+		mesh, positions, velocities, phases, scales, rotations, heights, count, material: mat,
 		migrateDir: Math.random() * Math.PI * 2,
 		migrateTimer: 3 + Math.random() * 5,
 		migrateLastChangeAt: -999,
+		spawnTime: -1,
+		dirChangeTimer: 2 + Math.random() * 4,
 	};
 }
 
@@ -158,81 +180,76 @@ export function disposeFishSchool(school: FishSchool, scene: THREE.Scene): void 
 
 interface SwimConfig {
 	speed: number;
-	turnRate: number;
-	bobAmp: number;
+	wanderAmp: number;
 	cohStr: number;
 	aliStr: number;
-	sepStr: number;
-	wanderAmp: number;
-	sepRangeSq: number;
-	tailFreq: number;
-	tailAmp: number;
+	dampFactor: number;
+	spread: number;
+	migrateSpeed: number;
 }
 
 const SWIM_CONFIG: Record<SwimMode, SwimConfig> = {
 	schooling: {
-		speed: 3,
-		turnRate: 4.0,
-		bobAmp: 0.08,
-		cohStr: 0.08,
-		aliStr: 0.4,
-		sepStr: 1.5,
-		wanderAmp: 0.2,
-		sepRangeSq: 25,
-		tailFreq: 3.0,
-		tailAmp: 0.05,
+		speed: 1.5,
+		wanderAmp: 1.2,
+		cohStr: 0.4,
+		aliStr: 0.15,
+		dampFactor: 0.03,
+		spread: 30,
+		migrateSpeed: 0,
 	},
 	scattered: {
-		speed: 1.8,
-		turnRate: 1.5,
-		bobAmp: 0.25,
-		cohStr: 0,
-		aliStr: 0,
-		sepStr: 0,
-		wanderAmp: 0.7,
-		sepRangeSq: 0,
-		tailFreq: 3.0,
-		tailAmp: 0.05,
+		speed: 0.8,
+		wanderAmp: 2.5,
+		cohStr: 0.03,
+		aliStr: 0.03,
+		dampFactor: 0.015,
+		spread: 50,
+		migrateSpeed: 0,
 	},
 	migrating: {
-		speed: 8,
-		turnRate: 3.0,
-		bobAmp: 0.03,
+		speed: 2,
+		wanderAmp: 0.8,
 		cohStr: 0,
 		aliStr: 0,
-		sepStr: 0,
-		wanderAmp: 0,
-		sepRangeSq: 0,
-		tailFreq: 4.0,
-		tailAmp: 0.06,
+		dampFactor: 0.02,
+		spread: 40,
+		migrateSpeed: 3,
 	},
 };
 
-// ── Angle helper ──
-
-function angleDiff(a: number, b: number): number {
-	let d = a - b;
-	d = d % (Math.PI * 2);
-	if (d > Math.PI) d -= Math.PI * 2;
-	if (d < -Math.PI) d += Math.PI * 2;
-	return d;
-}
-
-// ── Update ──
+// ── Update (v1-style velocity-based physics) ──
 
 export function updateFishSchool(
 	school: FishSchool,
 	delta: number,
 	elapsed: number,
 	swimMode: SwimMode,
-	flockMode: FlockMode,
-	center: THREE.Vector3,
+	playerPos: THREE.Vector3,
+	terrainFn?: (wx: number, wz: number) => number,
 ): void {
+	if (school.spawnTime < 0) school.spawnTime = elapsed;
+	const fadeElapsed = elapsed - school.spawnTime;
+	const fadeIn = Math.min(1, fadeElapsed / 2);
+	school.material.opacity = fadeIn;
+
 	const count = school.count;
 	const dummy = new THREE.Object3D();
 	const cfg = SWIM_CONFIG[swimMode];
 
-	// ── Migration: global direction change timer ──
+	// Direction change timer (all modes — fish randomly shift direction)
+	school.dirChangeTimer -= delta;
+	let dirChangeX = 0, dirChangeZ = 0;
+	if (school.dirChangeTimer <= 0) {
+		const angle = Math.random() * Math.PI * 2;
+		const strength = 1 + Math.random() * 3;
+		dirChangeX = Math.sin(angle) * strength;
+		dirChangeZ = -Math.cos(angle) * strength;
+		school.dirChangeTimer = 2 + Math.random() * 5;
+		if (swimMode === "scattered") school.dirChangeTimer *= 0.6;
+	}
+
+	// Migration direction changes
 	if (swimMode === "migrating") {
 		school.migrateTimer -= delta;
 		if (school.migrateTimer <= 0) {
@@ -243,117 +260,109 @@ export function updateFishSchool(
 		}
 	}
 
-	// School centroid + average forward direction (only for social modes)
-	let avgX = 0, avgZ = 0, avgFwdX = 0, avgFwdZ = 0;
-
-	if (flockMode !== "solo" && swimMode !== "migrating") {
-		for (let i = 0; i < count; i++) {
-			const i3 = i * 3;
-			avgX += school.positions[i3];
-			avgZ += school.positions[i3 + 2];
-			const r = school.rotations[i];
-			avgFwdX += Math.sin(r);
-			avgFwdZ += -Math.cos(r);
-		}
-		avgX /= count;
-		avgZ /= count;
-		const avgLen = Math.sqrt(avgFwdX * avgFwdX + avgFwdZ * avgFwdZ);
-		if (avgLen > 0.01) { avgFwdX /= avgLen; avgFwdZ /= avgLen; }
+	// Migration velocity offset
+	let migVx = 0, migVz = 0;
+	if (swimMode === "migrating") {
+		migVx = Math.sin(school.migrateDir) * cfg.migrateSpeed;
+		migVz = -Math.cos(school.migrateDir) * cfg.migrateSpeed;
 	}
+
+	// Centroid + average velocity
+	let avgX = 0, avgY = 0, avgZ = 0, avgVx = 0, avgVy = 0, avgVz = 0;
+	for (let i = 0; i < count; i++) {
+		const i3 = i * 3;
+		avgX += school.positions[i3];
+		avgY += school.positions[i3 + 1];
+		avgZ += school.positions[i3 + 2];
+		avgVx += school.velocities[i3];
+		avgVy += school.velocities[i3 + 1];
+		avgVz += school.velocities[i3 + 2];
+	}
+	avgX /= count;
+	avgY /= count;
+	avgZ /= count;
+	const aLen = Math.sqrt(avgVx * avgVx + avgVy * avgVy + avgVz * avgVz);
+	if (aLen > 0.01) { avgVx /= aLen; avgVy /= aLen; avgVz /= aLen; }
 
 	for (let i = 0; i < count; i++) {
 		const i3 = i * 3;
-		const rot = school.rotations[i];
 		const phase = school.phases[i];
 
 		const px = school.positions[i3];
 		const py = school.positions[i3 + 1];
 		const pz = school.positions[i3 + 2];
 
-		// ── Angular velocity (rad/s) — only turns, never reverses ──
-		let angVel = 0;
+		// Sine wandering per axis (v1-style)
+		const wanderX = Math.sin(elapsed * 0.3 + phase) * cfg.wanderAmp;
+		const wanderY = Math.sin(elapsed * 0.5 + phase * 1.5) * cfg.wanderAmp * 0.5;
+		const wanderZ = Math.cos(elapsed * 0.2 + phase) * cfg.wanderAmp;
 
-		if (swimMode === "migrating") {
-			// Ripple: per-fish delay based on phase creates a turning wave
-			const sinceChange = elapsed - school.migrateLastChangeAt;
-			const delay = (Math.sin(phase) * 0.5 + 0.5) * 0.4;
-			if (sinceChange >= delay) {
-				angVel += angleDiff(school.migrateDir, rot) * 1.5;
-			}
-		}
+		// Cohesion toward centroid
+		const toCX = (avgX - px) * cfg.cohStr;
+		const toCY = (avgY - py) * cfg.cohStr;
+		const toCZ = (avgZ - pz) * cfg.cohStr;
 
-		// Gentle individual meandering (always present)
-		angVel += Math.sin(elapsed * 0.2 + phase) * cfg.wanderAmp;
+		// Alignment
+		const aliX = avgVx * cfg.aliStr;
+		const aliY = avgVy * cfg.aliStr;
+		const aliZ = avgVz * cfg.aliStr;
 
-		if (swimMode !== "migrating") switch (flockMode) {
-			case "boids": {
-				// Cohesion: turn toward school centroid
-				const cohAngle = Math.atan2(avgX - px, -(avgZ - pz));
-				angVel += angleDiff(cohAngle, rot) * cfg.cohStr;
+		// Velocity update (v1 formula: wander * 0.4 + cohesion * 0.3 + alignment * 0.2 - damp * 0.04)
+		school.velocities[i3] += (wanderX * 0.4 + toCX * 0.3 + aliX - school.velocities[i3] * cfg.dampFactor + migVx + dirChangeX) * delta;
+		school.velocities[i3 + 1] += (wanderY * 0.4 + toCY * 0.3 + aliY - school.velocities[i3 + 1] * cfg.dampFactor) * delta;
+		school.velocities[i3 + 2] += (wanderZ * 0.4 + toCZ * 0.3 + aliZ - school.velocities[i3 + 2] * cfg.dampFactor + migVz + dirChangeZ) * delta;
 
-				// Alignment: match average direction
-				const avgRot = Math.atan2(avgFwdX, -avgFwdZ);
-				angVel += angleDiff(avgRot, rot) * cfg.aliStr;
-
-				// Separation: turn away from close neighbors
-				for (let j = 0; j < count; j++) {
-					if (j === i) continue;
-					const j3 = j * 3;
-					const dx = px - school.positions[j3];
-					const dz = pz - school.positions[j3 + 2];
-					const distSq = dx * dx + dz * dz;
-					if (distSq < cfg.sepRangeSq && distSq > 0.01) {
-						const awayAngle = Math.atan2(dx, -dz);
-						angVel += angleDiff(awayAngle, rot) * cfg.sepStr * (0.2 / (distSq + 0.1));
-					}
-				}
-				break;
-			}
-			case "swarm": {
-				const orbitR = 3 + school.scales[i] * 2;
-				const tx = center.x + Math.sin(phase + elapsed * 0.15) * orbitR;
-				const tz = center.z + Math.cos(phase + elapsed * 0.15) * orbitR;
-				const targetAngle = Math.atan2(tx - px, -(tz - pz));
-				angVel += angleDiff(targetAngle, rot) * 0.6;
-				break;
-			}
-		}
-
-		// Rotate
-		school.rotations[i] += angVel * delta * cfg.turnRate;
-
-		const finalRot = school.rotations[i];
-		const finalFwdX = Math.sin(finalRot);
-		const finalFwdZ = -Math.cos(finalRot);
-
-		// ── Velocity is always forward — NEVER backward or sideways ──
-		const lerpV = delta * 10;
-		school.velocities[i3] += (finalFwdX * cfg.speed - school.velocities[i3]) * lerpV;
-		school.velocities[i3 + 2] += (finalFwdZ * cfg.speed - school.velocities[i3 + 2]) * lerpV;
-
-		// Vertical: spring toward initial depth + gentle bob
-		const depthPull = (school.heights[i] - py) * 0.1;
-		const yBob = Math.sin(elapsed * 0.15 + phase) * cfg.bobAmp;
-		school.velocities[i3 + 1] += (yBob + depthPull - school.velocities[i3 + 1]) * delta * 5;
-
-		// Move
+		// Position update
 		school.positions[i3] += school.velocities[i3] * delta;
 		school.positions[i3 + 1] += school.velocities[i3 + 1] * delta;
 		school.positions[i3 + 2] += school.velocities[i3 + 2] * delta;
 
-		// Wrapping
-		const BOUNDS = 30;
-		for (let a = 0; a < 3; a++) {
-			if (school.positions[i3 + a] > BOUNDS) school.positions[i3 + a] = -BOUNDS;
-			if (school.positions[i3 + a] < -BOUNDS) school.positions[i3 + a] = BOUNDS;
+		// Player spread control (v1-style: pull back within spread, teleport if >200m)
+		const dx = school.positions[i3];
+		const dy = school.positions[i3 + 1];
+		const dz = school.positions[i3 + 2];
+		const dist2 = Math.sqrt(dx * dx + dz * dz);
+		if (dist2 > 300) {
+			school.positions[i3] = (Math.random() - 0.5) * 40;
+			school.positions[i3 + 1] = (Math.random() - 0.5) * 10;
+			school.positions[i3 + 2] = (Math.random() - 0.5) * 40;
+			school.velocities[i3] = (Math.random() - 0.5) * 1;
+			school.velocities[i3 + 1] = (Math.random() - 0.5) * 0.5;
+			school.velocities[i3 + 2] = (Math.random() - 0.5) * 1;
+		} else if (dist2 > cfg.spread) {
+			school.velocities[i3] -= (dx / dist2) * delta * 3 * (swimMode === "scattered" ? 0.5 : 1);
+			school.velocities[i3 + 2] -= (dz / dist2) * delta * 3 * (swimMode === "scattered" ? 0.5 : 1);
 		}
 
-		// ── Instance matrix ──
-		const tilt = Math.min(0.3, Math.max(-0.3, school.velocities[i3 + 1] * 0.06));
-		const tailWag = Math.sin(elapsed * cfg.tailFreq + phase) * cfg.tailAmp;
+		// Terrain floor — smooth spring force, no hard teleport
+		if (terrainFn) {
+			const wx = school.mesh.position.x + school.positions[i3];
+			const wz = school.mesh.position.z + school.positions[i3 + 2];
+			const terrainY = terrainFn(wx, wz);
+			const floorY = terrainY + 1.5;
+			const distAbove = school.positions[i3 + 1] - floorY;
+			if (distAbove < 4) {
+				const t = 1 - distAbove / 4;
+				const strength = t * t * 5;
+				school.velocities[i3 + 1] += strength * delta;
+			}
+			if (distAbove < 0) {
+				school.velocities[i3 + 1] = 1 + Math.abs(school.velocities[i3 + 1]) * 0.3;
+			}
+		}
+		school.positions[i3 + 1] = Math.max(-50, Math.min(200, school.positions[i3 + 1]));
+
+		// Rotation from velocity direction (v1-style, YXZ order)
+		const vx = school.velocities[i3];
+		const vy = school.velocities[i3 + 1];
+		const vz = school.velocities[i3 + 2];
+		const speed = Math.sqrt(vx * vx + vz * vz);
 		dummy.position.set(school.positions[i3], school.positions[i3 + 1], school.positions[i3 + 2]);
 		dummy.scale.setScalar(school.scales[i]);
-		dummy.rotation.set(tilt, finalRot + tailWag, 0);
+		dummy.rotation.order = "YXZ";
+		dummy.rotation.y = Math.atan2(vx, vz);
+		dummy.rotation.x = Math.atan2(vy, speed) * 0.3;
+		dummy.rotation.z = 0;
 		dummy.updateMatrix();
 		school.mesh.setMatrixAt(i, dummy.matrix);
 	}

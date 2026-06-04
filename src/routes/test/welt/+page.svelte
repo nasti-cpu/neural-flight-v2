@@ -10,12 +10,14 @@ let scene: THREE.Scene;
 let camera: THREE.PerspectiveCamera;
 let clock = new THREE.Clock();
 let state: UnderwaterWorldState;
+const _playerPos = new THREE.Vector3();
+const _playerRot = new THREE.Euler();
 
 onMount(async () => {
 	renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 	renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 	renderer.setSize(window.innerWidth, window.innerHeight);
-	renderer.setClearColor(0x001020);
+	renderer.setClearColor(0x0a2a4a);
 
 	scene = new THREE.Scene();
 	camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 600);
@@ -30,12 +32,14 @@ onMount(async () => {
 
 	renderer.setAnimationLoop(() => {
 		const delta = clock.getDelta();
+		_playerPos.copy(state.camera.position);
+		_playerRot.copy(state.camera.rotation);
 		const result = tick(state, {
 			delta,
 			elapsed: clock.elapsedTime,
 			camera: state.camera,
-			playerPosition: new THREE.Vector3(),
-			playerRotation: new THREE.Euler(),
+			playerPosition: _playerPos,
+			playerRotation: _playerRot,
 		});
 		state = result.state as UnderwaterWorldState;
 		renderer.render(scene, state.camera);

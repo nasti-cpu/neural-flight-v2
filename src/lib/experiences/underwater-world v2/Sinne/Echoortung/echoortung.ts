@@ -19,6 +19,8 @@ export interface EchoConfig {
 	description: string;
 }
 
+export const ECHO_VARIANT_KEYS: EchoVariant[] = ["scan", "puls", "welle"];
+
 export const ECHO_VARIANTS: Record<EchoVariant, EchoConfig> = {
 	scan: {
 		color: 0x00e5ff,

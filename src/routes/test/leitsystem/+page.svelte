@@ -4,6 +4,7 @@ import * as THREE from "three";
 import {
 	createGuidancePath,
 	VARIANT_CONFIGS,
+	GUIDANCE_VARIANTS,
 } from "$lib/experiences/underwater-world v2/Sinne/Leitsystem/guidance";
 import type { GuidancePath } from "$lib/experiences/underwater-world v2/Sinne/Leitsystem/guidance";
 
@@ -19,8 +20,6 @@ let orbitPhi = 0.5;
 let mouseDown = false;
 let lastMX = 0;
 let lastMY = 0;
-
-const variants = ["city", "target", "path"] as const;
 
 const controlPointSets: Record<string, THREE.Vector3[]> = {
 	city: [
@@ -105,7 +104,7 @@ onMount(() => {
 	scene.add(originGlow);
 
 	// Build 3 guidance paths
-	for (const v of variants) {
+	for (const v of GUIDANCE_VARIANTS) {
 		const config = VARIANT_CONFIGS[v];
 		const pts = controlPointSets[v];
 		const path = createGuidancePath(config, pts);
@@ -179,7 +178,7 @@ onDestroy(() => {
 	<div class="panel">
 		<h2>🧭 Leitsystem — 3 Varianten</h2>
 		<div class="legend">
-			{#each variants as v}
+			{#each GUIDANCE_VARIANTS as v}
 				{@const cfg = VARIANT_CONFIGS[v]}
 				<div class="entry">
 					<div class="swatch" style="background: #{cfg.color.toString(16).padStart(6, '0')}"></div>

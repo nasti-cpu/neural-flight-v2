@@ -125,6 +125,18 @@ interface DolphinConfig {
 	sepRangeSq: number;
 }
 
+export interface DolphinModeMeta {
+	id: DolphinMode;
+	label: string;
+	count: number;
+}
+
+export const DOLPHIN_MODE_META: DolphinModeMeta[] = [
+	{ id: "leisurely", label: "Gemütlich", count: 1 },
+	{ id: "fast", label: "Schnell", count: 1 },
+	{ id: "pod", label: "Gruppe", count: 3 },
+];
+
 const MODE_CONFIG: Record<DolphinMode, DolphinConfig> = {
 	leisurely: {
 		speed: 4,

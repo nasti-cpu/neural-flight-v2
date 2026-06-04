@@ -1,7 +1,7 @@
 <script lang="ts">
 import { onMount, onDestroy } from "svelte";
 import * as THREE from "three";
-import { createJellySwarm, updateJellySwarm, disposeJellySwarm } from "$lib/experiences/underwater-world v2/Objekte/Quallen/jellyfish";
+import { createJellySwarm, updateJellySwarm, disposeJellySwarm, JELLY_MODE_META } from "$lib/experiences/underwater-world v2/Objekte/Quallen/jellyfish";
 import type { JellyMode } from "$lib/experiences/underwater-world v2/Objekte/Quallen/jellyfish";
 
 type Mode = "drifting" | "pulsing" | "bloom";
@@ -24,9 +24,9 @@ let camera: THREE.PerspectiveCamera;
 let swarm: ReturnType<typeof createJellySwarm> | null = null;
 let clock = new THREE.Clock();
 
-let currentMode = $state<Mode>("drifting");
+let currentMode = $state<JellyMode>("drifting");
 
-function rebuild(mode: Mode): void {
+function rebuild(mode: JellyMode): void {
 	if (swarm) {
 		disposeJellySwarm(swarm, scene);
 		swarm = null;
@@ -84,7 +84,7 @@ onDestroy(() => {
 	<div class="panel">
 		<h2>Modus</h2>
 		<div class="buttons">
-			{#each MODES as mode}
+			{#each JELLY_MODE_META as mode}
 				<button
 					class:active={currentMode === mode.id}
 					onclick={() => {

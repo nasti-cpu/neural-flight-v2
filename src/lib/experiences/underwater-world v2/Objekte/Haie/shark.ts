@@ -101,6 +101,18 @@ interface SharkConfig {
 	breachY: number;
 }
 
+export interface SharkModeMeta {
+	id: SharkMode;
+	label: string;
+	description: string;
+}
+
+export const SHARK_MODE_META: SharkModeMeta[] = [
+	{ id: "patrol", label: "Patrouille", description: "Kreist langsam" },
+	{ id: "hunt", label: "Jagd", description: "Schnell, unberechenbar" },
+	{ id: "breach", label: "Lauer", description: "Taucht auf und ab" },
+];
+
 const MODE_CONFIG: Record<SharkMode, SharkConfig> = {
 	patrol: {
 		speed: 2.5,

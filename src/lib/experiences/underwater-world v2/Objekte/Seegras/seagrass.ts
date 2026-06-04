@@ -82,6 +82,18 @@ interface SeagrassConfig {
 	speed: number;
 }
 
+export interface SeagrassMeta {
+	id: SeagrassType;
+	label: string;
+	description: string;
+}
+
+export const SEAGRASS_META: SeagrassMeta[] = [
+	{ id: "algae", label: "Algen", description: "Breite, krause Algenfiedern" },
+	{ id: "long", label: "Langes Seegras", description: "Wie Eelgrass — lange, schmale Bänder" },
+	{ id: "bushy", label: "Buschiges Seegras", description: "Dichte Büschel, verzweigt" },
+];
+
 const CONFIG: Record<SeagrassType, SeagrassConfig> = {
 	algae: {
 		count: 220,

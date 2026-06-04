@@ -1,22 +1,8 @@
 <script lang="ts">
 import { onMount, onDestroy } from "svelte";
 import * as THREE from "three";
-import { createSharkPack, updateSharkPack, disposeSharkPack, loadSharkGeometry } from "$lib/experiences/underwater-world v2/Objekte/Haie/shark";
+import { createSharkPack, updateSharkPack, disposeSharkPack, loadSharkGeometry, SHARK_MODE_META } from "$lib/experiences/underwater-world v2/Objekte/Haie/shark";
 import type { SharkMode } from "$lib/experiences/underwater-world v2/Objekte/Haie/shark";
-
-type Mode = "patrol" | "hunt" | "breach";
-
-interface ModeDef {
-	id: Mode;
-	label: string;
-	description: string;
-}
-
-const MODES: ModeDef[] = [
-	{ id: "patrol", label: "Patrouille", description: "Kreist langsam" },
-	{ id: "hunt", label: "Jagd", description: "Schnell, unberechenbar" },
-	{ id: "breach", label: "Lauer", description: "Taucht auf und ab" },
-];
 
 let canvas: HTMLCanvasElement;
 let renderer: THREE.WebGLRenderer;
@@ -26,9 +12,9 @@ let pack: ReturnType<typeof createSharkPack> | null = null;
 let clock = new THREE.Clock();
 let modelGeo: THREE.BufferGeometry | null = null;
 
-let currentMode = $state<Mode>("patrol");
+let currentMode = $state<SharkMode>("patrol");
 
-function rebuild(mode: Mode): void {
+function rebuild(mode: SharkMode): void {
 	if (pack) {
 		disposeSharkPack(pack, scene);
 		pack = null;
@@ -88,7 +74,7 @@ onDestroy(() => {
 	<div class="panel">
 		<h2>Modus</h2>
 		<div class="buttons">
-			{#each MODES as mode}
+			{#each SHARK_MODE_META as mode}
 				<button
 					class:active={currentMode === mode.id}
 					onclick={() => {

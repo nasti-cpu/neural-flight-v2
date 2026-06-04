@@ -17,6 +17,8 @@ export interface GuidanceConfig {
 	description: string;
 }
 
+export const GUIDANCE_VARIANTS: GuidanceVariant[] = ["city", "target", "path"];
+
 export const VARIANT_CONFIGS: Record<GuidanceVariant, GuidanceConfig> = {
 	city: {
 		color: 0x00e5ff,

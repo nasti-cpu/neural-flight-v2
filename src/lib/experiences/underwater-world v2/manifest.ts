@@ -71,7 +71,7 @@ const parameters: ParameterDef[] = [
 ];
 
 export const manifest: ExperienceManifest = {
-	id: "underwater-world-v2",
+	id: "underwater-world",
 	name: "Underwater World V2",
 	description:
 		"Module underwater VR experience with bioluminescent life, procedural terrain, and echolocation.",

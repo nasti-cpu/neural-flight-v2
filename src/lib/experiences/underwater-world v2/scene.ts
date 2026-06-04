@@ -1,46 +1,30 @@
 import * as THREE from "three";
-import type { ExperienceState, SetupContext, TickContext } from "$lib/experiences/types";
-import { loadAllGeometries, createRockGeometry, createProceduralCoralGeometry } from "$lib/experiences/underwater-world v2/Biome/Korallenriff/korallenriff";
-import { createSeagrassMeadow, updateSeagrassSway, disposeSeagrassMeadow, type SeagrassMeadow } from "$lib/experiences/underwater-world v2/Objekte/Seegras/seagrass";
-import { createFishSchool, updateFishSchool, disposeFishSchool, loadFishGeometry, type FishSchool, type SwimMode, type FlockMode } from "$lib/experiences/underwater-world v2/Objekte/Fische/fish";
-import { createSharkPack, updateSharkPack, disposeSharkPack, loadSharkGeometry, type SharkPack, type SharkMode } from "$lib/experiences/underwater-world v2/Objekte/Haie/shark";
-import { createDolphinPod, updateDolphinPod, disposeDolphinPod, loadDolphinGeometry, type DolphinPod, type DolphinMode } from "$lib/experiences/underwater-world v2/Objekte/Delfine/dolphin";
-import { createJellySwarm, updateJellySwarm, disposeJellySwarm, type JellySwarm, type JellyMode } from "$lib/experiences/underwater-world v2/Objekte/Quallen/jellyfish";
-import { createCity, updateCityPulse, disposeCity, type CityResult } from "$lib/experiences/underwater-world v2/Biome/Städte/city";
-import { createEchoVariant, type EchoVariantSystem, ECHO_VARIANTS } from "$lib/experiences/underwater-world v2/Sinne/Echoortung/echoortung";
+import type { ExperienceState, SetupContext, TickContext } from "../types";
+import { createSeagrassMeadow, updateSeagrassSway, disposeSeagrassMeadow, SEAGRASS_META, type SeagrassMeadow } from "$lib/experiences/underwater-world v2/Objekte/Seegras/seagrass";
+import { createDuneSand, disposeDuneSand } from "$lib/experiences/underwater-world v2/Biome/Sand/sand";
+import type { DuneSandResult } from "$lib/experiences/underwater-world v2/Biome/Sand/sand";
+import { createCity, disposeCity, updateCityPulse } from "$lib/experiences/underwater-world v2/Biome/Städte/city";
+import type { CityResult, CityVariant } from "$lib/experiences/underwater-world v2/Biome/Städte/city";
+import { createGuidancePath, VARIANT_CONFIGS, type GuidancePath } from "$lib/experiences/underwater-world v2/Sinne/Leitsystem/guidance";
+import { createFishSchool, disposeFishSchool, loadFishGeometry, updateFishSchool, STANDARD_SCHOOL_CONFIGS, type FishSchool } from "$lib/experiences/underwater-world v2/Objekte/Fische/fish";
+import { createProceduralCoralGeometry } from "$lib/experiences/underwater-world v2/Biome/Korallenriff/korallenriff";
 
 // ── Constants ──
 
 const CHUNK_SIZE = 400;
-const CHUNK_SEGMENTS = 48;
+const CHUNK_SEGMENTS = 32;
 const CHUNK_RADIUS = 1;
-const WATER_SURFACE_Y = 75;
+const WATER_SURFACE_Y = 500;
 const TERRAIN_BASE_Y = -3;
-const BIOME_FREQ = 0.005;
+const BIOME_FREQ = 0.0025;
+const SAND_PATCH_COUNT = 400;
+const SAND_STREAM_PER_FRAME = 8;
+const CORAL_MAX_PER_TYPE = 500;
+const CORAL_STREAM_RADIUS = 300;
 
+const CITY_VARIANTS: CityVariant[] = ["altstadt", "zentrum", "vorort"];
+const SEAGRASS_TYPES: ("algae" | "long" | "bushy")[] = SEAGRASS_META.map((m) => m.id);
 const STREAM_INIT_RADIUS = 200;
-const STREAM_FWD_RADIUS = 400;
-const STREAM_BACK_RADIUS = 120;
-const CORAL_STREAM_PER_FRAME = 20;
-const ROCK_STREAM_PER_FRAME = 5;
-const SEAGRASS_STREAM_PER_FRAME = 1;
-
-const FISH_COUNT = 80;
-const SHARK_COUNT = 3;
-const DOLPHIN_COUNT = 2;
-const JELLY_COUNT = 10;
-
-const CITY_ACTIVATE_DSQ = 360000;
-const CITY_DEACTIVATE_DSQ = 490000;
-const CITY_DOME_RADIUS = 65;
-
-const ECHO_EMIT_INTERVAL = 10;
-
-const CORAL_TYPES = 5;
-const CORAL_COLORS = [
-	0xff6644, 0xdd8855, 0xdd77aa, 0xff9966, 0xee7766,
-	0xffaa44, 0x77ccaa, 0xff8844, 0xee5599, 0x66ddaa,
-];
 
 // ── Noise ──
 
@@ -86,9 +70,9 @@ export function getTerrainHeight(wx: number, wz: number, amplitude: number, scal
 }
 
 function getBiomeParams(biome: number): { ampMul: number; scaleMul: number; color: THREE.Color } {
-	if (biome < 0.55) return { ampMul: 1.0, scaleMul: 1.0, color: new THREE.Color(0x3a5a7a) };
-	if (biome < 0.75) return { ampMul: 0.4, scaleMul: 0.7, color: new THREE.Color(0xc4a87a) };
-	return { ampMul: 0.3, scaleMul: 0.6, color: new THREE.Color(0x4a4a6a) };
+	if (biome < 0.25) return { ampMul: 1.0, scaleMul: 1.0, color: new THREE.Color(0x3a5a7a) };
+	if (biome < 0.50) return { ampMul: 0.7, scaleMul: 0.8, color: new THREE.Color(0x3a7a5a) };
+	return { ampMul: 0.4, scaleMul: 0.7, color: new THREE.Color(0xc4a87a) };
 }
 
 // ── Types ──
@@ -107,26 +91,8 @@ interface AudioState {
 	surfaceGain: GainNode;
 	surfaceSrc: AudioBufferSourceNode | null;
 	surfaceBlend: number;
-	cityGain: GainNode | null;
-	citySrc: AudioBufferSourceNode | null;
-	cityBlend: number;
 	moveBuffer: AudioBuffer | null;
-	echoBuffer: AudioBuffer | null;
 	wasSpace: boolean;
-}
-
-interface CoralDatum {
-	wx: number;
-	wz: number;
-	typeIdx: number;
-	color: number;
-}
-
-interface SeagrassMeadowDatum {
-	wx: number;
-	wz: number;
-	type: "algae" | "long" | "bushy";
-	meadow: SeagrassMeadow;
 }
 
 export interface UnderwaterWorldState extends ExperienceState {
@@ -143,36 +109,29 @@ export interface UnderwaterWorldState extends ExperienceState {
 	prevGx: number;
 	prevGz: number;
 	terrainMat: THREE.MeshStandardMaterial;
-	// Corals (OBJ models from korallenriff.ts)
-	coralGeos: (THREE.BufferGeometry | null)[];
-	coralData: CoralDatum[];
-	coralMeshes: THREE.Mesh[];
-	// Rocks
-	rockGeo: THREE.BufferGeometry;
-	rockPositions: { wx: number; wz: number }[];
-	rockMeshes: THREE.Mesh[];
-	rockMat: THREE.MeshStandardMaterial;
-	// Seagrass meadows (from seagrass.ts)
-	seagrassData: SeagrassMeadowDatum[];
-	// Creatures
-	fishSchool: FishSchool | null;
-	sharkPack: SharkPack | null;
-	dolphinPod: DolphinPod | null;
-	jellySwarm: JellySwarm | null;
-	// City
-	city: CityResult | null;
-	cityActive: boolean;
-	cityFound: boolean;
-	cityX: number;
-	cityZ: number;
-	// Echo
-	echoSystem: EchoVariantSystem | null;
-	echoEnabled: boolean;
-	echoTimer: number;
-	// Core
+	sandEntries: {
+		wx: number; wz: number;
+		variant: "plain" | "seagrass" | "city";
+		cityVariant?: CityVariant;
+		seagrassType?: "algae" | "long" | "bushy";
+		dune: DuneSandResult;
+		meadow?: SeagrassMeadow;
+		city?: CityResult;
+	}[];
+	sandPositions: {
+		wx: number; wz: number;
+		variant: "plain" | "seagrass" | "city";
+		cityVariant?: CityVariant;
+		seagrassType?: "algae" | "long" | "bushy";
+	}[];
 	waterSurface: THREE.Mesh;
 	audio: AudioState | null;
 	keys: Set<string>;
+	cityGuidance: { key: string; path: GuidancePath }[];
+	fishSchools: FishSchool[];
+	coralMeshes: THREE.InstancedMesh[];
+	coralGeos: THREE.BufferGeometry[];
+	coralPositions: { wx: number; wz: number; type: number; color: number }[];
 }
 
 // ── Terrain ──
@@ -215,7 +174,7 @@ function disposeTerrainChunk(chunk: TerrainChunk, scene: THREE.Scene): void {
 
 function initAudio(ctx: AudioContext, masterGain: GainNode): AudioState {
 	const bgGain = ctx.createGain();
-	bgGain.gain.value = 0.2;
+	bgGain.gain.value = 0;
 	bgGain.connect(masterGain);
 	const bgSrc = ctx.createBufferSource();
 	bgSrc.loop = true;
@@ -225,16 +184,15 @@ function initAudio(ctx: AudioContext, masterGain: GainNode): AudioState {
 	surfaceGain.gain.value = 0;
 	surfaceGain.connect(masterGain);
 
-	const cityGain = ctx.createGain();
-	cityGain.gain.value = 0;
-	cityGain.connect(masterGain);
-
 	return {
-		ctx, masterGain,
-		bgGain, bgSrc,
-		surfaceGain, surfaceSrc: null, surfaceBlend: 0,
-		cityGain, citySrc: null, cityBlend: 0,
-		moveBuffer: null, echoBuffer: null,
+		ctx,
+		masterGain,
+		bgGain,
+		bgSrc,
+		surfaceGain,
+		surfaceSrc: null,
+		surfaceBlend: 0,
+		moveBuffer: null,
 		wasSpace: false,
 	};
 }
@@ -242,40 +200,29 @@ function initAudio(ctx: AudioContext, masterGain: GainNode): AudioState {
 async function loadAudioAssets(audio: AudioState): Promise<void> {
 	const ctx = audio.ctx;
 	try {
-		const r = await fetch("/sounds/dragon-studio-deep-sea-underwater-ambience-472383.mp3");
-		audio.bgSrc.buffer = await ctx.decodeAudioData(await r.arrayBuffer());
+		const bgRes = await fetch("/sounds/dragon-studio-deep-sea-underwater-ambience-472383.mp3");
+		const bgBuf = await bgRes.arrayBuffer();
+		audio.bgSrc.buffer = await ctx.decodeAudioData(bgBuf);
 		audio.bgSrc.start();
+		audio.bgGain.gain.value = 0.2;
 	} catch { /* bg silent */ }
 
 	try {
-		const r = await fetch("/sounds/dragon-studio-deep-sea-underwater-ambience-482888.mp3");
-		const s = ctx.createBufferSource();
-		s.loop = true;
-		s.buffer = await ctx.decodeAudioData(await r.arrayBuffer());
-		s.connect(audio.surfaceGain);
-		s.start();
-		audio.surfaceSrc = s;
+		const sfRes = await fetch("/sounds/dragon-studio-deep-sea-underwater-ambience-482888.mp3");
+		const sfBuf = await sfRes.arrayBuffer();
+		const sfSrc = ctx.createBufferSource();
+		sfSrc.loop = true;
+		sfSrc.buffer = await ctx.decodeAudioData(sfBuf);
+		sfSrc.connect(audio.surfaceGain);
+		sfSrc.start();
+		audio.surfaceSrc = sfSrc;
 	} catch { /* surface silent */ }
 
 	try {
-		const r = await fetch("/sounds/mavopix-underwater-159894.mp3");
-		const s = ctx.createBufferSource();
-		s.loop = true;
-		s.buffer = await ctx.decodeAudioData(await r.arrayBuffer());
-		s.connect(audio.cityGain!);
-		s.start();
-		audio.citySrc = s;
-	} catch { /* city silent */ }
-
-	try {
-		const r = await fetch("/sounds/freesound_community-underwater-movement-66914.mp3");
-		audio.moveBuffer = await ctx.decodeAudioData(await r.arrayBuffer());
+		const mvRes = await fetch("/sounds/freesound_community-underwater-movement-66914.mp3");
+		const mvBuf = await mvRes.arrayBuffer();
+		audio.moveBuffer = await ctx.decodeAudioData(mvBuf);
 	} catch { /* movement silent */ }
-
-	try {
-		const r = await fetch("/sounds/dragon-studio-deepsea-sonar-386156.mp3");
-		audio.echoBuffer = await ctx.decodeAudioData(await r.arrayBuffer());
-	} catch { /* echo silent */ }
 }
 
 function playMovementSound(audio: AudioState): void {
@@ -307,10 +254,12 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 	window.addEventListener("keydown", onKeyDown);
 	window.addEventListener("keyup", onKeyUp);
 
-	// ── Terrain ──
-
+	// Terrain
 	const terrainMat = new THREE.MeshStandardMaterial({
-		vertexColors: true, flatShading: true, roughness: 0.9, metalness: 0.0,
+		vertexColors: true,
+		flatShading: true,
+		roughness: 0.9,
+		metalness: 0.0,
 	});
 
 	const terrainChunks: TerrainChunk[] = [];
@@ -329,117 +278,94 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		terrainChunks.push(chunk);
 	}
 
-	// ── Coral Geos (OBJ from v2) ──
+	// ── Sand patch positions (sand biome ≥ 0.50) ──
+	// Distribution: 50% seagrass, 25% city, 25% plain
 
-	const coralGeos = await loadAllGeometries();
-
-	// ── World-locked positions: Corals, Rocks, Seagrass ──
-
-	const coralData: CoralDatum[] = [];
-	const rockPositions: { wx: number; wz: number }[] = [];
-	const seagrassDatum: { wx: number; wz: number; type: "algae" | "long" | "bushy" }[] = [];
-
-	const cTarget = 1200;
-	const rTarget = 120;
-	let ci = 0, ri = 0, si = 0;
-	while (ci < cTarget || ri < rTarget || si < 300) {
-		const wx = (hash2d(ci * 7 + 13, ci * 3 + 7) - 0.5) * 3000;
-		const wz = (hash2d(ci * 11 + 3, ci * 5 + 11) - 0.5) * 3000;
+	const sandPositions: {
+		wx: number; wz: number;
+		variant: "plain" | "seagrass" | "city";
+		cityVariant?: CityVariant;
+		seagrassType?: "algae" | "long" | "bushy";
+	}[] = [];
+	for (let si = 0; si < SAND_PATCH_COUNT * 4; si++) {
+		const wx = (hash2d(si * 19 + 3, si * 31 + 7) - 0.5) * 2800;
+		const wz = (hash2d(si * 23 + 11, si * 17 + 5) - 0.5) * 2800;
 		const biome = getBiome(wx, wz);
-
-		if (ci < cTarget && biome < 0.55) {
-			const typeIdx = Math.floor(hash2d(wx * 100, wz * 100) * CORAL_TYPES);
-			const color = CORAL_COLORS[Math.floor(hash2d(wx * 50, wz * 50) * CORAL_COLORS.length)];
-			coralData.push({ wx, wz, typeIdx, color });
-			ci++;
-		} else if (ci < cTarget) {
-			ci++;
-		}
-
-		if (ri < rTarget && biome < 0.55 && hash2d(wx * 30, wz * 30) > 0.85) {
-			rockPositions.push({ wx, wz });
-			ri++;
-		}
-
-		if (biome >= 0.55 && biome < 0.75 && si < 300 && hash2d(wx * 20, wz * 20) > 0.92) {
-			const type: "algae" | "long" | "bushy" =
-				hash2d(wx * 7, wz * 11) > 0.66 ? "bushy" :
-				hash2d(wx * 13, wz * 17) > 0.5 ? "long" : "algae";
-			seagrassDatum.push({ wx, wz, type });
-			si++;
+		if (biome >= 0.50) {
+			const roll = hash2d(wx * 13, wz * 17);
+			let variant: "plain" | "seagrass" | "city";
+			if (roll < 0.5) variant = "seagrass";
+			else if (roll < 0.75) variant = "city";
+			else variant = "plain";
+			const entry: typeof sandPositions[number] = { wx, wz, variant };
+			if (variant === "city") entry.cityVariant = CITY_VARIANTS[Math.floor(hash2d(wx * 7, wz * 11) * CITY_VARIANTS.length)];
+			if (variant === "seagrass") entry.seagrassType = SEAGRASS_TYPES[Math.floor(hash2d(wx * 5, wz * 13) * SEAGRASS_TYPES.length)];
+			sandPositions.push(entry);
+			if (sandPositions.length >= SAND_PATCH_COUNT) break;
 		}
 	}
 
-	// ── Rock geometry ──
-
-	const rockGeo = createRockGeometry();
-	const rockMat = new THREE.MeshStandardMaterial({
-		vertexColors: true, roughness: 0.8, flatShading: true,
-	});
-
-	// ── Creatures ──
-
-	let fishSchool: FishSchool | null = null;
-	let sharkPack: SharkPack | null = null;
-	let dolphinPod: DolphinPod | null = null;
-	let jellySwarm: JellySwarm | null = null;
-
-	try {
-		const fishGeo = await loadFishGeometry();
-		fishSchool = createFishSchool(FISH_COUNT, fishGeo ?? undefined);
-		scene.add(fishSchool.mesh);
-	} catch {
-		fishSchool = createFishSchool(FISH_COUNT);
-		scene.add(fishSchool.mesh);
-	}
-
-	try {
-		const sharkGeo = await loadSharkGeometry();
-		sharkPack = createSharkPack(SHARK_COUNT, sharkGeo ?? undefined);
-		scene.add(sharkPack.mesh);
-	} catch {
-		sharkPack = createSharkPack(SHARK_COUNT);
-		scene.add(sharkPack.mesh);
-	}
-
-	try {
-		const dolphinGeo = await loadDolphinGeometry();
-		dolphinPod = createDolphinPod(DOLPHIN_COUNT, dolphinGeo ?? undefined);
-		scene.add(dolphinPod.mesh);
-	} catch {
-		dolphinPod = createDolphinPod(DOLPHIN_COUNT);
-		scene.add(dolphinPod.mesh);
-	}
-
-	jellySwarm = createJellySwarm(JELLY_COUNT);
-	scene.add(jellySwarm.mesh);
-
-	// ── City ──
-
-	const city = createCity("zentrum");
-	scene.add(city.group);
-
-	// ── Echo ──
-
-	const echoSystem = createEchoVariant(ECHO_VARIANTS.scan);
-	scene.add(echoSystem.group);
-
-	// ── Water surface ──
-
+	// Water surface
 	const waterMat = new THREE.MeshPhysicalMaterial({
-		color: 0x1a6a9a, transparent: true, opacity: 0.35,
-		roughness: 0.0, metalness: 0.0, side: THREE.DoubleSide,
+		color: 0x1a6a9a,
+		transparent: true,
+		opacity: 0.35,
+		roughness: 0.0,
+		metalness: 0.0,
+		side: THREE.DoubleSide,
 	});
-	const water = new THREE.Mesh(new THREE.CircleGeometry(600, 64), waterMat);
+	const water = new THREE.Mesh(new THREE.CircleGeometry(2000, 64), waterMat);
 	water.rotation.x = -Math.PI / 2;
 	water.position.y = WATER_SURFACE_Y;
 	water.renderOrder = 1;
 	scene.add(water);
 
+	// Lighting
+	const ambient = new THREE.AmbientLight(0x4488cc, 1.0);
+	scene.add(ambient);
+	const sun = new THREE.DirectionalLight(0xffeedd, 2.0);
+	sun.position.set(200, 300, -100);
+	scene.add(sun);
+
+	// Fog
 	scene.fog = new THREE.Fog(0x001020, 10, 180);
 
-	// ── Audio ──
+	// Coral field
+	const CORAL_COLORS = [0xff4466, 0xff8844, 0xffcc44, 0x44ff88, 0x66ddff, 0xdd66ff, 0xff66aa, 0x88ff66, 0xffaa44, 0x66ffcc];
+	const coralGeos = [0, 1, 2, 3, 4].map((t) => createProceduralCoralGeometry(t));
+	const coralMeshes: THREE.InstancedMesh[] = [];
+	for (let ti = 0; ti < 5; ti++) {
+		const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6, metalness: 0.05 });
+		const mesh = new THREE.InstancedMesh(coralGeos[ti], mat, CORAL_MAX_PER_TYPE);
+		mesh.frustumCulled = true;
+		const colors = new Float32Array(CORAL_MAX_PER_TYPE * 3);
+		mesh.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
+		scene.add(mesh);
+		coralMeshes.push(mesh);
+	}
+	const coralPositions: { wx: number; wz: number; type: number; color: number }[] = [];
+	for (let ci = 0; ci < CORAL_MAX_PER_TYPE * 5; ci++) {
+		const wx = (hash2d(ci * 37 + 5, ci * 41 + 13) - 0.5) * 3000;
+		const wz = (hash2d(ci * 43 + 17, ci * 29 + 7) - 0.5) * 3000;
+		const biome = getBiome(wx, wz);
+		if (biome >= 0.25 && biome < 0.50) {
+			const type = Math.floor(hash2d(wx * 11, wz * 17) * 5);
+			const color = CORAL_COLORS[Math.floor(hash2d(wx * 3, wz * 7) * CORAL_COLORS.length)];
+			coralPositions.push({ wx, wz, type, color });
+		}
+	}
 
+	// Fish
+	const fishModel = await loadFishGeometry();
+	const fishSchools: FishSchool[] = [];
+	for (const cfg of STANDARD_SCHOOL_CONFIGS) {
+		const school = createFishSchool(cfg.count, fishModel ?? undefined, cfg.spread, cfg.heightRange);
+		school.mesh.position.set(0, 0, 0);
+		scene.add(school.mesh);
+		fishSchools.push(school);
+	}
+
+	// Audio
 	let audio: AudioState | null = null;
 	try {
 		const audioCtx = new AudioContext();
@@ -450,23 +376,30 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		loadAudioAssets(audio);
 	} catch { /* audio unavailable */ }
 
-	// Wire echo to audio
-	if (audio && audio.echoBuffer) {
-		echoSystem.setAudio(audio.ctx, audio.echoBuffer);
-	}
-
 	return {
-		camera, scene,
-		driftSpeed: 2, wasdSpeed: 6,
-		lightIntensity: 1.5, terrainAmplitude: amplitude, terrainScale: scale, terrainColor: "#ffffff",
-		terrainChunks, pendingChunks: [], prevGx: 0, prevGz: 0, terrainMat,
-		coralGeos, coralData, coralMeshes: [],
-		rockGeo, rockPositions, rockMeshes: [], rockMat,
-		seagrassData: [],
-		fishSchool, sharkPack, dolphinPod, jellySwarm,
-		city, cityActive: false, cityFound: false, cityX: 0, cityZ: 0,
-		echoSystem, echoEnabled: true, echoTimer: 0,
-		waterSurface: water, audio, keys,
+		camera,
+		scene,
+		driftSpeed: 2,
+		wasdSpeed: 6,
+		lightIntensity: 1.5,
+		terrainAmplitude: amplitude,
+		terrainScale: scale,
+		terrainColor: "#ffffff",
+		terrainChunks,
+		pendingChunks: [],
+		prevGx: 0,
+		prevGz: 0,
+		terrainMat,
+		sandEntries: [],
+		sandPositions,
+		waterSurface: water,
+		audio,
+		keys,
+		cityGuidance: [],
+		fishSchools,
+		coralMeshes,
+		coralGeos,
+		coralPositions,
 	};
 }
 
@@ -517,10 +450,6 @@ export function tick(
 	driftDir.normalize();
 	pos.add(driftDir.multiplyScalar(s.driftSpeed * delta));
 
-	// W/S vertical
-	if (s.keys.has("KeyW")) pos.y += s.wasdSpeed * delta;
-	if (s.keys.has("KeyS")) pos.y -= s.wasdSpeed * delta;
-
 	// ── Collision ──
 
 	const terrainY = getTerrainHeight(pos.x, pos.z, s.terrainAmplitude, s.terrainScale);
@@ -560,261 +489,152 @@ export function tick(
 
 	if (s.pendingChunks.length > 0) {
 		const batch = s.pendingChunks.splice(0, 2);
-		const bc = new THREE.Color(s.terrainColor);
+		const baseColor = new THREE.Color(s.terrainColor);
 		for (const p of batch) {
-			const chunk = createTerrainChunk(p.gx, p.gz, s.terrainAmplitude, s.terrainScale, bc, s.terrainMat);
+			const chunk = createTerrainChunk(p.gx, p.gz, s.terrainAmplitude, s.terrainScale, baseColor, s.terrainMat);
 			s.scene.add(chunk.mesh);
 			s.terrainChunks.push(chunk);
 		}
 	}
 
-	// ── Coral Streaming ──
+	// ── Sand Biome Entries (plain / seagrass / city) ──
 
-	const coralLoaded = new Set(s.coralMeshes.map((m) => `${m.userData.wx},${m.userData.wz}`));
-	for (let i = s.coralMeshes.length - 1; i >= 0; i--) {
-		const m = s.coralMeshes[i];
-		const dx = m.userData.wx - pos.x;
-		const dz = m.userData.wz - pos.z;
-		if (dx * dx + dz * dz > 450 * 450) {
-			s.scene.remove(m);
-			m.geometry.dispose();
-			(m.material as THREE.MeshStandardMaterial).dispose();
-			s.coralMeshes.splice(i, 1);
-		}
-	}
-
-	let cLoaded = 0;
-	for (const cd of s.coralData) {
-		if (cLoaded >= CORAL_STREAM_PER_FRAME) break;
-		const key = `${cd.wx},${cd.wz}`;
-		if (coralLoaded.has(key)) continue;
-		const dx = cd.wx - pos.x;
-		const dz = cd.wz - pos.z;
-		const dSq = dx * dx + dz * dz;
-		const maxR = (dx * driftDir.x + dz * driftDir.z > 0 ? STREAM_FWD_RADIUS : STREAM_BACK_RADIUS);
-		if (dSq > maxR * maxR) continue;
-		const srcGeo = s.coralGeos[cd.typeIdx] ?? createProceduralCoralGeometry(cd.typeIdx);
-		const geo = srcGeo.clone();
-		const mat = new THREE.MeshStandardMaterial({
-			color: cd.color, flatShading: true, roughness: 0.7,
-		});
-		const mesh = new THREE.Mesh(geo, mat);
-		const h = getTerrainHeight(cd.wx, cd.wz, s.terrainAmplitude, s.terrainScale);
-		mesh.position.set(cd.wx, h + hash2d(cd.wx, cd.wz) * 2, cd.wz);
-		const scl = 0.04 + hash2d(cd.wx * 3, cd.wz * 7) * 0.06;
-		mesh.scale.setScalar(scl);
-		mesh.rotation.set(0, hash2d(cd.wx * 10, cd.wz * 10) * Math.PI * 2, 0);
-		mesh.userData = { wx: cd.wx, wz: cd.wz };
-		s.scene.add(mesh);
-		s.coralMeshes.push(mesh);
-		cLoaded++;
-	}
-
-	// ── Rock Streaming ──
-
-	const rockLoaded = new Set(s.rockMeshes.map((m) => `${m.userData.wx},${m.userData.wz}`));
-	for (let i = s.rockMeshes.length - 1; i >= 0; i--) {
-		const m = s.rockMeshes[i];
-		const dx = m.userData.wx - pos.x;
-		const dz = m.userData.wz - pos.z;
-		if (dx * dx + dz * dz > 450 * 450) {
-			s.scene.remove(m);
-			m.geometry.dispose();
-			s.rockMeshes.splice(i, 1);
-		}
-	}
-
-	let rLoaded = 0;
-	for (const rp of s.rockPositions) {
-		if (rLoaded >= ROCK_STREAM_PER_FRAME) break;
-		const key = `${rp.wx},${rp.wz}`;
-		if (rockLoaded.has(key)) continue;
-		const dx = rp.wx - pos.x;
-		const dz = rp.wz - pos.z;
-		if (dx * dx + dz * dz > STREAM_INIT_RADIUS * STREAM_INIT_RADIUS) continue;
-		const h = getTerrainHeight(rp.wx, rp.wz, s.terrainAmplitude, s.terrainScale) - 0.5;
-		const mesh = new THREE.Mesh(s.rockGeo, s.rockMat);
-		const rs = 0.5 + hash2d(rp.wx * 5, rp.wz * 7) * 2;
-		mesh.position.set(rp.wx, h + rs * 0.15, rp.wz);
-		mesh.scale.set(rs, rs * (0.6 + hash2d(rp.wx * 3, rp.wz * 11) * 0.4), rs);
-		mesh.rotation.set(hash2d(rp.wx, rp.wz) * 0.4, hash2d(rp.wx * 10, rp.wz * 10) * Math.PI * 2, hash2d(rp.wx * 7, rp.wz * 13) * 0.2);
-		mesh.userData = { wx: rp.wx, wz: rp.wz };
-		s.scene.add(mesh);
-		s.rockMeshes.push(mesh);
-		rLoaded++;
-	}
-
-	// ── Seagrass Meadow Streaming ──
-
-	for (let i = s.seagrassData.length - 1; i >= 0; i--) {
-		const sd = s.seagrassData[i];
-		const dx = sd.wx - pos.x;
-		const dz = sd.wz - pos.z;
+	for (let i = s.sandEntries.length - 1; i >= 0; i--) {
+		const e = s.sandEntries[i];
+		const dx = e.wx - pos.x;
+		const dz = e.wz - pos.z;
 		if (dx * dx + dz * dz > 400 * 400) {
-			disposeSeagrassMeadow(sd.meadow, s.scene);
-			s.seagrassData.splice(i, 1);
+			disposeDuneSand(e.dune, s.scene);
+			if (e.meadow) disposeSeagrassMeadow(e.meadow, s.scene);
+			if (e.city) disposeCity(e.city, s.scene);
+			s.sandEntries.splice(i, 1);
 		}
 	}
 
-	if (s.seagrassData.length < 8) {
-		const sgTypes: ("algae" | "long" | "bushy")[] = ["algae", "long", "bushy"];
-		for (let tryI = 0; tryI < SEAGRASS_STREAM_PER_FRAME && s.seagrassData.length < 12; tryI++) {
-			const cx = pos.x + (hash2d(elapsed + tryI * 7, tryI * 13) - 0.5) * 300;
-			const cz = pos.z + (hash2d(tryI * 11, elapsed + tryI * 17) - 0.5) * 300;
-			const biome = getBiome(cx, cz);
-			if (biome >= 0.55 && biome < 0.75) {
-				const type = sgTypes[Math.floor(hash2d(cx * 7, cz * 11) * 3)];
-				const meadow = createSeagrassMeadow(type, (x: number, z: number) => getTerrainHeight(x, z, s.terrainAmplitude, s.terrainScale));
+	if (s.sandEntries.length < 10) {
+		const loaded = new Set(s.sandEntries.map((e) => `${e.wx},${e.wz}`));
+		for (const sp of s.sandPositions) {
+			if (s.sandEntries.length >= 10 + SAND_STREAM_PER_FRAME) break;
+			const key = `${sp.wx},${sp.wz}`;
+			if (loaded.has(key)) continue;
+			const dx = sp.wx - pos.x;
+			const dz = sp.wz - pos.z;
+			if (dx * dx + dz * dz > STREAM_INIT_RADIUS * STREAM_INIT_RADIUS) continue;
+
+			const dune = createDuneSand();
+			const sy = getTerrainHeight(sp.wx, sp.wz, s.terrainAmplitude, s.terrainScale);
+			dune.terrain.position.set(sp.wx, sy, sp.wz);
+			s.scene.add(dune.terrain);
+
+			let meadow: SeagrassMeadow | undefined;
+			let city: CityResult | undefined;
+
+			if (sp.variant === "seagrass" && sp.seagrassType) {
+				meadow = createSeagrassMeadow(sp.seagrassType, (x, z) => getTerrainHeight(x, z, s.terrainAmplitude, s.terrainScale));
 				s.scene.add(meadow.group);
-				s.seagrassData.push({ wx: cx, wz: cz, type, meadow });
 			}
+
+			if (sp.variant === "city" && sp.cityVariant) {
+				city = createCity(sp.cityVariant);
+				const sy = getTerrainHeight(sp.wx, sp.wz, s.terrainAmplitude, s.terrainScale);
+				city.group.position.set(sp.wx, sy, sp.wz);
+				city.group.visible = true;
+				s.scene.add(city.group);
+			}
+
+			s.sandEntries.push({
+				wx: sp.wx, wz: sp.wz,
+				variant: sp.variant,
+				cityVariant: sp.cityVariant,
+				seagrassType: sp.seagrassType,
+				dune, meadow, city,
+			});
 		}
 	}
 
-	for (const sd of s.seagrassData) {
-		updateSeagrassSway(sd.meadow, elapsed, sd.type);
+	for (const e of s.sandEntries) {
+		if (e.meadow && e.seagrassType) updateSeagrassSway(e.meadow, elapsed, e.seagrassType);
+		if (e.city && e.cityVariant) {
+			const sy = getTerrainHeight(e.wx, e.wz, s.terrainAmplitude, s.terrainScale);
+			updateCityPulse(e.city, elapsed, true, sy);
+		}
+	}
+
+	// ── City Guidance Paths ──
+
+	const cityKeys = new Set(s.sandEntries.filter((e) => e.city).map((e) => `${e.wx},${e.wz}`));
+	for (let i = s.cityGuidance.length - 1; i >= 0; i--) {
+		if (!cityKeys.has(s.cityGuidance[i].key)) {
+			s.scene.remove(s.cityGuidance[i].path.group);
+			s.cityGuidance[i].path.dispose();
+			s.cityGuidance.splice(i, 1);
+		}
+	}
+	for (const e of s.sandEntries) {
+		if (!e.city) continue;
+		const key = `${e.wx},${e.wz}`;
+		if (s.cityGuidance.some((g) => g.key === key)) continue;
+		const sy = getTerrainHeight(e.wx, e.wz, s.terrainAmplitude, s.terrainScale);
+		const dir = new THREE.Vector3(e.wx - pos.x, 0, e.wz - pos.z).normalize();
+		const start = new THREE.Vector3(e.wx - dir.x * 120, sy + 12, e.wz - dir.z * 120);
+		const mid = new THREE.Vector3(e.wx - dir.x * 40, sy + 24, e.wz - dir.z * 40);
+		const end = new THREE.Vector3(e.wx, sy + 3, e.wz);
+		const path = createGuidancePath(VARIANT_CONFIGS.city, [start, mid, end]);
+		s.scene.add(path.group);
+		s.cityGuidance.push({ key, path });
+	}
+	for (const g of s.cityGuidance) {
+		g.path.update(elapsed);
+	}
+
+	// ── Coral streaming ──
+
+	const cDummy = new THREE.Object3D();
+	const cCol = new THREE.Color();
+	const typeCounts = [0, 0, 0, 0, 0];
+	for (const cp of s.coralPositions) {
+		const dx = cp.wx - pos.x;
+		const dz = cp.wz - pos.z;
+		if (dx * dx + dz * dz > CORAL_STREAM_RADIUS * CORAL_STREAM_RADIUS) continue;
+		const ti = cp.type;
+		if (typeCounts[ti] >= CORAL_MAX_PER_TYPE) continue;
+		const sy = getTerrainHeight(cp.wx, cp.wz, s.terrainAmplitude, s.terrainScale);
+		const size = 0.4 + hash2d(cp.wx * 7, cp.wz * 13) * 1.8;
+		const si = typeCounts[ti];
+		cDummy.position.set(cp.wx, sy + size * 0.3, cp.wz);
+		cDummy.scale.setScalar(size);
+		cDummy.rotation.set(0, hash2d(cp.wx * 5, cp.wz * 11) * Math.PI * 2, 0);
+		cDummy.updateMatrix();
+		s.coralMeshes[ti].setMatrixAt(si, cDummy.matrix);
+		cCol.setHex(cp.color);
+		s.coralMeshes[ti].setColorAt(si, cCol);
+		typeCounts[ti]++;
+	}
+	for (let ti = 0; ti < 5; ti++) {
+		s.coralMeshes[ti].count = typeCounts[ti];
+		s.coralMeshes[ti].instanceMatrix.needsUpdate = true;
+		s.coralMeshes[ti].instanceColor!.needsUpdate = true;
 	}
 
 	// ── Fish ──
 
-	if (s.fishSchool) {
-		const fishCenter = new THREE.Vector3(pos.x, pos.y + 10, pos.z);
-		updateFishSchool(s.fishSchool, delta, elapsed, "schooling", "boids", fishCenter);
-		s.fishSchool.mesh.position.set(pos.x, pos.y, pos.z);
-	}
-
-	// ── Sharks ──
-
-	if (s.sharkPack) {
-		const sharkCenter = new THREE.Vector3(pos.x, pos.y + 5, pos.z);
-		updateSharkPack(s.sharkPack, delta, elapsed, "patrol");
-		s.sharkPack.mesh.position.set(pos.x, pos.y, pos.z);
-	}
-
-	// ── Dolphins ──
-
-	if (s.dolphinPod) {
-		const dolphCenter = new THREE.Vector3(pos.x, pos.y + 8, pos.z);
-		updateDolphinPod(s.dolphinPod, delta, elapsed, "leisurely", dolphCenter);
-		s.dolphinPod.mesh.position.set(pos.x, pos.y, pos.z);
-	}
-
-	// ── Jellyfish ──
-
-	if (s.jellySwarm) {
-		updateJellySwarm(s.jellySwarm, delta, elapsed, "drifting");
-		s.jellySwarm.mesh.position.set(pos.x, pos.y + 15, pos.z);
-	}
-
-	// ── City ──
-
-	if (s.city) {
-		let nearCityBiome = false;
-		const biomeVal = getBiome(pos.x, pos.z);
-		if (biomeVal >= 0.75) {
-			const h = getTerrainHeight(pos.x, pos.z, s.terrainAmplitude, s.terrainScale);
-			let flat = true;
-			for (let a = 0; a < 8; a++) {
-				const angle = (a / 8) * Math.PI * 2;
-				const sx = pos.x + Math.cos(angle) * 40;
-				const sz = pos.z + Math.sin(angle) * 40;
-				const sh = getTerrainHeight(sx, sz, s.terrainAmplitude, s.terrainScale);
-				if (Math.abs(sh - h) > 4) { flat = false; break; }
-			}
-			nearCityBiome = flat;
-		}
-
-		if (!s.cityFound && nearCityBiome) {
-			s.cityX = pos.x;
-			s.cityZ = pos.z;
-			s.cityFound = true;
-		}
-
-		if (s.cityFound) {
-			const dSq = (pos.x - s.cityX) ** 2 + (pos.z - s.cityZ) ** 2;
-			const active = dSq < CITY_ACTIVATE_DSQ;
-			const newY = getTerrainHeight(s.cityX, s.cityZ, s.terrainAmplitude, s.terrainScale);
-			updateCityPulse(s.city, elapsed, active, newY + 8);
-			s.cityActive = active;
-		}
-
-		// City audio crossfade
-		if (s.audio) {
-			const dist = s.cityFound
-				? Math.sqrt((pos.x - s.cityX) ** 2 + (pos.z - s.cityZ) ** 2)
-				: 9999;
-			const targetCity = THREE.MathUtils.clamp(1 - (dist - 100) / 400, 0, s.cityActive ? 1 : 0);
-			s.audio.cityBlend += (targetCity - s.audio.cityBlend) * delta * 2;
-			if (s.audio.cityGain) s.audio.cityGain.gain.value = s.audio.cityBlend * 0.5;
-		}
-	}
-
-	// ── Echo Rings ──
-
-	if (s.echoSystem && s.echoEnabled) {
-		s.echoTimer += delta;
-		if (s.echoTimer >= ECHO_EMIT_INTERVAL) {
-			s.echoTimer = 0;
-			const sources: [number, number, number][] = [];
-			// Fish positions
-			if (s.fishSchool) {
-				for (let i = 0; i < s.fishSchool.count; i += 10) {
-					const i3 = i * 3;
-					sources.push([
-						s.fishSchool.mesh.position.x + s.fishSchool.positions[i3],
-						s.fishSchool.mesh.position.y + s.fishSchool.positions[i3 + 1],
-						s.fishSchool.mesh.position.z + s.fishSchool.positions[i3 + 2],
-					]);
-				}
-			}
-			// Sharks
-			if (s.sharkPack) {
-				for (let i = 0; i < s.sharkPack.count; i++) {
-					const i3 = i * 3;
-					sources.push([
-						s.sharkPack.mesh.position.x + s.sharkPack.positions[i3],
-						s.sharkPack.mesh.position.y + s.sharkPack.positions[i3 + 1],
-						s.sharkPack.mesh.position.z + s.sharkPack.positions[i3 + 2],
-					]);
-				}
-			}
-			// Dolphins
-			if (s.dolphinPod) {
-				for (let i = 0; i < s.dolphinPod.count; i++) {
-					const i3 = i * 3;
-					sources.push([
-						s.dolphinPod.mesh.position.x + s.dolphinPod.positions[i3],
-						s.dolphinPod.mesh.position.y + s.dolphinPod.positions[i3 + 1],
-						s.dolphinPod.mesh.position.z + s.dolphinPod.positions[i3 + 2],
-					]);
-				}
-			}
-			// Jellyfish
-			if (s.jellySwarm) {
-				for (let i = 0; i < s.jellySwarm.count; i += 2) {
-					const i3 = i * 3;
-					sources.push([
-						s.jellySwarm.mesh.position.x + s.jellySwarm.positions[i3],
-						s.jellySwarm.mesh.position.y + s.jellySwarm.positions[i3 + 1],
-						s.jellySwarm.mesh.position.z + s.jellySwarm.positions[i3 + 2],
-					]);
-				}
-			}
-			// Emit from a random subset
-			const shuffled = sources.sort(() => Math.random() - 0.5);
-			const emitCount = Math.min(8, shuffled.length);
-			for (let i = 0; i < emitCount; i++) {
-				const [ex, ey, ez] = shuffled[i];
-				s.echoSystem.emit(ex, ey, ez);
-			}
-		}
-		s.echoSystem.update(delta);
+	const behindDir = new THREE.Vector3(0, 0, 1).applyQuaternion(ctx.camera.quaternion);
+	const fishTerrain = (wx: number, wz: number) => getTerrainHeight(wx, wz, s.terrainAmplitude, s.terrainScale);
+	for (let fi = 0; fi < s.fishSchools.length; fi++) {
+		const school = s.fishSchools[fi];
+		const behind = new THREE.Vector3(
+			pos.x + behindDir.x * (8 + fi * 4),
+			Math.max(pos.y - 3, 0),
+			pos.z + behindDir.z * (8 + fi * 4),
+		);
+		school.mesh.position.copy(behind);
+		updateFishSchool(school, delta, elapsed, STANDARD_SCHOOL_CONFIGS[fi].swimMode, behind, fishTerrain);
+		school.material.emissiveIntensity = 0.3 + Math.sin(elapsed * 0.5 + fi) * 0.2;
 	}
 
 	// ── Water Surface ──
 
-	const waveBob = WATER_SURFACE_Y + Math.sin(elapsed * 0.1) * 0.5;
-	s.waterSurface.position.y = waveBob;
+	s.waterSurface.position.y = WATER_SURFACE_Y + Math.sin(elapsed * 0.1) * 0.5;
 	(s.waterSurface.material as THREE.MeshPhysicalMaterial).opacity = 0.3 + Math.sin(elapsed * 0.15) * 0.08;
 
 	// ── Audio ──
@@ -823,7 +643,7 @@ export function tick(
 		const a = s.audio;
 		if (a.ctx.state === "suspended") a.ctx.resume();
 
-		const targetSurface = THREE.MathUtils.clamp((pos.y - 40) / 30, 0, 1);
+		const targetSurface = THREE.MathUtils.clamp((pos.y - 460) / 30, 0, 1);
 		a.surfaceBlend += (targetSurface - a.surfaceBlend) * delta * 2;
 		a.surfaceGain.gain.value = a.surfaceBlend * 0.35;
 
@@ -842,39 +662,43 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 	for (const ch of s.terrainChunks) {
 		disposeTerrainChunk(ch, scene);
 	}
-	s.terrainMat.dispose();
 
-	for (const m of s.coralMeshes) {
-		scene.remove(m);
-		m.geometry.dispose();
-		(m.material as THREE.MeshStandardMaterial).dispose();
-	}
-	for (const geo of s.coralGeos) {
-		if (geo) geo.dispose();
-	}
+	const toRemove: THREE.Object3D[] = [];
+	scene.traverse((child) => {
+		if (child instanceof THREE.AmbientLight || child instanceof THREE.DirectionalLight) {
+			toRemove.push(child);
+		}
+	});
+	for (const l of toRemove) scene.remove(l);
+	scene.fog = null;
 
-	for (const m of s.rockMeshes) {
-		scene.remove(m);
-	}
-	s.rockGeo.dispose();
-	s.rockMat.dispose();
-
-	for (const sd of s.seagrassData) {
-		disposeSeagrassMeadow(sd.meadow, scene);
+	for (const e of s.sandEntries) {
+		disposeDuneSand(e.dune, scene);
+		if (e.meadow) disposeSeagrassMeadow(e.meadow, scene);
+		if (e.city) disposeCity(e.city, scene);
 	}
 
-	if (s.fishSchool) disposeFishSchool(s.fishSchool, scene);
-	if (s.sharkPack) disposeSharkPack(s.sharkPack, scene);
-	if (s.dolphinPod) disposeDolphinPod(s.dolphinPod, scene);
-	if (s.jellySwarm) disposeJellySwarm(s.jellySwarm, scene);
-
-	if (s.city) disposeCity(s.city, scene);
-
-	if (s.echoSystem) s.echoSystem.dispose();
+	for (const g of s.cityGuidance) {
+		g.path.dispose();
+		scene.remove(g.path.group);
+	}
 
 	s.waterSurface.geometry.dispose();
 	(s.waterSurface.material as THREE.MeshPhysicalMaterial).dispose();
 	scene.remove(s.waterSurface);
+
+	for (const school of s.fishSchools) {
+		disposeFishSchool(school, scene);
+	}
+
+	for (const mesh of s.coralMeshes) {
+		scene.remove(mesh);
+		mesh.geometry.dispose();
+		(mesh.material as THREE.Material).dispose();
+	}
+	for (const geo of s.coralGeos) geo.dispose();
+
+	s.terrainMat.dispose();
 
 	if (s.audio) {
 		try { s.audio.ctx.close(); } catch { /* ignore */ }

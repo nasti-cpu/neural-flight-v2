@@ -1,22 +1,8 @@
 <script lang="ts">
 import { onMount, onDestroy } from "svelte";
 import * as THREE from "three";
-import { createDolphinPod, updateDolphinPod, disposeDolphinPod, loadDolphinGeometry } from "$lib/experiences/underwater-world v2/Objekte/Delfine/dolphin";
+import { createDolphinPod, updateDolphinPod, disposeDolphinPod, loadDolphinGeometry, DOLPHIN_MODE_META } from "$lib/experiences/underwater-world v2/Objekte/Delfine/dolphin";
 import type { DolphinMode } from "$lib/experiences/underwater-world v2/Objekte/Delfine/dolphin";
-
-type Mode = "leisurely" | "fast" | "pod";
-
-interface ModeDef {
-	id: Mode;
-	label: string;
-	count: number;
-}
-
-const MODES: ModeDef[] = [
-	{ id: "leisurely", label: "Gemütlich", count: 1 },
-	{ id: "fast", label: "Schnell", count: 1 },
-	{ id: "pod", label: "Gruppe", count: 3 },
-];
 
 let canvas: HTMLCanvasElement;
 let renderer: THREE.WebGLRenderer;
@@ -26,14 +12,14 @@ let pod: ReturnType<typeof createDolphinPod> | null = null;
 let clock = new THREE.Clock();
 let modelGeo: THREE.BufferGeometry | null = null;
 
-let currentMode = $state<Mode>("leisurely");
+let currentMode = $state<DolphinMode>("leisurely");
 
-function rebuild(mode: Mode): void {
+function rebuild(mode: DolphinMode): void {
 	if (pod) {
 		disposeDolphinPod(pod, scene);
 		pod = null;
 	}
-	const def = MODES.find((m) => m.id === mode)!;
+	const def = DOLPHIN_MODE_META.find((m) => m.id === mode)!;
 	pod = createDolphinPod(def.count, modelGeo ?? undefined);
 	scene.add(pod.mesh);
 }
@@ -61,7 +47,7 @@ onMount(async () => {
 	scene.add(grid);
 
 	modelGeo = await loadDolphinGeometry();
-	const def = MODES.find((m) => m.id === currentMode)!;
+	const def = DOLPHIN_MODE_META.find((m) => m.id === currentMode)!;
 	pod = createDolphinPod(def.count, modelGeo ?? undefined);
 	scene.add(pod.mesh);
 
@@ -70,7 +56,7 @@ onMount(async () => {
 	renderer.setAnimationLoop(() => {
 		const delta = Math.min(clock.getDelta(), 0.05);
 		if (pod) {
-			const def = MODES.find((m) => m.id === currentMode)!;
+			const def = DOLPHIN_MODE_META.find((m) => m.id === currentMode)!;
 			updateDolphinPod(pod, delta, clock.elapsedTime, def.id, center);
 		}
 		camera.position.set(0, 5, 40);
@@ -94,7 +80,7 @@ onDestroy(() => {
 	<div class="panel">
 		<h2>Modus</h2>
 		<div class="buttons">
-			{#each MODES as mode}
+			{#each DOLPHIN_MODE_META as mode}
 				<button
 					class:active={currentMode === mode.id}
 					onclick={() => {

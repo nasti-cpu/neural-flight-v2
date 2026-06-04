@@ -34,7 +34,7 @@ const CONFIG: Record<CityVariant, CityConfig> = {
 		domeColor: 0x886644,
 		domeEmissive: 0x553311,
 		lightColor: 0xffcc44,
-		lightIntensity: 6,
+		lightIntensity: 25,
 		glowColor: 0xff8844,
 	},
 	zentrum: {
@@ -48,7 +48,7 @@ const CONFIG: Record<CityVariant, CityConfig> = {
 		domeColor: 0x336688,
 		domeEmissive: 0x224466,
 		lightColor: 0xaaccff,
-		lightIntensity: 10,
+		lightIntensity: 35,
 		glowColor: 0x4488ff,
 	},
 	vorort: {
@@ -62,7 +62,7 @@ const CONFIG: Record<CityVariant, CityConfig> = {
 		domeColor: 0x88aa88,
 		domeEmissive: 0x446644,
 		lightColor: 0xffdd66,
-		lightIntensity: 4,
+		lightIntensity: 20,
 		glowColor: 0xddaa44,
 	},
 };
@@ -261,12 +261,13 @@ export function updateCityPulse(
 	result.group.visible = true;
 	result.group.position.y = worldY;
 
-	// Dome opacity pulse
+	// Dome glow pulse
+	result.domeMat.emissiveIntensity = 0.6 + Math.sin(elapsed * 0.4) * 0.3;
 	result.domeMat.opacity = 0.3 + Math.sin(elapsed * 0.4) * 0.06;
 
 	// Halo pulse
 	const haloScale = 1 + Math.sin(elapsed * 0.5) * 0.08;
-	result.glowHaloMat.opacity = 0.12 + Math.sin(elapsed * 0.6) * 0.04;
+	result.glowHaloMat.opacity = 0.3 + Math.sin(elapsed * 0.6) * 0.1;
 	result.group.children.forEach((child) => {
 		if (child instanceof THREE.Mesh && child.material === result.glowHaloMat) {
 			child.scale.setScalar(haloScale);

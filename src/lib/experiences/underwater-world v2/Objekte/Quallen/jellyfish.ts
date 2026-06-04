@@ -102,6 +102,17 @@ interface JellyConfig {
 	verticalFreq: number;
 }
 
+export interface JellyModeMeta {
+	id: JellyMode;
+	label: string;
+}
+
+export const JELLY_MODE_META: JellyModeMeta[] = [
+	{ id: "drifting", label: "Treibend" },
+	{ id: "pulsing", label: "Pulsierend" },
+	{ id: "bloom", label: "Blüte" },
+];
+
 const MODE_CONFIG: Record<JellyMode, JellyConfig> = {
 	drifting: {
 		speed: 0.6,

@@ -24,13 +24,13 @@ let reef: CoralReef | null = null;
 let currentMode = $state<CoralBiome>("shallow");
 let building = $state(false);
 
-async function rebuild(mode: CoralBiome): Promise<void> {
+function rebuild(mode: CoralBiome): void {
 	if (reef) {
 		disposeCoralReef(reef, scene);
 		reef = null;
 	}
 	building = true;
-	const tmp = await createCoralReef(mode);
+	const tmp = createCoralReef(mode);
 	scene.add(tmp.terrain);
 	scene.add(tmp.rocks);
 	for (const m of tmp.coralMeshes) scene.add(m);
@@ -38,7 +38,7 @@ async function rebuild(mode: CoralBiome): Promise<void> {
 	building = false;
 }
 
-onMount(async () => {
+onMount(() => {
 	renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 	renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 	renderer.setSize(window.innerWidth, window.innerHeight);
@@ -55,7 +55,7 @@ onMount(async () => {
 	sun.position.set(15, 30, 15);
 	scene.add(sun);
 
-	reef = await createCoralReef("shallow");
+	reef = createCoralReef("shallow");
 	scene.add(reef.terrain);
 	scene.add(reef.rocks);
 	for (const m of reef.coralMeshes) scene.add(m);
@@ -86,9 +86,9 @@ onDestroy(() => {
 				<button
 					class:active={currentMode === mode.id}
 					disabled={building}
-					onclick={async () => {
+					onclick={() => {
 						currentMode = mode.id;
-						await rebuild(mode.id);
+						rebuild(mode.id);
 					}}
 				>{mode.label}<span class="desc"> — {mode.description}</span></button>
 			{/each}

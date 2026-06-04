@@ -21,7 +21,7 @@ let renderer: THREE.WebGLRenderer;
 let scene: THREE.Scene;
 let camera: THREE.PerspectiveCamera;
 let city: CityResult | null = null;
-let elapsed = 0;
+let clock = new THREE.Clock();
 
 let currentMode = $state<CityVariant>("altstadt");
 let building = $state(false);
@@ -58,7 +58,7 @@ onMount(() => {
 	city.group.visible = true;
 
 	renderer.setAnimationLoop(() => {
-		elapsed += 0.016;
+		const elapsed = clock.elapsedTime;
 		camera.position.set(0, 30, 85);
 		camera.lookAt(0, 0, 0);
 		if (city) updateCityPulse(city, elapsed, true, 0);

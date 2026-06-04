@@ -4,6 +4,7 @@ import * as THREE from "three";
 import {
 	createEchoVariant,
 	ECHO_VARIANTS,
+	ECHO_VARIANT_KEYS,
 } from "$lib/experiences/underwater-world v2/Sinne/Echoortung/echoortung";
 import type { EchoVariant, EchoVariantSystem } from "$lib/experiences/underwater-world v2/Sinne/Echoortung/echoortung";
 
@@ -24,13 +25,6 @@ let lastMX = 0;
 let lastMY = 0;
 
 const EMIT_INTERVAL = 2.3;
-
-const variantKeys: EchoVariant[] = ["scan", "puls", "welle"];
-const variantColors: Record<EchoVariant, number> = {
-	scan: 0x00e5ff,
-	puls: 0xffaa44,
-	welle: 0xaa77ff,
-};
 
 const SOUND_PATHS: Record<EchoVariant, string> = {
 	scan: "/sounds/echo%201.mp3",
@@ -54,7 +48,7 @@ async function loadAudio() {
 	if (audioBuffers.size > 0) return;
 	initAudio();
 	if (!audioCtx) return;
-	for (const vk of variantKeys) {
+	for (const vk of ECHO_VARIANT_KEYS) {
 		try {
 			const res = await fetch(SOUND_PATHS[vk]);
 			if (!res.ok) { console.warn("audio fetch failed", res.status); continue; }
@@ -235,7 +229,7 @@ onDestroy(() => {
 	<div class="panel">
 		<h2>🔊 Echoortung</h2>
 		<div class="buttons">
-			{#each variantKeys as vk}
+			{#each ECHO_VARIANT_KEYS as vk}
 				{@const cfg = ECHO_VARIANTS[vk]}
 				<button
 					class:active={currentVariant === vk}

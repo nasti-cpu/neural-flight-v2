@@ -1,73 +1,281 @@
 import * as THREE from "three";
-import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 
 export type CoralBiome = "shallow" | "deep";
 
-// ── OBJ URLs (loaded from Objekte/Korallen/) ──
+// ── Procedural Coral Geometries (5 distinct types) ──
 
-const _objLoader = new OBJLoader();
-
-const _brainUrl = new URL("../../Objekte/Korallen/Brain_Coral_v1_L1.123c952dcd3e-dc3a-41a5-b56e-548475a0de97/20941_Brain_Coral_v1_NEW1.obj", import.meta.url).href;
-const _treeUrl = new URL("../../Objekte/Korallen/Tree_Coral_v2_L1.123c1b693a36-df33-4357-8bdb-fa7b5c1c4705/21488_Tree_Coral_v2_NEW.obj", import.meta.url).href;
-const _elkhornUrl = new URL("../../Objekte/Korallen/Elkhorn_Coral_v1_L1.123c162a38a6-812c-4bfe-93ca-46d6f6fa2d9b/21485_Elkhorn_Coral_v1.obj", import.meta.url).href;
-const _gorgonianUrl = new URL("../../Objekte/Korallen/Gorgonian_Soft_Coral_v1_L1.123cafe08258-2e9d-4e44-8094-0c6c8b63a0a0/21487_Gorgonian_Soft_Coral_v1.obj", import.meta.url).href;
-const _genericUrl = new URL("../../Objekte/Korallen/Coral_v1_L3.123c0f57868f-362d-45ca-a546-9c6138fb292d/10010_Coral_v1_L3.obj", import.meta.url).href;
-
-// ── Load helpers ──
-
-function autoFixOrientation(geo: THREE.BufferGeometry): void {
-	geo.computeBoundingBox();
-	if (!geo.boundingBox) return;
-	const sx = geo.boundingBox.max.x - geo.boundingBox.min.x;
-	const sy = geo.boundingBox.max.y - geo.boundingBox.min.y;
-	const sz = geo.boundingBox.max.z - geo.boundingBox.min.z;
+function displaceVertices(geo: THREE.BufferGeometry, fn: (x: number, y: number, z: number) => { x: number; y: number; z: number }): void {
 	const pos = geo.attributes.position;
-	if (sz > sy && sz >= sx) {
-		// Z is longest → rotate -PI/2 around X: (x,y,z) → (x, z, -y)
-		for (let i = 0; i < pos.count; i++) {
-			const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-			pos.setXYZ(i, x, z, -y);
-		}
-		pos.needsUpdate = true;
-		geo.computeVertexNormals();
-	} else if (sx > sy && sx >= sz) {
-		// X is longest → rotate +PI/2 around Z: (x,y,z) → (-y, x, z)
-		for (let i = 0; i < pos.count; i++) {
-			const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-			pos.setXYZ(i, -y, x, z);
-		}
-		pos.needsUpdate = true;
-		geo.computeVertexNormals();
+	for (let i = 0; i < pos.count; i++) {
+		const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+		const r = fn(x, y, z);
+		pos.setXYZ(i, r.x, r.y, r.z);
 	}
+	pos.needsUpdate = true;
+	geo.computeVertexNormals();
 }
 
-async function loadObjGeometry(url: string): Promise<THREE.BufferGeometry | null> {
-	try {
-		const obj = await new Promise<THREE.Group>((resolve, reject) => {
-			_objLoader.load(url, resolve, undefined, reject);
-		});
-		const meshes: THREE.Mesh[] = [];
-		obj.traverse((child) => {
-			if (child instanceof THREE.Mesh) meshes.push(child);
-		});
-		if (meshes.length === 0) return null;
-		const geo = meshes[0].geometry.clone();
-		geo.deleteAttribute("JOINTS_0");
-		geo.deleteAttribute("WEIGHTS_0");
-		geo.deleteAttribute("TEXCOORD_0");
+function addWhiteVertexColors(geo: THREE.BufferGeometry): void {
+	const count = geo.attributes.position.count;
+	const colors = new Float32Array(count * 3).fill(1);
+	geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+}
 
-		autoFixOrientation(geo);
+function noise3(x: number, y: number, z: number): number {
+	const n = Math.sin(x * 12.9898 + y * 78.233 + z * 45.164) * 43758.5453;
+	return n - Math.floor(n);
+}
 
-		geo.computeBoundingBox();
-		if (geo.boundingBox) {
-			const minY = geo.boundingBox.min.y;
-			const cx = (geo.boundingBox.max.x + geo.boundingBox.min.x) / 2;
-			const cz = (geo.boundingBox.max.z + geo.boundingBox.min.z) / 2;
-			geo.translate(-cx, -minY, -cz);
+function fbm3(x: number, y: number, z: number, octaves: number): number {
+	let val = 0, amp = 0.5, freq = 1;
+	for (let i = 0; i < octaves; i++) {
+		val += amp * (noise3(x * freq, y * freq, z * freq) - 0.5) * 2;
+		freq *= 2;
+		amp *= 0.5;
+	}
+	return val;
+}
+
+/** Type 0 — Brain coral (Diploria): hemispherical dome with meandering serpentine grooves */
+function createBrainCoralGeometry(): THREE.BufferGeometry {
+	const geo = new THREE.IcosahedronGeometry(0.5, 4);
+	const pos = geo.attributes.position;
+	const tmpV = new THREE.Vector3();
+	for (let i = 0; i < pos.count; i++) {
+		tmpV.set(pos.getX(i), pos.getY(i), pos.getZ(i));
+		const len = tmpV.length();
+		if (len < 0.001) continue;
+		const nx = tmpV.x / len, ny = tmpV.y / len, nz = tmpV.z / len;
+		const up = ny;
+		if (up < -0.15) { pos.setXYZ(i, 0, -0.5, 0); continue; }
+		const upFactor = Math.max(0, up);
+		const angle = Math.atan2(nz, nx);
+		const rAngle = Math.atan2(nz * 0.7 + nx * 0.7, nx * 0.7 - nz * 0.7);
+		const ridge1 = Math.abs(Math.sin(angle * 4 + rAngle * 3 + up * 2)) * 0.35;
+		const ridge2 = Math.abs(Math.sin(angle * 7 - up * 5 + 1.8)) * 0.2;
+		const ridge3 = Math.abs(Math.sin(angle * 11 + rAngle * 5 + up * 4 + 0.7)) * 0.12;
+		const valley = (1 - Math.abs(Math.sin(angle * 4 + rAngle * 3 + up * 2))) * 0.15;
+		const r = 0.5 + ridge1 + ridge2 + ridge3 - valley * 0.5 + upFactor * 0.1;
+		pos.setXYZ(i, nx * r, ny * r * 0.7, nz * r);
+	}
+	pos.needsUpdate = true;
+	geo.computeVertexNormals();
+	addWhiteVertexColors(geo);
+	return geo;
+}
+
+/** Type 1 — Tree coral (Dendrogyra): thick vertical branches with multiple fork levels */
+function createTreeCoralGeometry(): THREE.BufferGeometry {
+	const geos: THREE.BufferGeometry[] = [];
+	const segs = 7;
+	const trunk = new THREE.CylinderGeometry(0.08, 0.14, 0.6, segs);
+	trunk.translate(0, 0.3, 0);
+	geos.push(trunk);
+
+	// First-level branches from mid/upper trunk
+	const branchDefs = [
+		{ y: 0.35, ry: 0, rx: 0.5, len: 0.3, rBase: 0.08, rTip: 0.04 },
+		{ y: 0.38, ry: 1.2, rx: 0.7, len: 0.35, rBase: 0.09, rTip: 0.045 },
+		{ y: 0.4, ry: 2.5, rx: 0.45, len: 0.25, rBase: 0.07, rTip: 0.035 },
+		{ y: 0.42, ry: 3.8, rx: 0.6, len: 0.3, rBase: 0.08, rTip: 0.04 },
+		{ y: 0.45, ry: 5.0, rx: 0.55, len: 0.28, rBase: 0.07, rTip: 0.035 },
+	];
+	for (const b of branchDefs) {
+		const g = new THREE.CylinderGeometry(b.rTip, b.rBase, b.len, segs);
+		g.translate(0, b.len / 2, 0);
+		g.rotateX(b.rx);
+		g.rotateY(b.ry);
+		g.translate(0, b.y, 0);
+		geos.push(g);
+
+		// Sub-branch at tip
+		const subLen = b.len * 0.5;
+		const sg = new THREE.CylinderGeometry(b.rTip * 0.5, b.rTip * 0.8, subLen, segs);
+		sg.translate(0, subLen / 2, 0);
+		sg.rotateX(b.rx * 0.3 + 0.3);
+		sg.rotateY(b.ry + 0.8);
+		const tipX = Math.sin(b.rx) * Math.cos(b.ry) * b.len;
+		const tipY = b.y + Math.cos(b.rx) * b.len;
+		const tipZ = Math.sin(b.rx) * Math.sin(b.ry) * b.len;
+		sg.translate(tipX, tipY, tipZ);
+		geos.push(sg);
+	}
+
+	const merged = mergeBufferGeometries(geos);
+	merged.computeBoundingBox();
+	const minY = merged.boundingBox!.min.y;
+	merged.translate(0, -minY, 0);
+	addWhiteVertexColors(merged);
+	return merged;
+}
+
+/** Merge any array of BufferGeometries */
+function mergeBufferGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
+	const total = geos.reduce((s, g) => s + g.attributes.position.count, 0);
+	const pos = new Float32Array(total * 3);
+	const nrm = new Float32Array(total * 3);
+	let offset = 0;
+	for (const g of geos) {
+		g.computeVertexNormals();
+		const p = g.attributes.position.array as Float32Array;
+		const n = g.attributes.normal.array as Float32Array;
+		pos.set(p, offset * 3);
+		nrm.set(n, offset * 3);
+		offset += p.length / 3;
+	}
+	const out = new THREE.BufferGeometry();
+	out.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+	out.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+	return out;
+}
+
+/** Type 2 — Elkhorn coral (Acropora palmata): broad flat antler branches */
+function createElkhornCoralGeometry(): THREE.BufferGeometry {
+	const geos: THREE.BufferGeometry[] = [];
+	const segs = 6;
+
+	const addAntlerBranch = (x: number, y: number, z: number, w: number, h: number, d: number, ry: number, rx: number) => {
+		const g = new THREE.BoxGeometry(w, h, d, 4, 1, 2);
+		g.translate(0, h / 2, 0);
+		g.rotateX(rx);
+		g.rotateY(ry);
+		g.translate(x, y, z);
+		displaceGeometry(g, 0.08, 3, 4);
+		geos.push(g);
+	};
+
+	// Central stalk (flattened in Z)
+	const stalk = new THREE.BoxGeometry(0.08, 0.5, 0.25, 4, 4, 2);
+	displaceGeometry(stalk, 0.04, 2, 3);
+	geos.push(stalk);
+
+	// Antler branches spreading outward like elk horns
+	addAntlerBranch(0, 0.35, 0, 0.35, 0.3, 0.12, -0.3, 0.4);
+	addAntlerBranch(0, 0.35, 0, 0.35, 0.3, 0.12,  0.3, 0.4);
+	addAntlerBranch(0, 0.45, 0, 0.25, 0.25, 0.1, -0.8, 0.6);
+	addAntlerBranch(0, 0.45, 0, 0.25, 0.25, 0.1,  0.8, 0.6);
+	addAntlerBranch(0, 0.5, 0, 0.2, 0.2, 0.08,  -1.6, 0.8);
+	addAntlerBranch(0, 0.5, 0, 0.2, 0.2, 0.08,   1.6, 0.8);
+	addAntlerBranch(0, 0.55, 0, 0.15, 0.15, 0.06, -2.4, 1.0);
+	addAntlerBranch(0, 0.55, 0, 0.15, 0.15, 0.06,  2.4, 1.0);
+
+	const merged = mergeBufferGeometries(geos);
+	merged.computeBoundingBox();
+	const minY = merged.boundingBox!.min.y;
+	merged.translate(0, -minY, 0);
+	addWhiteVertexColors(merged);
+	return merged;
+}
+
+/** Type 3 — Gorgonian/Fan coral (Gorgonia): intricate fan-shaped lattice */
+function createFanCoralGeometry(): THREE.BufferGeometry {
+	const cols = 14;
+	const rows = 12;
+	const geo = new THREE.PlaneGeometry(0.9, 0.6, cols, rows);
+	const pos = geo.attributes.position;
+	for (let i = 0; i < pos.count; i++) {
+		const x = pos.getX(i);
+		const y = pos.getY(i);
+		const u = (x / 0.9 + 0.5);
+		const v = (y / 0.6 + 0.5);
+		const dist = Math.sqrt(u * u + v * v);
+		const mask = Math.max(0, 1 - (dist / 1.1) ** 3);
+		const fanShape = 1 - Math.pow(1 - v, 1.5);
+		const taper = 1 - (1 - v) * 0.4;
+		const spread = fanShape * 0.9 + 0.1;
+		const nx = x * spread * taper;
+		const ny = y;
+		const branchA = Math.sin(u * 15 + v * 12) * 0.08;
+		const branchB = Math.sin(u * 22 + v * 18 + 1.3) * 0.05;
+		const branchC = Math.sin(u * 10 - v * 8) * 0.06;
+		const zOffset = (branchA + branchB + branchC) * mask;
+		pos.setXYZ(i, nx, ny, zOffset);
+	}
+	pos.needsUpdate = true;
+	geo.computeVertexNormals();
+	geo.rotateX(-Math.PI / 2);
+	addWhiteVertexColors(geo);
+	return geo;
+}
+
+function displaceGeometry(geo: THREE.BufferGeometry, amount: number, freq1: number, freq2: number): void {
+	const pos = geo.attributes.position;
+	for (let i = 0; i < pos.count; i++) {
+		const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+		const d = (Math.sin(x * freq1 + y * freq2) + Math.sin(x * freq2 - y * freq1 + 1.7) + Math.sin(x * freq1 * 1.5 + z * freq2 * 1.3 + 0.9)) * amount;
+		const n = Math.sqrt(x * x + y * y + z * z) || 0.001;
+		pos.setXYZ(i, x + (x / n) * d, y + (y / n) * d, z + (z / n) * d);
+	}
+	pos.needsUpdate = true;
+}
+
+/** Type 4 — Digitate/Branching coral (Acropora digitifera): multiple thick finger-like branches from a base */
+function createDigitateCoralGeometry(): THREE.BufferGeometry {
+	const geos: THREE.BufferGeometry[] = [];
+	const segs = 7;
+	const numBranches = 8 + Math.floor(Math.random() * 4);
+	const angles: number[] = [];
+	for (let i = 0; i < numBranches; i++) {
+		angles.push((i / numBranches) * Math.PI * 2 + (Math.random() - 0.5) * 0.4);
+	}
+	for (let i = 0; i < numBranches; i++) {
+		const angle = angles[i];
+		const tilt = 0.2 + Math.random() * 0.5;
+		const len = 0.2 + Math.random() * 0.35;
+		const rBase = 0.04 + Math.random() * 0.04;
+		const rTip = 0.03 + Math.random() * 0.03;
+		const yOff = 0.02;
+		const g = new THREE.CylinderGeometry(rTip, rBase, len, segs);
+		g.translate(0, len / 2, 0);
+		g.rotateX(tilt);
+		g.rotateY(angle);
+		g.translate(0, yOff, 0);
+		// Round tip with small sphere
+		const tip = new THREE.SphereGeometry(rTip * 1.1, 5, 4);
+		const tipX = Math.sin(tilt) * Math.cos(angle) * len;
+		const tipY = yOff + Math.cos(tilt) * len;
+		const tipZ = Math.sin(tilt) * Math.sin(angle) * len;
+		tip.translate(tipX, tipY, tipZ);
+		geos.push(g, tip);
+
+		// Occasional small sub-branch
+		if (Math.random() < 0.3) {
+			const subAngle = angle + (Math.random() - 0.5) * 1.0;
+			const subTilt = tilt + 0.2 + Math.random() * 0.3;
+			const subLen = len * (0.4 + Math.random() * 0.3);
+			const subR = rBase * 0.5;
+			const sg = new THREE.CylinderGeometry(subR, subR * 1.2, subLen, 5);
+			const midX = Math.sin(tilt) * Math.cos(angle) * len * 0.5;
+			const midY = yOff + Math.cos(tilt) * len * 0.5;
+			const midZ = Math.sin(tilt) * Math.sin(angle) * len * 0.5;
+			sg.translate(0, subLen / 2, 0);
+			sg.rotateX(subTilt);
+			sg.rotateY(subAngle);
+			sg.translate(midX, midY, midZ);
+			geos.push(sg);
 		}
-		return geo;
-	} catch {
-		return null;
+	}
+	// Small base mound
+	const base = new THREE.SphereGeometry(0.08, 6, 5, 0, Math.PI * 2, 0, Math.PI / 2);
+	base.translate(0, 0.01, 0);
+	geos.push(base);
+
+	const merged = mergeBufferGeometries(geos);
+	merged.computeBoundingBox();
+	const minY = merged.boundingBox!.min.y;
+	merged.translate(0, -minY, 0);
+	addWhiteVertexColors(merged);
+	return merged;
+}
+
+export function createProceduralCoralGeometry(type: number): THREE.BufferGeometry {
+	switch (type) {
+		case 0: return createBrainCoralGeometry();
+		case 1: return createTreeCoralGeometry();
+		case 2: return createElkhornCoralGeometry();
+		case 3: return createFanCoralGeometry();
+		case 4: return createDigitateCoralGeometry();
+		default: return createBrainCoralGeometry();
 	}
 }
 
@@ -108,32 +316,6 @@ function getHeight(x: number, z: number, amp: number): number {
 	return (n - 0.5) * amp;
 }
 
-// ── Procedural coral fallback ──
-
-export function createProceduralCoralGeometry(type: number): THREE.BufferGeometry {
-	const geo = new THREE.IcosahedronGeometry(0.5, 2);
-	const pos = geo.attributes.position;
-	for (let i = 0; i < pos.count; i++) {
-		let x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
-		const len = Math.sqrt(x * x + y * y + z * z);
-		const nx = x / len, ny = y / len, nz = z / len;
-		const s1 = Math.sin(x * 6 + y * 7 + z * 5 + type) * 0.3;
-		const s2 = Math.sin(x * 13 + y * 15 + z * 10 + type * 2) * 0.2;
-		const r = 1 + s1 + s2;
-		x = nx * r * 0.6;
-		y = ny * r * 0.6;
-		z = nz * r * 0.6;
-		if (ny < -0.3) {
-			const t = Math.min(1, (ny + 0.3) / 0.35);
-			y = y * (1 - t) + (-0.6) * t;
-		}
-		pos.setXYZ(i, x, y, z);
-	}
-	pos.needsUpdate = true;
-	geo.computeVertexNormals();
-	return geo;
-}
-
 // ── Rock geometry (jagged boulder) ──
 
 export function createRockGeometry(): THREE.BufferGeometry {
@@ -151,6 +333,7 @@ export function createRockGeometry(): THREE.BufferGeometry {
 	}
 	pos.needsUpdate = true;
 	geo.computeVertexNormals();
+	addWhiteVertexColors(geo);
 	return geo;
 }
 
@@ -172,32 +355,32 @@ interface CoralVariantConfig {
 	coralsPerRock: number;
 }
 
-const BIOME_CONFIG: Record<CoralBiome, CoralVariantConfig> = {
+	const BIOME_CONFIG: Record<CoralBiome, CoralVariantConfig> = {
 	shallow: {
 		label: "Saumriff (Fringing Reef)",
 		peakCount: 30,
 		spread: 32,
 		terrainAmp: 1.8,
-		coralSize: [0.03, 0.09],
+		coralSize: [0.5, 1.5],
 		rockMin: 0.2,
 		rockMax: 5.0,
-		colors: [0xff6644, 0xdd8855, 0xdd77aa, 0xff9966, 0xee7766, 0xffaa44, 0x77ccaa, 0xff8844, 0xee5599, 0x66ddaa],
+		colors: [0xff4466, 0xff8844, 0xffcc44, 0xee55aa, 0xff6644, 0xdd77aa, 0x44ddaa, 0xffaa44, 0xee5599, 0x66ddaa],
 		typeOrder: [0, 1, 2, 3, 4],
 		rocksPerPeak: 8,
-		coralsPerRock: 3,
+		coralsPerRock: 4,
 	},
 	deep: {
 		label: "Hangriff (Fore Reef)",
 		peakCount: 18,
 		spread: 34,
 		terrainAmp: 4.0,
-		coralSize: [0.06, 0.15],
+		coralSize: [0.6, 2.0],
 		rockMin: 0.3,
 		rockMax: 9.0,
-		colors: [0x335566, 0x445577, 0x336677, 0x224466, 0x557788, 0x4488aa],
-		typeOrder: [1, 3],
+		colors: [0x4488ff, 0x66ddff, 0xaa88ff, 0x3366cc, 0x44aaff, 0x8866dd],
+		typeOrder: [0, 1, 2, 3, 4],
 		rocksPerPeak: 8,
-		coralsPerRock: 3,
+		coralsPerRock: 4,
 	},
 };
 
@@ -214,19 +397,9 @@ export interface CoralReef {
 
 // ── Create ──
 
-export async function loadAllGeometries(): Promise<(THREE.BufferGeometry | null)[]> {
-	return await Promise.all([
-		loadObjGeometry(_brainUrl),
-		loadObjGeometry(_treeUrl),
-		loadObjGeometry(_elkhornUrl),
-		loadObjGeometry(_gorgonianUrl),
-		loadObjGeometry(_genericUrl),
-	]);
-}
-
-export async function createCoralReef(biome: CoralBiome, geoOverride?: THREE.BufferGeometry[]): Promise<CoralReef> {
+export function createCoralReef(biome: CoralBiome): CoralReef {
 	const cfg = BIOME_CONFIG[biome];
-	const geos = geoOverride ?? (await loadAllGeometries());
+	const geos = [0, 1, 2, 3, 4].map((t) => createProceduralCoralGeometry(t));
 	const tmpCol = new THREE.Color();
 
 	// ── Terrain (mountainous seabed) ──
@@ -337,7 +510,7 @@ export async function createCoralReef(biome: CoralBiome, geoOverride?: THREE.Buf
 
 	for (let ti = 0; ti < typeSet.length; ti++) {
 		const typeIdx = typeSet[ti];
-		const srcGeo = geos[typeIdx] ?? createProceduralCoralGeometry(typeIdx);
+		const srcGeo = geos[typeIdx];
 		const geo = srcGeo.clone();
 
 		// Distribute corals across rock positions, multiple per rock

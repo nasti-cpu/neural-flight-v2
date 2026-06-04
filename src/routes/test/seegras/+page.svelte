@@ -3,20 +3,8 @@ import { onMount, onDestroy } from "svelte";
 import * as THREE from "three";
 import { createDuneSand, disposeDuneSand, getSandHeight } from "$lib/experiences/underwater-world v2/Biome/Sand/sand";
 import type { DuneSandResult } from "$lib/experiences/underwater-world v2/Biome/Sand/sand";
-import { createSeagrassMeadow, disposeSeagrassMeadow, updateSeagrassSway } from "$lib/experiences/underwater-world v2/Objekte/Seegras/seagrass";
+import { createSeagrassMeadow, disposeSeagrassMeadow, updateSeagrassSway, SEAGRASS_META } from "$lib/experiences/underwater-world v2/Objekte/Seegras/seagrass";
 import type { SeagrassType, SeagrassMeadow } from "$lib/experiences/underwater-world v2/Objekte/Seegras/seagrass";
-
-interface ModeDef {
-	id: SeagrassType;
-	label: string;
-	description: string;
-}
-
-const MODES: ModeDef[] = [
-	{ id: "algae", label: "Algen", description: "Breite, krause Algenfiedern" },
-	{ id: "long", label: "Langes Seegras", description: "Wie Eelgrass — lange, schmale Bänder" },
-	{ id: "bushy", label: "Buschiges Seegras", description: "Dichte Büschel, verzweigt" },
-];
 
 let canvas: HTMLCanvasElement;
 let renderer: THREE.WebGLRenderer;
@@ -89,7 +77,7 @@ onDestroy(() => {
 	<div class="panel">
 		<h2>Seegras-Wiese</h2>
 		<div class="buttons">
-			{#each MODES as mode}
+			{#each SEAGRASS_META as mode}
 				<button
 					class:active={currentMode === mode.id}
 					disabled={building}
