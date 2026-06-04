@@ -63,6 +63,41 @@
 		const variant = SKY_VARIANTS[0];
 		scene.fog = new THREE.Fog(variant.skyBottom, 25, 60);
 
+		const flowerMeshes: THREE.InstancedMesh[] = [];
+
+		function clearInstancesInRect(
+			meshes: THREE.InstancedMesh[],
+			cx: number, cz: number,
+			hw: number, hd: number,
+			angle: number,
+			border: number,
+		) {
+			const sin = Math.sin(angle);
+			const cos = Math.cos(angle);
+			const bw = hw + border;
+			const bd = hd + border;
+			const d = new THREE.Object3D();
+		const pos = new THREE.Vector3();
+			for (const mesh of meshes) {
+				for (let i = 0; i < mesh.count; i++) {
+					mesh.getMatrixAt(i, d.matrix);
+					pos.setFromMatrixPosition(d.matrix);
+					const dx = pos.x - cx;
+					const dz = pos.z - cz;
+					const localX = dx * cos + dz * sin;
+					const localZ = -dx * sin + dz * cos;
+					if (Math.abs(localX) < bw && Math.abs(localZ) < bd) {
+						d.position.set(pos.x, -100, pos.z);
+						d.scale.setScalar(1);
+						d.rotation.set(0, 0, 0);
+						d.updateMatrix();
+						mesh.setMatrixAt(i, d.matrix);
+					}
+				}
+				mesh.instanceMatrix.needsUpdate = true;
+			}
+		}
+
 		async function loadAll() {
 			const [armeriaScene, spiderScene, lungwortScene, cityScene] = await Promise.all([
 				loadGLB("/models/blumen/glb_Alba_Armeria_Spring_Pink.glb"),
@@ -118,6 +153,7 @@
 					}
 					mesh.instanceMatrix.needsUpdate = true;
 					scene.add(mesh);
+					flowerMeshes.push(mesh);
 				}
 			}
 
@@ -131,6 +167,7 @@
 			scene.add(cityScene);
 
 			meadow.clearRotatedRect(18, 0, 4.3, 4.4, -Math.PI / 4, 0.01);
+			clearInstancesInRect(flowerMeshes, 18, 0, 4.3, 4.4, -Math.PI / 4, 0.01);
 
 			loading = false;
 		}
