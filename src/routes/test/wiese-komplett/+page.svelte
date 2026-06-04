@@ -24,7 +24,7 @@
 	const SPEED = 5;
 
 	const BEE_COUNT = 15;
-	const BEE_SCALE = 0.03;
+	const BEE_SCALE = 0.0345;
 
 	interface Bee {
 		group: THREE.Group;
