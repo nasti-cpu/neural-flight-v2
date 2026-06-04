@@ -1,7 +1,7 @@
 export const BIENEN = {
 	MODEL: "/models/bienen/Meshy_AI_Honeybee_0604154325_texture.glb",
 	COUNT: 15,
-	SCALE: 0.0345,
+	SCALE: 0.0414,
 	FLY_RADIUS_MIN: 1,
 	FLY_RADIUS_MAX: 3,
 	SPEED_MIN: 0.3,
