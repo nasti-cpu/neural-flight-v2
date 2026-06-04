@@ -2,10 +2,18 @@ import * as THREE from "three";
 
 const GRASS_COUNT = 5000;
 const FIELD_SIZE = 45;
+const CURVATURE = 0.0025;
+const GROUND_RADIUS = (FIELD_SIZE + 20) / 2;
+
+function groundHeight(x: number, z: number): number {
+	const dist = Math.sqrt(x * x + z * z);
+	return -CURVATURE * dist * dist;
+}
 
 interface SwayData {
 	baseX: number;
 	baseZ: number;
+	baseY: number;
 	baseRotY: number;
 	phase: number;
 	speed: number;
@@ -29,11 +37,27 @@ export class GrassMeadow {
 	build(): void {
 		const grassColor = "#6aaf4c";
 
-		const groundGeo = new THREE.PlaneGeometry(FIELD_SIZE + 20, FIELD_SIZE + 20);
+		const groundSegs = 40;
+		const groundGeo = new THREE.PlaneGeometry(GROUND_RADIUS * 2, GROUND_RADIUS * 2, groundSegs, groundSegs);
+		groundGeo.rotateX(-Math.PI / 2);
+		const gPos = groundGeo.attributes.position as THREE.Float32BufferAttribute;
+		for (let i = 0; i < gPos.count; i++) {
+			const x = gPos.getX(i);
+			const z = gPos.getZ(i);
+			const dist = Math.sqrt(x * x + z * z);
+			if (dist > GROUND_RADIUS) {
+				const edge = GROUND_RADIUS;
+				const fade = 1 - (dist - edge) / (GROUND_RADIUS * 0.3);
+				gPos.setY(i, groundHeight(x, z) * Math.max(0, fade));
+			} else {
+				gPos.setY(i, groundHeight(x, z));
+			}
+		}
+		gPos.needsUpdate = true;
+		groundGeo.computeVertexNormals();
+
 		const groundMat = new THREE.MeshStandardMaterial({ color: grassColor, roughness: 1 });
 		const ground = new THREE.Mesh(groundGeo, groundMat);
-		ground.rotation.x = -Math.PI / 2;
-		ground.position.y = -0.05;
 		ground.receiveShadow = true;
 		this.scene.add(ground);
 
@@ -44,7 +68,9 @@ export class GrassMeadow {
 			const angle = Math.random() * Math.PI * 2;
 			const dist = 3 + Math.random() * 14;
 			bump.rotation.x = -Math.PI / 2;
-			bump.position.set(Math.cos(angle) * dist, -0.02, Math.sin(angle) * dist);
+			const bx = Math.cos(angle) * dist;
+			const bz = Math.sin(angle) * dist;
+			bump.position.set(bx, groundHeight(bx, bz) + 0.03, bz);
 			bump.scale.set(1, 1, 0.4 + Math.random() * 0.8);
 			this.scene.add(bump);
 		}
@@ -67,8 +93,9 @@ export class GrassMeadow {
 			const baseRotY = Math.random() * Math.PI * 2;
 			const sx = 0.5 + Math.random() * 0.8;
 			const sz = 0.5 + Math.random() * 0.8;
+			const baseY = groundHeight(x, z);
 
-			this.dummy.position.set(x, height / 2, z);
+			this.dummy.position.set(x, baseY + height / 2, z);
 			this.dummy.scale.set(sx, height, sz);
 			this.dummy.rotation.set(0, baseRotY, 0);
 			this.dummy.updateMatrix();
@@ -77,6 +104,7 @@ export class GrassMeadow {
 			this.swayData.push({
 				baseX: x,
 				baseZ: z,
+				baseY,
 				baseRotY,
 				phase: Math.random() * Math.PI * 2,
 				speed: 0.5 + Math.random() * 1.5,
@@ -101,7 +129,7 @@ export class GrassMeadow {
 			const swayX = Math.sin(elapsed * d.speed + d.phase + d.baseX * 0.5) * 0.06;
 			const swayZ = Math.sin(elapsed * d.speed * 0.7 + d.phase + d.baseZ * 0.5) * 0.04;
 
-			this.dummy.position.set(d.baseX, d.height / 2, d.baseZ);
+			this.dummy.position.set(d.baseX, d.baseY + d.height / 2, d.baseZ);
 			this.dummy.scale.set(d.scaleX, d.height, d.scaleZ);
 			this.dummy.rotation.set(swayZ * 0.5, d.baseRotY, swayX + windDir * 0.08);
 			this.dummy.updateMatrix();
