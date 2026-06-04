@@ -6,6 +6,7 @@
 	import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 	import { GrassMeadow } from "$lib/experiences/insect-world/Biome/Wiese/grass-test";
 	import { SkyScene, SKY_VARIANTS } from "$lib/experiences/insect-world/Biome/blauer Himmel/sky-test";
+	import { CITY } from "$lib/experiences/insect-world/Objekte/Stadt/city";
 
 	let canvas: HTMLCanvasElement;
 	let renderer: THREE.WebGLRenderer;
@@ -103,7 +104,7 @@
 				loadGLB("/models/blumen/glb_Alba_Armeria_Spring_Pink.glb"),
 				loadGLB("/models/blumen/spider_lily_lycoris_radiata.glb"),
 				loadGLB("/models/blumen/Lungwort Spring.glb"),
-				loadGLB("/models/stadt/around_the_world_map_1.glb"),
+				loadGLB(CITY.MODEL),
 			]);
 
 			const spiderParts: { geo: THREE.BufferGeometry; mat: THREE.Material }[] = [];
@@ -161,13 +162,14 @@
 			scatterFlower(spiderParts, 1.7, [0.6, 1.6], 25);
 			scatterFlower(lungwortParts, 0.025, [0.5, 1.5], 25);
 
-			cityScene.scale.setScalar(0.00025);
-			cityScene.position.set(18, -0.35, 0);
-			cityScene.rotation.y = -Math.PI / 4;
+			cityScene.scale.setScalar(CITY.SCALE);
+			cityScene.position.set(CITY.POSITION.x, CITY.POSITION.y, CITY.POSITION.z);
+			cityScene.rotation.y = CITY.ROTATION_Y;
 			scene.add(cityScene);
 
-			meadow.clearArea(6, 12, 6.5);
-			clearInstancesInRect(flowerMeshes, 6, 12, 4.5, 5, Math.PI / 4, 0.5);
+			meadow.clearArea(CITY.CLEAR.CENTER.x, CITY.CLEAR.CENTER.z, CITY.CLEAR.RADIUS);
+			clearInstancesInRect(flowerMeshes, CITY.CLEAR.CENTER.x, CITY.CLEAR.CENTER.z, CITY.CLEAR.RECT.hw,
+				CITY.CLEAR.RECT.hd, CITY.CLEAR.RECT.angle, CITY.CLEAR.RECT.border);
 
 			loading = false;
 		}
