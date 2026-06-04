@@ -166,20 +166,8 @@
 			cityScene.rotation.y = -Math.PI / 4;
 			scene.add(cityScene);
 
-			meadow.clearArea(18, 0, 22);
-			clearInstancesInRect(flowerMeshes, 18, 0, 20, 20, Math.PI / 4, 10);
-
-			// Debug: show clearing zone
-			const debugMat = new THREE.LineBasicMaterial({ color: 0xff0000 });
-			const debugPoints: THREE.Vector3[] = [];
-			const segs = 32;
-			for (let i = 0; i <= segs; i++) {
-				const a = (i / segs) * Math.PI * 2;
-				debugPoints.push(new THREE.Vector3(18 + Math.cos(a) * 22, 0.1, 0 + Math.sin(a) * 22));
-			}
-			const debugGeo = new THREE.BufferGeometry().setFromPoints(debugPoints);
-			const debugLine = new THREE.Line(debugGeo, debugMat);
-			scene.add(debugLine);
+			meadow.clearArea(6, 12, 6.5);
+			clearInstancesInRect(flowerMeshes, 6, 12, 4.5, 5, Math.PI / 4, 0.5);
 
 			loading = false;
 		}
