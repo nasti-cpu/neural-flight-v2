@@ -283,23 +283,44 @@ export class SkyScene {
 		this.sunSphere.position.copy(sunDir.multiplyScalar(50));
 		this.scene.add(this.sunSphere);
 
-		for (let i = 0; i < variant.cloudCount; i++) {
+		const count = variant.cloudCount;
+		const rings = count <= 8 ? 1 : 2;
+		const perRing = Math.ceil(count / rings);
+
+		for (let i = 0; i < count; i++) {
 			const geo = pickCloudGeometry();
-			const shade = 0.9 + Math.random() * 0.1;
+			const ringIdx = Math.min(i % rings, rings - 1);
+			const idxInRing = Math.floor(i / rings);
+			const totalInRing = Math.min(perRing, count - ringIdx * perRing);
+			const baseAngle = (idxInRing / Math.max(1, totalInRing)) * Math.PI * 2;
+			const jitterAngle = (Math.random() - 0.5) * 0.5;
+			const angle = baseAngle + jitterAngle;
+
+			const ringDist = ringIdx === 0
+				? 12 + Math.random() * 18
+				: 30 + Math.random() * 30;
+			const dist = ringDist + (Math.random() - 0.5) * 4;
+
+			const height = variant.cloudHeightMin + Math.random() * (variant.cloudHeightMax - variant.cloudHeightMin);
+
+			const shade = 0.92 + Math.random() * 0.08;
+			const opacity = 0.6 + Math.random() * 0.25;
 			const mat = new THREE.MeshStandardMaterial({
 				color: new THREE.Color(shade, shade, shade),
-				roughness: 0.25,
-				metalness: 0.0,
+				roughness: 0.95,
+				metalness: 0,
+				transparent: true,
+				opacity,
+				depthWrite: false,
 			});
 			const mesh = new THREE.Mesh(geo, mat);
 
-			const angle = Math.random() * Math.PI * 2;
-			const dist = 10 + Math.random() * 55;
-			const height = variant.cloudHeightMin + Math.random() * (variant.cloudHeightMax - variant.cloudHeightMin);
-			const scale = 1.0 + Math.random() * 3.0;
+			const scale = ringIdx === 0
+				? 1.0 + Math.random() * 2.0
+				: 2.0 + Math.random() * 3.0;
 
 			mesh.position.set(Math.cos(angle) * dist, height, Math.sin(angle) * dist);
-			mesh.scale.set(scale, scale * (0.5 + Math.random() * 0.3), scale);
+			mesh.scale.set(scale, scale * (0.4 + Math.random() * 0.3), scale);
 			mesh.rotation.set(0, Math.random() * Math.PI * 2, 0);
 			mesh.castShadow = false;
 			mesh.receiveShadow = false;
