@@ -20,8 +20,8 @@ export interface SkyVariant {
 export const SKY_VARIANTS: SkyVariant[] = [
 	{
 		name: "Sonnig & klar",
-		skyTop: "#4a90d9",
-		skyBottom: "#b8d4f0",
+		skyTop: "#3a80c9",
+		skyBottom: "#a8c8e8",
 		sunColor: "#fff5e0",
 		sunIntensity: 2.5,
 		sunPosition: [10, 18, 5],
@@ -30,14 +30,14 @@ export const SKY_VARIANTS: SkyVariant[] = [
 		hemiColor: "#87ceeb",
 		hemiGround: "#5a7a4a",
 		hemiIntensity: 0.3,
-		cloudCount: 10,
-		cloudHeightMin: 6,
-		cloudHeightMax: 14,
+		cloudCount: 14,
+		cloudHeightMin: 12,
+		cloudHeightMax: 20,
 	},
 	{
 		name: "Leicht bewölkt",
-		skyTop: "#5b9bd5",
-		skyBottom: "#c9dde8",
+		skyTop: "#4a8ac5",
+		skyBottom: "#b8cce0",
 		sunColor: "#ffe8c8",
 		sunIntensity: 1.8,
 		sunPosition: [8, 14, 12],
@@ -46,14 +46,14 @@ export const SKY_VARIANTS: SkyVariant[] = [
 		hemiColor: "#99ccee",
 		hemiGround: "#5a7a4a",
 		hemiIntensity: 0.4,
-		cloudCount: 22,
-		cloudHeightMin: 5,
-		cloudHeightMax: 13,
+		cloudCount: 28,
+		cloudHeightMin: 10,
+		cloudHeightMax: 18,
 	},
 	{
 		name: "Warme Morgensonne",
-		skyTop: "#f5a060",
-		skyBottom: "#fde8c8",
+		skyTop: "#e09050",
+		skyBottom: "#f5d8b8",
 		sunColor: "#ffcc77",
 		sunIntensity: 2.0,
 		sunPosition: [-5, 6, 15],
@@ -62,14 +62,14 @@ export const SKY_VARIANTS: SkyVariant[] = [
 		hemiColor: "#ffcc88",
 		hemiGround: "#7a6a4a",
 		hemiIntensity: 0.3,
-		cloudCount: 14,
-		cloudHeightMin: 5,
-		cloudHeightMax: 12,
+		cloudCount: 18,
+		cloudHeightMin: 10,
+		cloudHeightMax: 18,
 	},
 	{
 		name: "Strahlend blau",
-		skyTop: "#2a6bb0",
-		skyBottom: "#a0c8ee",
+		skyTop: "#2060a0",
+		skyBottom: "#90bae8",
 		sunColor: "#fff8ee",
 		sunIntensity: 3.0,
 		sunPosition: [12, 22, 2],
@@ -78,9 +78,9 @@ export const SKY_VARIANTS: SkyVariant[] = [
 		hemiColor: "#77aaee",
 		hemiGround: "#4a6a3a",
 		hemiIntensity: 0.25,
-		cloudCount: 5,
-		cloudHeightMin: 7,
-		cloudHeightMax: 16,
+		cloudCount: 8,
+		cloudHeightMin: 14,
+		cloudHeightMax: 22,
 	},
 ];
 
@@ -147,6 +147,7 @@ function createCloudGeometry(seed: number): THREE.BufferGeometry {
 	const heightSegs = 26;
 	const geo = new THREE.SphereGeometry(1, widthSegs, heightSegs);
 	const pos = geo.attributes.position as THREE.Float32BufferAttribute;
+	const colors = new Float32Array(pos.count * 3);
 
 	for (let i = 0; i < pos.count; i++) {
 		const x = pos.getX(i);
@@ -166,16 +167,20 @@ function createCloudGeometry(seed: number): THREE.BufferGeometry {
 		);
 
 		const baseRadius = 0.5 + noiseVal * 0.5;
-
 		const bottom = Math.max(0, Math.min(1, (ny + 1) * 1.8));
 		const flattenBottom = 0.3 + bottom * 0.7;
-
 		const radius = baseRadius * flattenBottom;
 
 		pos.setXYZ(i, nx * radius, ny * radius, nz * radius);
+
+		const grayTone = 0.6 + Math.max(0, ny) * 0.4;
+		colors[i * 3] = grayTone;
+		colors[i * 3 + 1] = grayTone;
+		colors[i * 3 + 2] = grayTone;
 	}
 
 	pos.needsUpdate = true;
+	geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
 	geo.computeVertexNormals();
 	return geo;
 }
@@ -284,43 +289,44 @@ export class SkyScene {
 		this.scene.add(this.sunSphere);
 
 		const count = variant.cloudCount;
-		const rings = count <= 8 ? 1 : 2;
-		const perRing = Math.ceil(count / rings);
+		const clusterCount = Math.max(3, Math.round(count / 2.5));
+
+		const clusterPositions: { angle: number; dist: number; height: number }[] = [];
+		for (let c = 0; c < clusterCount; c++) {
+			const angle = (c / clusterCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.8;
+			const dist = 14 + Math.random() * 38;
+			const height = variant.cloudHeightMin + Math.random() * (variant.cloudHeightMax - variant.cloudHeightMin) + (Math.random() - 0.5) * 3;
+			clusterPositions.push({ angle, dist, height });
+		}
 
 		for (let i = 0; i < count; i++) {
 			const geo = pickCloudGeometry();
-			const ringIdx = Math.min(i % rings, rings - 1);
-			const idxInRing = Math.floor(i / rings);
-			const totalInRing = Math.min(perRing, count - ringIdx * perRing);
-			const baseAngle = (idxInRing / Math.max(1, totalInRing)) * Math.PI * 2;
-			const jitterAngle = (Math.random() - 0.5) * 0.5;
-			const angle = baseAngle + jitterAngle;
+			const cluster = clusterPositions[i % clusterCount];
 
-			const ringDist = ringIdx === 0
-				? 12 + Math.random() * 18
-				: 30 + Math.random() * 30;
-			const dist = ringDist + (Math.random() - 0.5) * 4;
+			const offsetAngle = (Math.random() - 0.5) * 0.35;
+			const offsetDist = (Math.random() - 0.5) * 6;
+			const angle = cluster.angle + offsetAngle;
+			const dist = Math.max(2, cluster.dist + offsetDist);
+			const height = cluster.height + (Math.random() - 0.5) * 2;
 
-			const height = variant.cloudHeightMin + Math.random() * (variant.cloudHeightMax - variant.cloudHeightMin);
-
-			const shade = 0.92 + Math.random() * 0.08;
-			const opacity = 0.6 + Math.random() * 0.25;
+			const isSoft = Math.random() < 0.4;
+			const opacity = isSoft ? 0.25 + Math.random() * 0.2 : 0.55 + Math.random() * 0.35;
+			const roughness = isSoft ? 0.98 : 0.85 + Math.random() * 0.1;
 			const mat = new THREE.MeshStandardMaterial({
-				color: new THREE.Color(shade, shade, shade),
-				roughness: 0.95,
+				color: 0xffffff,
+				roughness,
 				metalness: 0,
 				transparent: true,
 				opacity,
 				depthWrite: false,
+				vertexColors: true,
 			});
 			const mesh = new THREE.Mesh(geo, mat);
 
-			const scale = ringIdx === 0
-				? 1.0 + Math.random() * 2.0
-				: 2.0 + Math.random() * 3.0;
+			const scale = 1.5 + Math.random() * 3.5;
 
 			mesh.position.set(Math.cos(angle) * dist, height, Math.sin(angle) * dist);
-			mesh.scale.set(scale, scale * (0.4 + Math.random() * 0.3), scale);
+			mesh.scale.set(scale, scale * (0.35 + Math.random() * 0.3), scale);
 			mesh.rotation.set(0, Math.random() * Math.PI * 2, 0);
 			mesh.castShadow = false;
 			mesh.receiveShadow = false;
