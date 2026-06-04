@@ -6,9 +6,12 @@ const KALEIDO_PATH = "/models/Meshy_AI_Kaleidoscope_Coral_Re_0604163348_texture.
 
 interface CoralModel {
 	scene: THREE.Group;
+	/** Offset to place bottom at Y=0 when scale = modelScale */
 	offset: THREE.Vector3;
-	scale: number;
-	colors: THREE.Color[];
+	/** Scale that maps targetSize onto model */
+	modelScale: number;
+	/** Original geometry min Y (unscaled) */
+	bminY: number;
 }
 let _garden: CoralModel | null = null;
 let _kaleido: CoralModel | null = null;
@@ -23,8 +26,14 @@ const CORAL_COLORS = [
 	0xff6688, 0x66dd88, 0xaa66ff, 0xff9966,
 ];
 
-_loadPromise = new Promise((resolve) => { _loadResolve = resolve; });
-_loadBoth();
+// Defer loading to client-side only (SSR can't load relative URLs)
+if (typeof window !== "undefined") {
+	_loadPromise = new Promise((resolve) => { _loadResolve = resolve; });
+	_loadBoth();
+} else {
+	_loadPromise = Promise.resolve();
+	_modelLoadFailed = true;
+}
 
 async function _loadBoth(): Promise<void> {
 	try {
@@ -58,7 +67,6 @@ function _processModel(src: THREE.Group): CoralModel {
 		-center.z * modelScale,
 	);
 
-	const colors: THREE.Color[] = [];
 	const tmpCol = new THREE.Color();
 	let meshIdx = 0;
 	src.traverse((child) => {
@@ -70,13 +78,12 @@ function _processModel(src: THREE.Group): CoralModel {
 				mat.color.copy(tmpCol);
 				mat.roughness = 0.5;
 				mat.metalness = 0.05;
-				colors.push(tmpCol.clone());
 			}
 			meshIdx++;
 		}
 	});
 
-	return { scene: src, offset, scale: modelScale, colors };
+	return { scene: src, offset, modelScale, bminY: bmin.y };
 }
 
 export function ensureModelLoaded(): Promise<void> {
@@ -102,7 +109,7 @@ export function createModelCoralReefSync(): ModelCoralReefResult | null {
 	const group = new THREE.Group();
 	if (_garden) {
 		const m = _garden.scene.clone();
-		m.scale.setScalar(_garden.scale);
+		m.scale.setScalar(_garden.modelScale);
 		m.position.copy(_garden.offset);
 		group.add(m);
 	}
@@ -148,7 +155,8 @@ export function scatterCoralModels(config: ScatterConfig): THREE.Group | null {
 
 		const s = scaleRange[0] + Math.random() * (scaleRange[1] - scaleRange[0]);
 		clone.scale.setScalar(s);
-		clone.position.set(x, groundY - src.offset.y * s, z);
+		// Bottom of model sits at groundY: position.y + bminY * s = groundY → position.y = groundY - bminY * s
+		clone.position.set(x, groundY - src.bminY * s, z);
 		clone.rotation.y = Math.random() * Math.PI * 2;
 
 		let meshIdx = 0;
