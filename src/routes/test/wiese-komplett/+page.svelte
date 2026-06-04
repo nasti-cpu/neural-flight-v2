@@ -52,11 +52,12 @@
 		const variant = SKY_VARIANTS[0];
 		scene.fog = new THREE.Fog(variant.skyBottom, 25, 60);
 
-		async function loadFlowers() {
-			const [armeriaScene, spiderScene, lungwortScene] = await Promise.all([
+		async function loadAll() {
+			const [armeriaScene, spiderScene, lungwortScene, cityScene] = await Promise.all([
 				loadGLB("/models/blumen/glb_Alba_Armeria_Spring_Pink.glb"),
 				loadGLB("/models/blumen/spider_lily_lycoris_radiata.glb"),
 				loadGLB("/models/blumen/Lungwort Spring.glb"),
+				loadGLB("/models/stadt/around_the_world_map_1.glb"),
 			]);
 
 			const spiderParts: { geo: THREE.BufferGeometry; mat: THREE.Material }[] = [];
@@ -113,10 +114,15 @@
 			scatterFlower(spiderParts, 1.7, [0.6, 1.6], 25);
 			scatterFlower(lungwortParts, 0.025, [0.5, 1.5], 25);
 
+			cityScene.scale.setScalar(0.0005);
+			cityScene.position.set(18, -0.02, 0);
+			cityScene.rotation.y = -Math.PI / 4;
+			scene.add(cityScene);
+
 			loading = false;
 		}
 
-		loadFlowers().catch((err) => {
+		loadAll().catch((err) => {
 			console.error("Fehler:", err);
 			loading = false;
 		});
