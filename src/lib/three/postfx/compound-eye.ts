@@ -1,11 +1,11 @@
 import * as THREE from "three";
 
 export const VARIANTS = [
-	{ name: "Hex-Gitter", desc: "Feines Sechseck-Gitter wie ein Facettenauge" },
-	{ name: "Linsen-Array", desc: "Runde Linsen mit Vignettierung pro Zelle" },
-	{ name: "Waben-Schimmer", desc: "Farbige Schimmer-Verschiebung pro Wabe" },
-	{ name: "Ommatidien-Blick", desc: "Lichtreflexe auf jeder Linse" },
-	{ name: "Bienen-Sicht", desc: "Chromatische Aberration + Wabenmuster" },
+	{ name: "Wabengitter", desc: "Feines hexagonales Gitter — die Szene bleibt gestochen scharf" },
+	{ name: "Facetten-Vignette", desc: "Jede Wabe leicht abgedunkelt zum Rand hin" },
+	{ name: "Lichtbrechung", desc: "Prismatischer Farbsaum pro Facette" },
+	{ name: "Glanzlichter", desc: "Lichtreflexe auf jeder Linse" },
+	{ name: "Dämmerung", desc: "Helle Zentren, dunkle Ränder — angepasst an schwaches Licht" },
 ];
 
 const vertexShader = `
@@ -30,134 +30,116 @@ const fragmentShader = `
 	const float PI = 3.14159265359;
 	const float SQRT3 = 1.73205080757;
 
-	// ── HEX GRID ──────────────────────────────────────────────────
+	// ── Hex cell lookup (pointy-top) ─────────────────────────────
+	// Returns the cell center (in grid units) and distance to it.
 
-	struct HexInfo {
+	struct HexCell {
 		vec2 center;
 		float dist;
 	};
 
-	HexInfo getHex(vec2 p) {
+	HexCell getHexCell(vec2 p) {
 		float w = 2.0;
 		float h = SQRT3;
 		vec2 grid = vec2(w, h);
 
-		vec2 hexId = floor(p / grid);
-		float rowOff = mod(hexId.y, 2.0) * 0.5;
-		vec2 center = (hexId + vec2(rowOff, 0.5)) * grid;
-		float bestD = distance(p, center);
-		vec2 best = center;
+		vec2 id = floor(p / grid);
+		float off = mod(id.y, 2.0) * 0.5;
+		vec2 c = (id + vec2(off, 0.5)) * grid;
+		float bd = distance(p, c);
+		vec2 bc = c;
 
 		for (int dy = -1; dy <= 1; dy++) {
 			for (int dx = -1; dx <= 1; dx++) {
-				vec2 nId = hexId + vec2(float(dx), float(dy));
-				float nOff = mod(nId.y, 2.0) * 0.5;
-				vec2 nCenter = (nId + vec2(nOff, 0.5)) * grid;
-				float d = distance(p, nCenter);
-				if (d < bestD) { bestD = d; best = nCenter; }
+				vec2 n = id + vec2(float(dx), float(dy));
+				float no = mod(n.y, 2.0) * 0.5;
+				vec2 nc = (n + vec2(no, 0.5)) * grid;
+				float d = distance(p, nc);
+				if (d < bd) { bd = d; bc = nc; }
 			}
 		}
-		return HexInfo(best, bestD);
+		return HexCell(bc, bd);
 	}
 
-	// ── GRID LINES ────────────────────────────────────────────────
+	// ── Full-resolution scene sample ────────────────────────────
 
-	float hexEdge(vec2 p, float size, float thickness) {
-		HexInfo h = getHex(p);
-		return 1.0 - smoothstep(size - thickness - 0.5, size - thickness + 0.5, h.dist);
+	vec4 scene(vec2 uv) {
+		return texture2D(tScene, uv);
 	}
 
-	// ── VARIANTS ──────────────────────────────────────────────────
+	// ── Variants ────────────────────────────────────────────────
+	// Each variant samples at full resolution (no pixelation).
+	// Only the hex overlay pattern changes.
 
-	// 0 — Hex-Gitter: clear image + subtle dark hex grid overlay
 	vec4 variantGrid(vec2 uv, vec2 p, float size) {
-		vec4 color = texture2D(tScene, uv);
-		HexInfo h = getHex(p);
+		vec4 color = scene(uv);
+		HexCell h = getHexCell(p);
 		float edge = smoothstep(size - 1.0, size - 0.2, h.dist);
-		float gridLine = 1.0 - edge;
-		color.rgb *= 1.0 - gridLine * 0.25;
+		float line = 1.0 - edge;
+		color.rgb *= 1.0 - line * 0.2;
 		return color;
 	}
 
-	// 1 — Linsen-Array: clear image + circular vignette per cell
-	vec4 variantLenses(vec2 uv, vec2 p, float size) {
-		vec4 color = texture2D(tScene, uv);
-		HexInfo h = getHex(p);
-		float lensRim = smoothstep(size * 0.82, size * 0.7, h.dist);
-		float lensCenter = 1.0 - smoothstep(0.0, size * 0.3, h.dist);
-		color.rgb *= 0.85 + lensRim * 0.15 + lensCenter * 0.06;
+	vec4 variantVignette(vec2 uv, vec2 p, float size) {
+		vec4 color = scene(uv);
+		HexCell h = getHexCell(p);
+		float vig = 1.0 - smoothstep(0.0, size * 0.75, h.dist) * 0.12;
+		color.rgb *= vig;
 		return color;
 	}
 
-	// 2 — Waben-Schimmer: per-cell hue shift
-	vec4 variantShimmer(vec2 uv, vec2 p, float size) {
-		vec4 color = texture2D(tScene, uv);
-		HexInfo h = getHex(p);
+	vec4 variantPrism(vec2 uv, vec2 p, float size) {
+		HexCell h = getHexCell(p);
+		float ca = h.dist / size * 0.002;
 
-		float shift = sin(h.center.x * 1.7 + h.center.y * 2.3 + uTime * 0.3) * 0.04;
-		color.r += shift;
-		color.b -= shift;
-
-		float edge = smoothstep(size - 1.5, size - 0.3, h.dist);
-		color.rgb *= 1.0 - (1.0 - edge) * 0.18;
-
-		return color;
-	}
-
-	// 3 — Ommatidien-Blick: bright specular highlight on each lens
-	vec4 variantOmmatidia(vec2 uv, vec2 p, float size) {
-		vec4 color = texture2D(tScene, uv);
-		HexInfo h = getHex(p);
-
-		float lightAngle = uTime * 0.2;
-		vec2 lightDir = vec2(cos(lightAngle), sin(lightAngle));
-		float spec = max(0.0, dot(normalize(h.center - p), lightDir));
-		float highlight = pow(spec, 8.0) * 0.3;
-
-		float vignette = 1.0 - smoothstep(0.0, size * 0.9, h.dist) * 0.1;
-		float rim = smoothstep(size * 0.85, size * 0.7, h.dist) * 0.08;
-
-		color.rgb += highlight;
-		color.rgb *= vignette + rim;
-		return color;
-	}
-
-	// 4 — Bienen-Sicht: chromatic aberration + honeycomb
-	vec4 variantBeeVision(vec2 uv, vec2 p, float size) {
-		HexInfo h = getHex(p);
-
-		float chromaOffset = 2.0 / uResolution.x;
-		float r = texture2D(tScene, uv + vec2(chromaOffset, 0.0)).r;
-		float g = texture2D(tScene, uv).g;
-		float b = texture2D(tScene, uv - vec2(chromaOffset, 0.0)).b;
+		float r = scene(uv + vec2(ca, 0.0)).r;
+		float g = scene(uv).g;
+		float b = scene(uv - vec2(ca, 0.0)).b;
 		vec4 color = vec4(r, g, b, 1.0);
 
-		float edge = smoothstep(size - 1.2, size - 0.3, h.dist);
-		color.rgb *= 1.0 - (1.0 - edge) * 0.2;
-
-		float glow = exp(-h.dist * 4.0 / size) * 0.06;
-		color.rgb += vec3(0.9, 0.95, 1.0) * glow;
-
+		float edge = smoothstep(size - 1.0, size - 0.2, h.dist);
+		color.rgb *= 1.0 - (1.0 - edge) * 0.08;
 		return color;
 	}
 
-	// ── MAIN ─────────────────────────────────────────────────────
+	vec4 variantGlare(vec2 uv, vec2 p, float size) {
+		vec4 color = scene(uv);
+		HexCell h = getHexCell(p);
+
+		float a = uTime * 0.15;
+		vec2 dir = vec2(cos(a), sin(a));
+		float spec = pow(max(0.0, dot(normalize(h.center - p), dir)), 12.0);
+		color.rgb += spec * 0.15;
+
+		float edge = smoothstep(size - 1.0, size - 0.2, h.dist);
+		color.rgb *= 1.0 - (1.0 - edge) * 0.15;
+		return color;
+	}
+
+	vec4 variantTwilight(vec2 uv, vec2 p, float size) {
+		vec4 color = scene(uv);
+		HexCell h = getHexCell(p);
+
+		float bright = 1.0 - smoothstep(0.0, size * 0.3, h.dist) * 0.1;
+		float dark = 1.0 - smoothstep(size * 0.6, size * 0.9, h.dist) * 0.18;
+		color.rgb *= bright * dark;
+
+		float edge = smoothstep(size - 1.0, size - 0.2, h.dist);
+		color.rgb *= 1.0 - (1.0 - edge) * 0.1;
+		return color;
+	}
+
+	// ── Main ────────────────────────────────────────────────────
 
 	void main() {
 		vec2 p = vUv * uResolution / uCellSize;
 
 		vec4 color;
-		if (uVariant == 0) {
-			color = variantGrid(vUv, p, uCellSize);
-		} else if (uVariant == 1) {
-			color = variantLenses(vUv, p, uCellSize);
-		} else if (uVariant == 2) {
-			color = variantShimmer(vUv, p, uCellSize);
-		} else if (uVariant == 3) {
-			color = variantOmmatidia(vUv, p, uCellSize);
-		} else {
-			color = variantBeeVision(vUv, p, uCellSize);
-		}
+		if (uVariant == 0) color = variantGrid(vUv, p, uCellSize);
+		else if (uVariant == 1) color = variantVignette(vUv, p, uCellSize);
+		else if (uVariant == 2) color = variantPrism(vUv, p, uCellSize);
+		else if (uVariant == 3) color = variantGlare(vUv, p, uCellSize);
+		else color = variantTwilight(vUv, p, uCellSize);
 
 		gl_FragColor = color;
 	}
@@ -185,7 +167,7 @@ export class CompoundEyeEffect {
 			uniforms: {
 				tScene: { value: this.renderTarget.texture },
 				uResolution: { value: new THREE.Vector2(width, height) },
-				uCellSize: { value: 24.0 },
+				uCellSize: { value: 32.0 },
 				uVariant: { value: 0 },
 				uTime: { value: 0 },
 			},
@@ -203,7 +185,7 @@ export class CompoundEyeEffect {
 	}
 
 	setCellSize(size: number): void {
-		this.material.uniforms.uCellSize.value = Math.max(4, size);
+		this.material.uniforms.uCellSize.value = Math.max(8, size);
 	}
 
 	resize(width: number, height: number): void {
