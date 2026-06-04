@@ -12,7 +12,6 @@ export interface SkyVariant {
 	hemiColor: string;
 	hemiGround: string;
 	hemiIntensity: number;
-	cloudCoverage: number;
 	cloudCount: number;
 	cloudHeightMin: number;
 	cloudHeightMax: number;
@@ -31,8 +30,7 @@ export const SKY_VARIANTS: SkyVariant[] = [
 		hemiColor: "#87ceeb",
 		hemiGround: "#5a7a4a",
 		hemiIntensity: 0.3,
-		cloudCoverage: 0.2,
-		cloudCount: 12,
+		cloudCount: 10,
 		cloudHeightMin: 6,
 		cloudHeightMax: 14,
 	},
@@ -48,8 +46,7 @@ export const SKY_VARIANTS: SkyVariant[] = [
 		hemiColor: "#99ccee",
 		hemiGround: "#5a7a4a",
 		hemiIntensity: 0.4,
-		cloudCoverage: 0.5,
-		cloudCount: 28,
+		cloudCount: 22,
 		cloudHeightMin: 5,
 		cloudHeightMax: 13,
 	},
@@ -65,8 +62,7 @@ export const SKY_VARIANTS: SkyVariant[] = [
 		hemiColor: "#ffcc88",
 		hemiGround: "#7a6a4a",
 		hemiIntensity: 0.3,
-		cloudCoverage: 0.3,
-		cloudCount: 18,
+		cloudCount: 14,
 		cloudHeightMin: 5,
 		cloudHeightMax: 12,
 	},
@@ -82,64 +78,109 @@ export const SKY_VARIANTS: SkyVariant[] = [
 		hemiColor: "#77aaee",
 		hemiGround: "#4a6a3a",
 		hemiIntensity: 0.25,
-		cloudCoverage: 0.1,
-		cloudCount: 6,
+		cloudCount: 5,
 		cloudHeightMin: 7,
 		cloudHeightMax: 16,
 	},
 ];
 
-interface PuffDef {
-	puffs: [number, number, number, number][];
+function hash3(ix: number, iy: number, iz: number): number {
+	let h = ix * 374761393 + iy * 668265263 + iz * 1274126177;
+	h = (h ^ (h >> 13)) * 1274126177;
+	h = h ^ (h >> 16);
+	return (h & 0x7fffffff) / 0x7fffffff;
 }
 
-const PUFF_SEED_CONFIGS: PuffDef[] = [
-	{ puffs: [[0, 0.4, 0, 1.0], [0.7, 0.6, 0.3, 0.7], [-0.6, 0.5, 0.4, 0.65], [0.3, 0.8, -0.5, 0.6], [-0.4, 0.7, -0.6, 0.55], [0.9, 0.3, -0.3, 0.5], [-0.8, 0.4, -0.2, 0.45]] },
-	{ puffs: [[0, 0.3, 0, 0.9], [0.5, 0.5, -0.5, 0.7], [-0.6, 0.4, 0.5, 0.65], [0.8, 0.5, 0.4, 0.55], [-0.3, 0.7, -0.4, 0.5], [-0.7, 0.3, -0.7, 0.45], [0, 0.6, 0.8, 0.5], [0.3, 0.8, 0.2, 0.4]] },
-	{ puffs: [[0, 0.5, 0, 1.2], [0.6, 0.7, -0.6, 0.8], [-0.7, 0.6, 0.6, 0.75], [0, 0.9, -0.3, 0.6], [-0.5, 0.8, -0.5, 0.5], [0.5, 0.4, 0.7, 0.5], [1.0, 0.5, 0.2, 0.45], [-0.9, 0.5, 0.1, 0.4], [0, 0.3, -0.9, 0.45]] },
-	{ puffs: [[0, 0.3, 0, 0.8], [0.4, 0.5, 0.4, 0.6], [-0.5, 0.4, -0.3, 0.55], [0.7, 0.4, -0.5, 0.5], [-0.3, 0.6, 0.6, 0.45], [-0.7, 0.3, 0.3, 0.4], [0.2, 0.7, -0.6, 0.4], [0.5, 0.7, 0, 0.35]] },
-	{ puffs: [[0, 0.4, 0, 1.1], [-0.8, 0.6, 0.2, 0.75], [0.7, 0.5, -0.4, 0.7], [-0.2, 0.8, 0.7, 0.55], [0.4, 0.7, -0.7, 0.5], [-0.6, 0.9, -0.3, 0.45], [0.9, 0.4, 0.5, 0.4], [-0.9, 0.3, -0.5, 0.35], [0.2, 0.5, 0.9, 0.4]] },
-];
+function smoothstep(t: number): number {
+	return t * t * (3 - 2 * t);
+}
 
-const SPHERE_SEGMENTS = 7;
+function lerp(a: number, b: number, t: number): number {
+	return a + (b - a) * t;
+}
 
-function buildCloudGeometry(
-	puffDefs: PuffDef,
-): THREE.BufferGeometry {
-	const tempSphere = new THREE.SphereGeometry(1, SPHERE_SEGMENTS, Math.ceil(SPHERE_SEGMENTS * 0.7));
-	const posAttr = tempSphere.attributes.position;
-	const norAttr = tempSphere.attributes.normal;
-	const uvAttr = tempSphere.attributes.uv;
+function valueNoise3D(x: number, y: number, z: number): number {
+	const ix = Math.floor(x);
+	const iy = Math.floor(y);
+	const iz = Math.floor(z);
+	const fx = x - ix;
+	const fy = y - iy;
+	const fz = z - iz;
+	const sx = smoothstep(fx);
+	const sy = smoothstep(fy);
+	const sz = smoothstep(fz);
 
-	const allPos: number[] = [];
-	const allNor: number[] = [];
-	const allUv: number[] = [];
+	const n000 = hash3(ix, iy, iz);
+	const n100 = hash3(ix + 1, iy, iz);
+	const n010 = hash3(ix, iy + 1, iz);
+	const n110 = hash3(ix + 1, iy + 1, iz);
+	const n001 = hash3(ix, iy, iz + 1);
+	const n101 = hash3(ix + 1, iy, iz + 1);
+	const n011 = hash3(ix, iy + 1, iz + 1);
+	const n111 = hash3(ix + 1, iy + 1, iz + 1);
 
-	for (const [px, py, pz, r] of puffDefs.puffs) {
-		for (let i = 0; i < posAttr.count; i++) {
-			const x = posAttr.getX(i) * r + px;
-			const y = posAttr.getY(i) * r + py;
-			const z = posAttr.getZ(i) * r + pz;
-			allPos.push(x, y, z);
+	return lerp(
+		lerp(lerp(n000, n100, sx), lerp(n010, n110, sx), sy),
+		lerp(lerp(n001, n101, sx), lerp(n011, n111, sx), sy),
+		sz,
+	);
+}
 
-			const nx = norAttr.getX(i);
-			const ny = norAttr.getY(i);
-			const nz = norAttr.getZ(i);
-			allNor.push(nx, ny, nz);
+function fbm(x: number, y: number, z: number, octaves: number = 4): number {
+	let value = 0;
+	let amplitude = 1;
+	let frequency = 1;
+	let maxVal = 0;
+	for (let i = 0; i < octaves; i++) {
+		value += amplitude * valueNoise3D(x * frequency, y * frequency, z * frequency);
+		maxVal += amplitude;
+		amplitude *= 0.5;
+		frequency *= 2;
+	}
+	return value / maxVal;
+}
 
-			allUv.push(uvAttr.getX(i), uvAttr.getY(i));
-		}
+const CLOUD_SEEDS = [137, 421, 733, 991, 1193, 1559, 1787, 2011];
+
+function createCloudGeometry(seed: number): THREE.BufferGeometry {
+	const widthSegs = 36;
+	const heightSegs = 26;
+	const geo = new THREE.SphereGeometry(1, widthSegs, heightSegs);
+	const pos = geo.attributes.position as THREE.Float32BufferAttribute;
+
+	for (let i = 0; i < pos.count; i++) {
+		const x = pos.getX(i);
+		const y = pos.getY(i);
+		const z = pos.getZ(i);
+
+		const len = Math.sqrt(x * x + y * y + z * z);
+		const nx = x / len;
+		const ny = y / len;
+		const nz = z / len;
+
+		const noiseVal = fbm(
+			nx * 2.5 + seed * 0.01,
+			ny * 2.5 + seed * 0.013,
+			nz * 2.5 + seed * 0.017,
+			4,
+		);
+
+		const baseRadius = 0.5 + noiseVal * 0.5;
+
+		const bottom = Math.max(0, Math.min(1, (ny + 1) * 1.8));
+		const flattenBottom = 0.3 + bottom * 0.7;
+
+		const radius = baseRadius * flattenBottom;
+
+		pos.setXYZ(i, nx * radius, ny * radius, nz * radius);
 	}
 
-	tempSphere.dispose();
-	const geo = new THREE.BufferGeometry();
-	geo.setAttribute("position", new THREE.Float32BufferAttribute(allPos, 3));
-	geo.setAttribute("normal", new THREE.Float32BufferAttribute(allNor, 3));
-	geo.setAttribute("uv", new THREE.Float32BufferAttribute(allUv, 2));
+	pos.needsUpdate = true;
+	geo.computeVertexNormals();
 	return geo;
 }
 
-const cloudGeometries: THREE.BufferGeometry[] = PUFF_SEED_CONFIGS.map(buildCloudGeometry);
+const cloudGeometries: THREE.BufferGeometry[] = CLOUD_SEEDS.map(createCloudGeometry);
 
 function pickCloudGeometry(): THREE.BufferGeometry {
 	const idx = Math.floor(Math.random() * cloudGeometries.length);
@@ -234,7 +275,7 @@ export class SkyScene {
 		this.skyDome = new THREE.Mesh(domeGeo, domeMat);
 		this.scene.add(this.skyDome);
 
-		const sunGeo = new THREE.SphereGeometry(0.5, 12, 12);
+		const sunGeo = new THREE.SphereGeometry(0.5, 16, 16);
 		const sunMat = new THREE.MeshBasicMaterial({ color: variant.sunColor });
 		this.sunSphere = new THREE.Mesh(sunGeo, sunMat);
 		const sunPos = variant.sunPosition;
@@ -244,22 +285,21 @@ export class SkyScene {
 
 		for (let i = 0; i < variant.cloudCount; i++) {
 			const geo = pickCloudGeometry();
-			const shade = 0.85 + Math.random() * 0.15;
+			const shade = 0.9 + Math.random() * 0.1;
 			const mat = new THREE.MeshStandardMaterial({
 				color: new THREE.Color(shade, shade, shade),
-				roughness: 0.3,
+				roughness: 0.25,
 				metalness: 0.0,
-				flatShading: false,
 			});
 			const mesh = new THREE.Mesh(geo, mat);
 
 			const angle = Math.random() * Math.PI * 2;
-			const dist = 10 + Math.random() * 50;
+			const dist = 10 + Math.random() * 55;
 			const height = variant.cloudHeightMin + Math.random() * (variant.cloudHeightMax - variant.cloudHeightMin);
-			const scale = 0.6 + Math.random() * 2.5;
+			const scale = 1.0 + Math.random() * 3.0;
 
 			mesh.position.set(Math.cos(angle) * dist, height, Math.sin(angle) * dist);
-			mesh.scale.set(scale, scale * (0.5 + Math.random() * 0.4), scale);
+			mesh.scale.set(scale, scale * (0.5 + Math.random() * 0.3), scale);
 			mesh.rotation.set(0, Math.random() * Math.PI * 2, 0);
 			mesh.castShadow = false;
 			mesh.receiveShadow = false;
