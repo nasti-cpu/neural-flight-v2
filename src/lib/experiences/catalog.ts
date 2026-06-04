@@ -1,5 +1,6 @@
 import { manifest as cloudTowers } from "./cloud-towers";
 import { manifest as gradientPrism } from "./gradient-prism";
+import { manifest as insectWorld } from "./insect-world";
 import { manifest as mountainFlight } from "./mountain-flight";
 import { manifest as shaderDemo } from "./shader-demo";
 import type { ExperienceManifest } from "./types";
@@ -15,6 +16,7 @@ import type { ExperienceManifest } from "./types";
 const CATALOG: Record<string, ExperienceManifest> = {
 	"cloud-towers": cloudTowers,
 	"gradient-prism": gradientPrism,
+	"insect-world": insectWorld,
 	"mountain-flight": mountainFlight,
 	"shader-demo": shaderDemo,
 };
