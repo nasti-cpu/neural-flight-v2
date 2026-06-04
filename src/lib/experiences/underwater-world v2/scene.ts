@@ -477,23 +477,40 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 	});
 
 	// ── Start Coral Reef (model) near start city ──
-	const startReefX = 60;
-	const startReefZ = -180;
-	const startReefY = getTerrainHeight(startReefX, startReefZ, amplitude, scale);
+	const startReefY = getTerrainHeight(START_CITY_X, START_CITY_Z, amplitude, scale);
+
+	// Patch 1: around the city perimeter
+	const reef1Y = getTerrainHeight(START_CITY_X - 35, START_CITY_Z - 30, amplitude, scale);
+	stateObj.startCoralReef = new THREE.Group();
+	stateObj.startCoralReef.visible = true;
+	scene.add(stateObj.startCoralReef);
+
 	ensureCoralModelLoaded().then(() => {
 		const rc = scatterCoralModels({
-			count: 10 + Math.floor(Math.random() * 6),
-			radius: 30,
-			cx: startReefX,
-			cz: startReefZ,
-			groundY: startReefY,
+			count: 12 + Math.floor(Math.random() * 8),
+			radius: 25,
+			cx: START_CITY_X - 35,
+			cz: START_CITY_Z - 30,
+			groundY: reef1Y,
 			scaleRange: [1.5, 3.0],
-			kaleidoChance: 0.4,
+			kaleidoChance: 0.5,
 		});
 		if (rc) {
-			rc.visible = true;
-			scene.add(rc);
-			stateObj.startCoralReef = rc;
+			stateObj.startCoralReef!.add(rc);
+		}
+		// Patch 2: other side of city
+		const reef2Y = getTerrainHeight(START_CITY_X + 40, START_CITY_Z + 20, amplitude, scale);
+		const rc2 = scatterCoralModels({
+			count: 8 + Math.floor(Math.random() * 6),
+			radius: 20,
+			cx: START_CITY_X + 40,
+			cz: START_CITY_Z + 20,
+			groundY: reef2Y,
+			scaleRange: [1.0, 2.5],
+			kaleidoChance: 0.4,
+		});
+		if (rc2) {
+			stateObj.startCoralReef!.add(rc2);
 		}
 	});
 
