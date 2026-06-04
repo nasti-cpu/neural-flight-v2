@@ -166,8 +166,8 @@
 			cityScene.rotation.y = -Math.PI / 4;
 			scene.add(cityScene);
 
-			meadow.clearRotatedRect(18, 0, 4.3, 4.4, Math.PI / 4, 0.01);
-			clearInstancesInRect(flowerMeshes, 18, 0, 4.3, 4.4, Math.PI / 4, 0.01);
+			meadow.clearArea(18, 0, 7);
+			clearInstancesInRect(flowerMeshes, 18, 0, 6, 6, Math.PI / 4, 1);
 
 			loading = false;
 		}
