@@ -5,9 +5,22 @@ import { createDuneSand, disposeDuneSand } from "$lib/experiences/underwater-wor
 import type { DuneSandResult } from "$lib/experiences/underwater-world v2/Biome/Sand/sand";
 import { createCity, disposeCity, updateCityPulse } from "$lib/experiences/underwater-world v2/Biome/Städte/city";
 import type { CityResult, CityVariant } from "$lib/experiences/underwater-world v2/Biome/Städte/city";
+import {
+	createModelCitySync,
+	updateModelCityPulse,
+	disposeModelCity,
+	ensureModelLoaded,
+} from "$lib/experiences/underwater-world v2/Biome/Städte/modelCity";
+import type { ModelCityResult } from "$lib/experiences/underwater-world v2/Biome/Städte/modelCity";
 import { createGuidancePath, VARIANT_CONFIGS, type GuidancePath } from "$lib/experiences/underwater-world v2/Sinne/Leitsystem/guidance";
 import { createFishSchool, disposeFishSchool, loadFishGeometry, updateFishSchool, STANDARD_SCHOOL_CONFIGS, type FishSchool } from "$lib/experiences/underwater-world v2/Objekte/Fische/fish";
 import { createProceduralCoralGeometry } from "$lib/experiences/underwater-world v2/Biome/Korallenriff/korallenriff";
+import { createDolphinPod, updateDolphinPod, disposeDolphinPod, loadDolphinGeometry, DOLPHIN_MODE_META, type DolphinPod } from "$lib/experiences/underwater-world v2/Objekte/Delfine/dolphin";
+import { createJellySwarm, updateJellySwarm, disposeJellySwarm, JELLY_MODE_META } from "$lib/experiences/underwater-world v2/Objekte/Quallen/jellyfish";
+import type { JellySwarm, JellyMode } from "$lib/experiences/underwater-world v2/Objekte/Quallen/jellyfish";
+import { createCoralReef, disposeCoralReef } from "$lib/experiences/underwater-world v2/Biome/Korallenriff/korallenriff";
+import type { CoralReef, CoralBiome } from "$lib/experiences/underwater-world v2/Biome/Korallenriff/korallenriff";
+import { scatterCoralModels, disposeScatterGroup, ensureModelLoaded as ensureCoralModelLoaded } from "$lib/experiences/underwater-world v2/Biome/Korallenriff/modelCoralReef";
 
 // ── Constants ──
 
@@ -25,6 +38,9 @@ const CORAL_STREAM_RADIUS = 300;
 const CITY_VARIANTS: CityVariant[] = ["altstadt", "zentrum", "vorort"];
 const SEAGRASS_TYPES: ("algae" | "long" | "bushy")[] = SEAGRASS_META.map((m) => m.id);
 const STREAM_INIT_RADIUS = 200;
+const START_CITY_X = 0;
+const START_CITY_Z = -200;
+const CITY_DOME_RADIUS = 65;
 
 // ── Noise ──
 
@@ -111,18 +127,23 @@ export interface UnderwaterWorldState extends ExperienceState {
 	terrainMat: THREE.MeshStandardMaterial;
 	sandEntries: {
 		wx: number; wz: number;
-		variant: "plain" | "seagrass" | "city";
+		variant: "plain" | "seagrass" | "city" | "reef";
 		cityVariant?: CityVariant;
 		seagrassType?: "algae" | "long" | "bushy";
-		dune: DuneSandResult;
+		reefBiome?: CoralBiome;
+		dune?: DuneSandResult;
 		meadow?: SeagrassMeadow;
 		city?: CityResult;
+		modelCity?: ModelCityResult;
+		reef?: CoralReef;
+		modelCoralReef?: THREE.Group;
 	}[];
 	sandPositions: {
 		wx: number; wz: number;
-		variant: "plain" | "seagrass" | "city";
+		variant: "plain" | "seagrass" | "city" | "reef";
 		cityVariant?: CityVariant;
 		seagrassType?: "algae" | "long" | "bushy";
+		reefBiome?: CoralBiome;
 	}[];
 	waterSurface: THREE.Mesh;
 	audio: AudioState | null;
@@ -132,6 +153,15 @@ export interface UnderwaterWorldState extends ExperienceState {
 	coralMeshes: THREE.InstancedMesh[];
 	coralGeos: THREE.BufferGeometry[];
 	coralPositions: { wx: number; wz: number; type: number; color: number }[];
+	dolphinPod: DolphinPod;
+	dolphinModeIndex: number;
+	dolphinModeTimer: number;
+	dolphinPrevMode: string;
+	startCityModelCity: ModelCityResult | null;
+	startCoralReef: THREE.Group | null;
+	jellySwarm: JellySwarm;
+	jellyMode: JellyMode;
+	jellyTimer: number;
 }
 
 // ── Terrain ──
@@ -279,13 +309,14 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 	}
 
 	// ── Sand patch positions (sand biome ≥ 0.50) ──
-	// Distribution: 50% seagrass, 25% city, 25% plain
+	// Distribution: 40% seagrass, 20% city, 20% reef, 20% plain
 
 	const sandPositions: {
 		wx: number; wz: number;
-		variant: "plain" | "seagrass" | "city";
+		variant: "plain" | "seagrass" | "city" | "reef";
 		cityVariant?: CityVariant;
 		seagrassType?: "algae" | "long" | "bushy";
+		reefBiome?: CoralBiome;
 	}[] = [];
 	for (let si = 0; si < SAND_PATCH_COUNT * 4; si++) {
 		const wx = (hash2d(si * 19 + 3, si * 31 + 7) - 0.5) * 2800;
@@ -293,13 +324,15 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		const biome = getBiome(wx, wz);
 		if (biome >= 0.50) {
 			const roll = hash2d(wx * 13, wz * 17);
-			let variant: "plain" | "seagrass" | "city";
-			if (roll < 0.5) variant = "seagrass";
-			else if (roll < 0.75) variant = "city";
+			let variant: "plain" | "seagrass" | "city" | "reef";
+			if (roll < 0.4) variant = "seagrass";
+			else if (roll < 0.6) variant = "city";
+			else if (roll < 0.8) variant = "reef";
 			else variant = "plain";
 			const entry: typeof sandPositions[number] = { wx, wz, variant };
 			if (variant === "city") entry.cityVariant = CITY_VARIANTS[Math.floor(hash2d(wx * 7, wz * 11) * CITY_VARIANTS.length)];
 			if (variant === "seagrass") entry.seagrassType = SEAGRASS_TYPES[Math.floor(hash2d(wx * 5, wz * 13) * SEAGRASS_TYPES.length)];
+			if (variant === "reef") entry.reefBiome = hash2d(wx * 3, wz * 7) < 0.5 ? "shallow" : "deep";
 			sandPositions.push(entry);
 			if (sandPositions.length >= SAND_PATCH_COUNT) break;
 		}
@@ -365,6 +398,25 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		fishSchools.push(school);
 	}
 
+	// Dolphins
+	const dolphinGeo = await loadDolphinGeometry();
+	const dolphinPod = createDolphinPod(3, dolphinGeo ?? undefined);
+	dolphinPod.mesh.position.set(
+		camera.position.x + 12,
+		Math.max(camera.position.y - 2, 0),
+		camera.position.z - 18,
+	);
+	scene.add(dolphinPod.mesh);
+
+	// Jellyfish
+	const jellySwarm = createJellySwarm(6, 6, 4);
+	jellySwarm.mesh.position.set(
+		camera.position.x - 12,
+		Math.max(camera.position.y - 1, 0),
+		camera.position.z - 15,
+	);
+	scene.add(jellySwarm.mesh);
+
 	// Audio
 	let audio: AudioState | null = null;
 	try {
@@ -376,7 +428,7 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		loadAudioAssets(audio);
 	} catch { /* audio unavailable */ }
 
-	return {
+	const stateObj: UnderwaterWorldState = {
 		camera,
 		scene,
 		driftSpeed: 2,
@@ -400,7 +452,52 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		coralMeshes,
 		coralGeos,
 		coralPositions,
+		dolphinPod,
+		dolphinModeIndex: 0,
+		dolphinModeTimer: 5 + Math.random() * 4,
+		dolphinPrevMode: "leisurely",
+		jellySwarm,
+		jellyMode: "drifting",
+		jellyTimer: 8 + Math.random() * 7,
+		startCityModelCity: null,
+		startCoralReef: null,
 	};
+
+	// ── Start City (model) ──
+	// Pre-load model in background; create start city at fixed position
+	const startCityYVal = getTerrainHeight(START_CITY_X, START_CITY_Z, amplitude, scale);
+	ensureModelLoaded().then(() => {
+		const mc = createModelCitySync();
+		if (mc) {
+			mc.group.position.set(START_CITY_X, startCityYVal, START_CITY_Z);
+			mc.group.visible = true;
+			scene.add(mc.group);
+			stateObj.startCityModelCity = mc;
+		}
+	});
+
+	// ── Start Coral Reef (model) near start city ──
+	const startReefX = 60;
+	const startReefZ = -180;
+	const startReefY = getTerrainHeight(startReefX, startReefZ, amplitude, scale);
+	ensureCoralModelLoaded().then(() => {
+		const rc = scatterCoralModels({
+			count: 10 + Math.floor(Math.random() * 6),
+			radius: 30,
+			cx: startReefX,
+			cz: startReefZ,
+			groundY: startReefY,
+			scaleRange: [1.5, 3.0],
+			kaleidoChance: 0.4,
+		});
+		if (rc) {
+			rc.visible = true;
+			scene.add(rc);
+			stateObj.startCoralReef = rc;
+		}
+	});
+
+	return stateObj;
 }
 
 // ── Tick ──
@@ -504,9 +601,12 @@ export function tick(
 		const dx = e.wx - pos.x;
 		const dz = e.wz - pos.z;
 		if (dx * dx + dz * dz > 400 * 400) {
-			disposeDuneSand(e.dune, s.scene);
+		if (e.dune) disposeDuneSand(e.dune, s.scene);
 			if (e.meadow) disposeSeagrassMeadow(e.meadow, s.scene);
-			if (e.city) disposeCity(e.city, s.scene);
+			if (e.modelCoralReef) disposeScatterGroup(e.modelCoralReef, s.scene);
+			else if (e.reef) disposeCoralReef(e.reef, s.scene);
+			if (e.modelCity) disposeModelCity(e.modelCity, s.scene);
+			else if (e.city) disposeCity(e.city, s.scene);
 			s.sandEntries.splice(i, 1);
 		}
 	}
@@ -521,25 +621,66 @@ export function tick(
 			const dz = sp.wz - pos.z;
 			if (dx * dx + dz * dz > STREAM_INIT_RADIUS * STREAM_INIT_RADIUS) continue;
 
-			const dune = createDuneSand();
 			const sy = getTerrainHeight(sp.wx, sp.wz, s.terrainAmplitude, s.terrainScale);
-			dune.terrain.position.set(sp.wx, sy, sp.wz);
-			s.scene.add(dune.terrain);
+			const dune = sp.variant !== "reef" ? (() => {
+				const d = createDuneSand();
+				d.terrain.position.set(sp.wx, sy, sp.wz);
+				s.scene.add(d.terrain);
+				return d;
+			})() : undefined;
 
 			let meadow: SeagrassMeadow | undefined;
 			let city: CityResult | undefined;
+			let modelCity: ModelCityResult | undefined;
 
 			if (sp.variant === "seagrass" && sp.seagrassType) {
 				meadow = createSeagrassMeadow(sp.seagrassType, (x, z) => getTerrainHeight(x, z, s.terrainAmplitude, s.terrainScale));
 				s.scene.add(meadow.group);
 			}
 
-			if (sp.variant === "city" && sp.cityVariant) {
-				city = createCity(sp.cityVariant);
-				const sy = getTerrainHeight(sp.wx, sp.wz, s.terrainAmplitude, s.terrainScale);
-				city.group.position.set(sp.wx, sy, sp.wz);
-				city.group.visible = true;
-				s.scene.add(city.group);
+			if (sp.variant === "city") {
+				// Try model city first, fall back to procedural
+				const mc = createModelCitySync();
+				if (mc) {
+					mc.group.position.set(sp.wx, sy, sp.wz);
+					mc.group.visible = true;
+					s.scene.add(mc.group);
+					modelCity = mc;
+				} else if (sp.cityVariant) {
+					city = createCity(sp.cityVariant);
+					city.group.position.set(sp.wx, sy, sp.wz);
+					city.group.visible = true;
+					s.scene.add(city.group);
+				}
+			}
+
+			let reef: CoralReef | undefined;
+			let modelCoralReef: THREE.Group | undefined;
+			if (sp.variant === "reef") {
+				const mc = scatterCoralModels({
+					count: 8 + Math.floor(Math.random() * 5),
+					radius: 25 + Math.random() * 15,
+					cx: sp.wx,
+					cz: sp.wz,
+					groundY: sy,
+					scaleRange: [1.2, 2.8],
+					kaleidoChance: 0.4,
+				});
+				if (mc) {
+					mc.visible = true;
+					s.scene.add(mc);
+					modelCoralReef = mc;
+				} else if (sp.reefBiome) {
+					reef = createCoralReef(sp.reefBiome);
+					reef.terrain.position.set(sp.wx, sy, sp.wz);
+					reef.rocks.position.set(sp.wx, sy, sp.wz);
+					s.scene.add(reef.terrain);
+					s.scene.add(reef.rocks);
+					for (const m of reef.coralMeshes) {
+						m.position.set(sp.wx, sy, sp.wz);
+						s.scene.add(m);
+					}
+				}
 			}
 
 			s.sandEntries.push({
@@ -547,14 +688,18 @@ export function tick(
 				variant: sp.variant,
 				cityVariant: sp.cityVariant,
 				seagrassType: sp.seagrassType,
-				dune, meadow, city,
+				reefBiome: sp.reefBiome,
+				dune, meadow, city, modelCity, reef, modelCoralReef,
 			});
 		}
 	}
 
 	for (const e of s.sandEntries) {
 		if (e.meadow && e.seagrassType) updateSeagrassSway(e.meadow, elapsed, e.seagrassType);
-		if (e.city && e.cityVariant) {
+		if (e.modelCity) {
+			const sy = getTerrainHeight(e.wx, e.wz, s.terrainAmplitude, s.terrainScale);
+			updateModelCityPulse(e.modelCity, elapsed, true, sy);
+		} else if (e.city && e.cityVariant) {
 			const sy = getTerrainHeight(e.wx, e.wz, s.terrainAmplitude, s.terrainScale);
 			updateCityPulse(e.city, elapsed, true, sy);
 		}
@@ -562,7 +707,7 @@ export function tick(
 
 	// ── City Guidance Paths ──
 
-	const cityKeys = new Set(s.sandEntries.filter((e) => e.city).map((e) => `${e.wx},${e.wz}`));
+	const cityKeys = new Set(s.sandEntries.filter((e) => e.city || e.modelCity).map((e) => `${e.wx},${e.wz}`));
 	for (let i = s.cityGuidance.length - 1; i >= 0; i--) {
 		if (!cityKeys.has(s.cityGuidance[i].key)) {
 			s.scene.remove(s.cityGuidance[i].path.group);
@@ -571,7 +716,7 @@ export function tick(
 		}
 	}
 	for (const e of s.sandEntries) {
-		if (!e.city) continue;
+		if (!e.city && !e.modelCity) continue;
 		const key = `${e.wx},${e.wz}`;
 		if (s.cityGuidance.some((g) => g.key === key)) continue;
 		const sy = getTerrainHeight(e.wx, e.wz, s.terrainAmplitude, s.terrainScale);
@@ -620,6 +765,15 @@ export function tick(
 
 	const behindDir = new THREE.Vector3(0, 0, 1).applyQuaternion(ctx.camera.quaternion);
 	const fishTerrain = (wx: number, wz: number) => getTerrainHeight(wx, wz, s.terrainAmplitude, s.terrainScale);
+
+	// ── City dome repel centers ──
+	const repelCenters: { x: number; z: number; radius: number }[] = [];
+	if (s.startCityModelCity) repelCenters.push({ x: START_CITY_X, z: START_CITY_Z, radius: CITY_DOME_RADIUS });
+	for (const e of s.sandEntries) {
+		if (e.modelCity || e.city) repelCenters.push({ x: e.wx, z: e.wz, radius: CITY_DOME_RADIUS });
+	}
+	const repelArg = repelCenters.length > 0 ? repelCenters : undefined;
+
 	for (let fi = 0; fi < s.fishSchools.length; fi++) {
 		const school = s.fishSchools[fi];
 		const behind = new THREE.Vector3(
@@ -628,8 +782,48 @@ export function tick(
 			pos.z + behindDir.z * (8 + fi * 4),
 		);
 		school.mesh.position.copy(behind);
-		updateFishSchool(school, delta, elapsed, STANDARD_SCHOOL_CONFIGS[fi].swimMode, behind, fishTerrain);
+		updateFishSchool(school, delta, elapsed, STANDARD_SCHOOL_CONFIGS[fi].swimMode, behind, fishTerrain, repelArg);
 		school.material.emissiveIntensity = 0.3 + Math.sin(elapsed * 0.5 + fi) * 0.2;
+	}
+
+	// ── Dolphins ──
+
+	s.dolphinModeTimer -= delta;
+	if (s.dolphinModeTimer <= 0) {
+		s.dolphinModeIndex = (s.dolphinModeIndex + 1) % 3;
+		s.dolphinModeTimer = 8 + Math.random() * 6;
+	}
+	const dMode = DOLPHIN_MODE_META[s.dolphinModeIndex].id;
+
+	// When mode changes, reset velocities so dolphins smoothly transition
+	if (dMode !== s.dolphinPrevMode) {
+		s.dolphinPrevMode = dMode;
+		for (let di = 0; di < 3; di++) {
+			const di3 = di * 3;
+			s.dolphinPod.velocities[di3] = 0;
+			s.dolphinPod.velocities[di3 + 1] = 0;
+			s.dolphinPod.velocities[di3 + 2] = 0;
+			s.dolphinPod.rotations[di] = 0;
+		}
+	}
+
+	updateDolphinPod(s.dolphinPod, delta, elapsed, dMode, s.dolphinPod.mesh.position, fishTerrain, repelArg);
+
+	// ── Jellyfish ──
+
+	s.jellyTimer -= delta;
+	if (s.jellyTimer <= 0) {
+		s.jellyMode = s.jellyMode === "drifting" ? "pulsing" : "drifting";
+		s.jellyTimer = 8 + Math.random() * 7;
+	}
+
+	updateJellySwarm(s.jellySwarm, delta, elapsed, s.jellyMode, s.jellySwarm.mesh.position, repelArg);
+
+	// ── Start City ──
+
+	if (s.startCityModelCity) {
+		const sy = getTerrainHeight(START_CITY_X, START_CITY_Z, s.terrainAmplitude, s.terrainScale);
+		updateModelCityPulse(s.startCityModelCity, elapsed, true, sy);
 	}
 
 	// ── Water Surface ──
@@ -673,10 +867,17 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 	scene.fog = null;
 
 	for (const e of s.sandEntries) {
-		disposeDuneSand(e.dune, scene);
+		if (e.dune) disposeDuneSand(e.dune, scene);
 		if (e.meadow) disposeSeagrassMeadow(e.meadow, scene);
-		if (e.city) disposeCity(e.city, scene);
+		if (e.modelCoralReef) disposeScatterGroup(e.modelCoralReef, scene);
+		else if (e.reef) disposeCoralReef(e.reef, scene);
+		if (e.modelCity) disposeModelCity(e.modelCity, scene);
+		else if (e.city) disposeCity(e.city, scene);
 	}
+
+	if (s.startCityModelCity) disposeModelCity(s.startCityModelCity, scene);
+
+	if (s.startCoralReef) disposeScatterGroup(s.startCoralReef, scene);
 
 	for (const g of s.cityGuidance) {
 		g.path.dispose();
@@ -690,6 +891,10 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 	for (const school of s.fishSchools) {
 		disposeFishSchool(school, scene);
 	}
+
+	disposeDolphinPod(s.dolphinPod, scene);
+
+	disposeJellySwarm(s.jellySwarm, scene);
 
 	for (const mesh of s.coralMeshes) {
 		scene.remove(mesh);
