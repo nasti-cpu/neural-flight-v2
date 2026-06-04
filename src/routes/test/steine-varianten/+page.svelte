@@ -3,7 +3,6 @@
 	import { browser } from "$app/environment";
 	import * as THREE from "three";
 	import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-	import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 	let canvas: HTMLCanvasElement;
 	let renderer: THREE.WebGLRenderer;
@@ -11,38 +10,137 @@
 	let camera: THREE.PerspectiveCamera;
 	let controls: OrbitControls;
 	let animationId: number;
-	let loading = $state(true);
+
 	let variantIndex = $state(0);
 
-	interface MaterialPreset {
+	interface StoneVariant {
 		name: string;
 		color: THREE.ColorRepresentation;
+		colorVar: number;
 		roughness: number;
 		metalness: number;
+		detail: number;
+		noiseScale: number;
+		noiseAmp: number;
+		scaleRange: [number, number];
+		count: number;
 	}
 
-	const PRESETS: MaterialPreset[] = [
-		{ name: "Original (Textur)", color: "#ffffff", roughness: 0.8, metalness: 0 },
-		{ name: "Heller Kiesel", color: "#c8c0b8", roughness: 0.5, metalness: 0 },
-		{ name: "Dunkler Basalt", color: "#3a3a40", roughness: 0.6, metalness: 0.05 },
-		{ name: "Warmgrau", color: "#9a9088", roughness: 0.55, metalness: 0 },
-		{ name: "Sandstein", color: "#c4b49c", roughness: 0.7, metalness: 0 },
-		{ name: "Schiefer", color: "#505058", roughness: 0.5, metalness: 0.1 },
-		{ name: "Marmor", color: "#e0dcd4", roughness: 0.25, metalness: 0.05 },
+	const VARIANTS: StoneVariant[] = [
+		{
+			name: "Flusskiesel",
+			color: "#b8b0a8",
+			colorVar: 0.04,
+			roughness: 0.45,
+			metalness: 0,
+			detail: 3,
+			noiseScale: 6,
+			noiseAmp: 0.02,
+			scaleRange: [0.15, 0.45],
+			count: 25,
+		},
+		{
+			name: "Granitbrocken",
+			color: "#6a6a72",
+			colorVar: 0.06,
+			roughness: 0.5,
+			metalness: 0.1,
+			detail: 3,
+			noiseScale: 6,
+			noiseAmp: 0.02,
+			scaleRange: [0.15, 0.45],
+			count: 22,
+		},
+		{
+			name: "Sandstein",
+			color: "#c4b49c",
+			colorVar: 0.03,
+			roughness: 0.6,
+			metalness: 0,
+			detail: 3,
+			noiseScale: 6,
+			noiseAmp: 0.02,
+			scaleRange: [0.15, 0.45],
+			count: 22,
+		},
+		{
+			name: "Basalt",
+			color: "#383840",
+			colorVar: 0.02,
+			roughness: 0.45,
+			metalness: 0.05,
+			detail: 3,
+			noiseScale: 6,
+			noiseAmp: 0.02,
+			scaleRange: [0.15, 0.45],
+			count: 25,
+		},
+		{
+			name: "Kalkstein",
+			color: "#d4d0c8",
+			colorVar: 0.03,
+			roughness: 0.55,
+			metalness: 0,
+			detail: 3,
+			noiseScale: 6,
+			noiseAmp: 0.02,
+			scaleRange: [0.15, 0.45],
+			count: 22,
+		},
+		{
+			name: "Marmor",
+			color: "#e0dcd4",
+			colorVar: 0.08,
+			roughness: 0.2,
+			metalness: 0.05,
+			detail: 3,
+			noiseScale: 6,
+			noiseAmp: 0.02,
+			scaleRange: [0.15, 0.45],
+			count: 25,
+		},
 	];
 
-	const STONE_COUNT = 25;
-	const dummy = new THREE.Object3D();
-	let stoneParts: { geo: THREE.BufferGeometry; mat: THREE.Material }[] = [];
 	let stoneMeshes: THREE.InstancedMesh[] = [];
 
-	function loadGLB(url: string): Promise<THREE.Group> {
-		return new Promise((resolve, reject) => {
-			new GLTFLoader().load(url, (gltf) => resolve(gltf.scene), () => {}, reject);
-		});
+	function smoothNoise(p: THREE.Vector3): number {
+		let v = 0;
+		v += Math.sin(p.x * 1.3 + p.y * 2.7 + p.z * 3.1) * 0.5;
+		v += Math.sin(p.x * 4.1 + p.y * 0.7 + p.z * 5.3) * 0.25;
+		v += Math.sin(p.x * 7.5 + p.y * 9.2 + p.z * 2.9) * 0.125;
+		v += Math.sin(p.x * 12.3 + p.y * 6.1 + p.z * 8.7) * 0.0625;
+		return v;
 	}
 
-	function buildVariant(presetIndex: number) {
+	function createProceduralStone(params: StoneVariant): THREE.BufferGeometry {
+		const geo = new THREE.IcosahedronGeometry(1, params.detail);
+
+		const pos = geo.attributes.position;
+		const vertex = new THREE.Vector3();
+		const noisePos = new THREE.Vector3();
+		const colors: number[] = [];
+
+		const baseColor = new THREE.Color(params.color);
+
+		for (let i = 0; i < pos.count; i++) {
+			vertex.fromBufferAttribute(pos, i).normalize();
+			noisePos.copy(vertex).multiplyScalar(params.noiseScale);
+			const n = smoothNoise(noisePos);
+			const displace = n * params.noiseAmp;
+			vertex.multiplyScalar(1 + displace);
+			pos.setXYZ(i, vertex.x, vertex.y, vertex.z);
+
+			const variation = 1 + (Math.random() - 0.5) * params.colorVar * 2;
+			const c = baseColor.clone().multiplyScalar(variation);
+			colors.push(c.r, c.g, c.b);
+		}
+		pos.needsUpdate = true;
+		geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+		geo.computeVertexNormals();
+		return geo;
+	}
+
+	function buildVariant(index: number) {
 		for (const m of stoneMeshes) {
 			scene.remove(m);
 			m.geometry.dispose();
@@ -54,40 +152,39 @@
 		}
 		stoneMeshes = [];
 
-		const preset = PRESETS[presetIndex];
+		const variant = VARIANTS[index];
+		const geo = createProceduralStone(variant);
+		const mat = new THREE.MeshStandardMaterial({
+			color: variant.color,
+			roughness: variant.roughness,
+			metalness: variant.metalness,
+			vertexColors: true,
+			flatShading: false,
+		});
 
-		for (const part of stoneParts) {
-			const mat =
-				presetIndex === 0
-					? part.mat
-					: new THREE.MeshStandardMaterial({
-							color: preset.color,
-							roughness: preset.roughness,
-							metalness: preset.metalness,
-						});
+		const count = variant.count;
+		const mesh = new THREE.InstancedMesh(geo, mat, count);
+		mesh.castShadow = true;
+		mesh.receiveShadow = true;
 
-			const mesh = new THREE.InstancedMesh(part.geo, mat, STONE_COUNT);
-			mesh.castShadow = true;
-			mesh.receiveShadow = true;
-
-			for (let i = 0; i < STONE_COUNT; i++) {
-				const angle = Math.random() * Math.PI * 2;
-				const dist = 2 + Math.random() * 16;
-				const s = 0.03 + Math.random() * 0.04;
-				dummy.position.set(Math.cos(angle) * dist, -0.02, Math.sin(angle) * dist);
-				dummy.scale.setScalar(s);
-				dummy.rotation.set(
-					(Math.random() - 0.5) * 0.5,
-					Math.random() * Math.PI * 2,
-					(Math.random() - 0.5) * 0.5,
-				);
-				dummy.updateMatrix();
-				mesh.setMatrixAt(i, dummy.matrix);
-			}
-			mesh.instanceMatrix.needsUpdate = true;
-			scene.add(mesh);
-			stoneMeshes.push(mesh);
+		const dummy = new THREE.Object3D();
+		for (let i = 0; i < count; i++) {
+			const angle = Math.random() * Math.PI * 2;
+			const dist = 2 + Math.random() * 16;
+			const s = variant.scaleRange[0] + Math.random() * (variant.scaleRange[1] - variant.scaleRange[0]);
+			dummy.position.set(Math.cos(angle) * dist, -0.02, Math.sin(angle) * dist);
+			dummy.scale.set(s, s * (0.7 + Math.random() * 0.6), s * (0.7 + Math.random() * 0.6));
+			dummy.rotation.set(
+				(Math.random() - 0.5) * 0.4,
+				Math.random() * Math.PI * 2,
+				(Math.random() - 0.5) * 0.4,
+			);
+			dummy.updateMatrix();
+			mesh.setMatrixAt(i, dummy.matrix);
 		}
+		mesh.instanceMatrix.needsUpdate = true;
+		scene.add(mesh);
+		stoneMeshes = [mesh];
 	}
 
 	onMount(() => {
@@ -121,7 +218,8 @@
 		ground.receiveShadow = true;
 		scene.add(ground);
 
-		scene.add(new THREE.AmbientLight(0x8899aa, 0.5));
+		const ambient = new THREE.AmbientLight(0x8899aa, 0.5);
+		scene.add(ambient);
 
 		const sun = new THREE.DirectionalLight(0xffeedd, 1.8);
 		sun.position.set(10, 15, 8);
@@ -135,24 +233,12 @@
 		sun.shadow.camera.bottom = -15;
 		scene.add(sun);
 
-		scene.add(new THREE.HemisphereLight(0x87ceeb, 0x3a5f3a, 0.6));
+		const hemi = new THREE.HemisphereLight(0x87ceeb, 0x3a5f3a, 0.6);
+		scene.add(hemi);
+
 		scene.fog = new THREE.Fog("#c8d8e8", 20, 40);
 
-		async function init() {
-			const gltfScene = await loadGLB("/models/steine/small_stones_pack_vcljbb1iw_raw.glb");
-			gltfScene.traverse((child) => {
-				if (child instanceof THREE.Mesh) {
-					stoneParts.push({ geo: child.geometry, mat: child.material });
-				}
-			});
-			loading = false;
-			buildVariant(0);
-		}
-
-		init().catch((err) => {
-			console.error("Fehler:", err);
-			loading = false;
-		});
+		buildVariant(0);
 
 		function animate(time: number) {
 			controls.update();
@@ -196,22 +282,19 @@
 	<canvas bind:this={canvas}></canvas>
 
 	<div class="ui-overlay">
-		<h1>🪨 Stein-Varianten (Blender-Modelle)</h1>
-		{#if loading}
-			<p class="loading">Lade Stein-Modell (387 MB) …</p>
-		{/if}
+		<h1>🪨 Stein-Varianten</h1>
 		<p class="hint">Ziehen zum Drehen • Scrollen zum Zoomen</p>
 	</div>
 
 	<div class="toolbar">
-		{#each PRESETS as preset, i}
+		{#each VARIANTS as variant, i}
 			<button
 				class="variant-btn"
 				class:active={variantIndex === i}
 				onclick={() => selectVariant(i)}
 			>
-				<span class="swatch" style="background: {preset.color}"></span>
-				<span class="label">{preset.name}</span>
+				<span class="swatch" style="background: {variant.color}"></span>
+				<span class="label">{variant.name}</span>
 			</button>
 		{/each}
 	</div>
@@ -246,13 +329,6 @@
 		font-weight: 600;
 		text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 		margin: 0 0 2px;
-	}
-
-	.loading {
-		color: rgba(255, 255, 255, 0.8);
-		font-size: 0.85rem;
-		margin: 8px 0;
-		text-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 	}
 
 	.hint {

@@ -25,28 +25,52 @@
 		});
 	}
 
-	function scatterStones(parts: { geo: THREE.BufferGeometry; mat: THREE.Material }[], count: number) {
-		for (const { geo, mat } of parts) {
-			const mesh = new THREE.InstancedMesh(geo, mat, count);
-			mesh.castShadow = true;
-			mesh.receiveShadow = true;
-			for (let i = 0; i < count; i++) {
-				const angle = Math.random() * Math.PI * 2;
-				const dist = 2 + Math.random() * 18;
-				const s = 0.025 + Math.random() * 0.04;
-				dummy.position.set(Math.cos(angle) * dist, -0.02, Math.sin(angle) * dist);
-				dummy.scale.setScalar(s);
-				dummy.rotation.set(
-					(Math.random() - 0.5) * 0.5,
-					Math.random() * Math.PI * 2,
-					(Math.random() - 0.5) * 0.5,
-				);
-				dummy.updateMatrix();
-				mesh.setMatrixAt(i, dummy.matrix);
-			}
-			mesh.instanceMatrix.needsUpdate = true;
-			scene.add(mesh);
+	function smoothNoise(p: THREE.Vector3): number {
+		let v = 0;
+		v += Math.sin(p.x * 1.3 + p.y * 2.7 + p.z * 3.1) * 0.5;
+		v += Math.sin(p.x * 4.1 + p.y * 0.7 + p.z * 5.3) * 0.25;
+		v += Math.sin(p.x * 7.5 + p.y * 9.2 + p.z * 2.9) * 0.125;
+		v += Math.sin(p.x * 12.3 + p.y * 6.1 + p.z * 8.7) * 0.0625;
+		return v;
+	}
+
+	function createStoneGeometry(): THREE.BufferGeometry {
+		const geo = new THREE.IcosahedronGeometry(1, 3);
+		const pos = geo.attributes.position;
+		const vertex = new THREE.Vector3();
+		const noisePos = new THREE.Vector3();
+		for (let i = 0; i < pos.count; i++) {
+			vertex.fromBufferAttribute(pos, i).normalize();
+			noisePos.copy(vertex).multiplyScalar(6);
+			const n = smoothNoise(noisePos);
+			vertex.multiplyScalar(1 + n * 0.02);
+			pos.setXYZ(i, vertex.x, vertex.y, vertex.z);
 		}
+		pos.needsUpdate = true;
+		geo.computeVertexNormals();
+		return geo;
+	}
+
+	function scatterStones(geo: THREE.BufferGeometry, mat: THREE.Material, count: number) {
+		const mesh = new THREE.InstancedMesh(geo, mat, count);
+		mesh.castShadow = true;
+		mesh.receiveShadow = true;
+		for (let i = 0; i < count; i++) {
+			const angle = Math.random() * Math.PI * 2;
+			const dist = 2 + Math.random() * 18;
+			const s = 0.15 + Math.random() * 0.3;
+			dummy.position.set(Math.cos(angle) * dist, -0.02, Math.sin(angle) * dist);
+			dummy.scale.set(s, s * (0.7 + Math.random() * 0.6), s * (0.7 + Math.random() * 0.6));
+			dummy.rotation.set(
+				(Math.random() - 0.5) * 0.4,
+				Math.random() * Math.PI * 2,
+				(Math.random() - 0.5) * 0.4,
+			);
+			dummy.updateMatrix();
+			mesh.setMatrixAt(i, dummy.matrix);
+		}
+		mesh.instanceMatrix.needsUpdate = true;
+		scene.add(mesh);
 	}
 
 	onMount(() => {
@@ -77,11 +101,10 @@
 		scene.fog = new THREE.Fog(variant.skyBottom, 25, 60);
 
 		async function loadEverything() {
-			const [armeriaScene, spiderScene, lungwortScene, stoneScene] = await Promise.all([
+			const [armeriaScene, spiderScene, lungwortScene] = await Promise.all([
 				loadGLB("/models/blumen/glb_Alba_Armeria_Spring_Pink.glb"),
 				loadGLB("/models/blumen/spider_lily_lycoris_radiata.glb"),
 				loadGLB("/models/blumen/Lungwort Spring.glb"),
-				loadGLB("/models/steine/small_stones_pack_vcljbb1iw_raw.glb"),
 			]);
 
 			const spiderParts: { geo: THREE.BufferGeometry; mat: THREE.Material }[] = [];
@@ -106,13 +129,6 @@
 			lungwortScene.traverse((child) => {
 				if (child instanceof THREE.Mesh) {
 					lungwortParts.push({ geo: child.geometry, mat: child.material });
-				}
-			});
-
-			const stoneParts: { geo: THREE.BufferGeometry; mat: THREE.Material }[] = [];
-			stoneScene.traverse((child) => {
-				if (child instanceof THREE.Mesh) {
-					stoneParts.push({ geo: child.geometry, mat: child.material });
 				}
 			});
 
@@ -145,7 +161,14 @@
 			scatterFlower(spiderParts, 1.7, [0.6, 1.6], 25);
 			scatterFlower(lungwortParts, 0.025, [0.5, 1.5], 25);
 
-			scatterStones(stoneParts, 5);
+			const stoneGeo = createStoneGeometry();
+			const stoneMat = new THREE.MeshStandardMaterial({
+				color: "#b8b0a8",
+				roughness: 0.45,
+				metalness: 0,
+				flatShading: false,
+			});
+			scatterStones(stoneGeo, stoneMat, 30);
 
 			loading = false;
 		}
