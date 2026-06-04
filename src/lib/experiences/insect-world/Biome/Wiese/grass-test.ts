@@ -167,8 +167,8 @@ export class GrassMeadow {
 			const d = this.swayData[i];
 			const dx = d.baseX - cx;
 			const dz = d.baseZ - cz;
-			const localX = dx * cos + dz * sin;
-			const localZ = -dx * sin + dz * cos;
+			const localX = dx * cos - dz * sin;
+			const localZ = dx * sin + dz * cos;
 			if (Math.abs(localX) < bw && Math.abs(localZ) < bd) {
 				dummy.position.set(d.baseX, -100, d.baseZ);
 				dummy.scale.setScalar(1);

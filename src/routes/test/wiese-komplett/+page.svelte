@@ -77,15 +77,15 @@
 			const bw = hw + border;
 			const bd = hd + border;
 			const d = new THREE.Object3D();
-		const pos = new THREE.Vector3();
+			const pos = new THREE.Vector3();
 			for (const mesh of meshes) {
 				for (let i = 0; i < mesh.count; i++) {
 					mesh.getMatrixAt(i, d.matrix);
 					pos.setFromMatrixPosition(d.matrix);
 					const dx = pos.x - cx;
 					const dz = pos.z - cz;
-					const localX = dx * cos + dz * sin;
-					const localZ = -dx * sin + dz * cos;
+					const localX = dx * cos - dz * sin;
+					const localZ = dx * sin + dz * cos;
 					if (Math.abs(localX) < bw && Math.abs(localZ) < bd) {
 						d.position.set(pos.x, -100, pos.z);
 						d.scale.setScalar(1);
@@ -166,8 +166,8 @@
 			cityScene.rotation.y = -Math.PI / 4;
 			scene.add(cityScene);
 
-			meadow.clearRotatedRect(18, 0, 4.3, 4.4, -Math.PI / 4, 0.01);
-			clearInstancesInRect(flowerMeshes, 18, 0, 4.3, 4.4, -Math.PI / 4, 0.01);
+			meadow.clearRotatedRect(18, 0, 4.3, 4.4, Math.PI / 4, 0.01);
+			clearInstancesInRect(flowerMeshes, 18, 0, 4.3, 4.4, Math.PI / 4, 0.01);
 
 			loading = false;
 		}
