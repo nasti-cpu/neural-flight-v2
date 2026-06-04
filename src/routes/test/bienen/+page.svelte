@@ -5,6 +5,7 @@
 	import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 	import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 	import { SkyScene, SKY_VARIANTS } from "$lib/experiences/insect-world/Biome/blauer Himmel/sky-test";
+	import { BIENEN } from "$lib/experiences/insect-world/Objekte/Bienen/bienen";
 
 	let canvas: HTMLCanvasElement;
 	let renderer: THREE.WebGLRenderer;
@@ -15,8 +16,6 @@
 	let animationId: number;
 	let loading = $state(true);
 
-	const BEE_COUNT = 15;
-	const BEE_SCALE = 0.03;
 	const FLY_RADIUS = 12;
 	const FLY_HEIGHT_RANGE = [0.5, 3.5];
 
@@ -71,7 +70,7 @@
 		const bees: Bee[] = [];
 
 		async function loadBees() {
-			const beeScene = await loadGLB("/models/bienen/Meshy_AI_Honeybee_0604154325_texture.glb");
+			const beeScene = await loadGLB(BIENEN.MODEL);
 
 			const template = new THREE.Group();
 			beeScene.traverse((child) => {
@@ -83,17 +82,17 @@
 				}
 			});
 
-			for (let i = 0; i < BEE_COUNT; i++) {
+			for (let i = 0; i < BIENEN.COUNT; i++) {
 				const group = new THREE.Group();
 				group.add(template.clone(true));
 
 				const angle = Math.random() * Math.PI * 2;
-				const dist = 2 + Math.random() * 8;
+				const dist = BIENEN.SPAWN_DIST_MIN + Math.random() * (BIENEN.SPAWN_DIST_MAX - BIENEN.SPAWN_DIST_MIN);
 				const baseX = Math.cos(angle) * dist;
 				const baseZ = Math.sin(angle) * dist;
 
-				group.position.set(baseX, 1 + Math.random() * 2, baseZ);
-				group.scale.setScalar(BEE_SCALE);
+				group.position.set(baseX, BIENEN.SPAWN_HEIGHT_MIN + Math.random() * (BIENEN.SPAWN_HEIGHT_MAX - BIENEN.SPAWN_HEIGHT_MIN), baseZ);
+				group.scale.setScalar(BIENEN.SCALE);
 				group.rotation.y = Math.random() * Math.PI * 2;
 
 				scene.add(group);
@@ -101,11 +100,11 @@
 				bees.push({
 					group,
 					orbitCenter: new THREE.Vector3(baseX, 0, baseZ),
-					orbitRadius: 1 + Math.random() * 3,
-					speed: 0.3 + Math.random() * 0.7,
+					orbitRadius: BIENEN.FLY_RADIUS_MIN + Math.random() * (BIENEN.FLY_RADIUS_MAX - BIENEN.FLY_RADIUS_MIN),
+					speed: BIENEN.SPEED_MIN + Math.random() * (BIENEN.SPEED_MAX - BIENEN.SPEED_MIN),
 					phase: Math.random() * Math.PI * 2,
-					heightBase: 0.8 + Math.random() * 1.5,
-					heightRange: 0.3 + Math.random() * 0.5,
+					heightBase: BIENEN.HEIGHT_BASE_MIN + Math.random() * (BIENEN.HEIGHT_BASE_MAX - BIENEN.HEIGHT_BASE_MIN),
+					heightRange: BIENEN.HEIGHT_RANGE_MIN + Math.random() * (BIENEN.HEIGHT_RANGE_MAX - BIENEN.HEIGHT_RANGE_MIN),
 				});
 			}
 
