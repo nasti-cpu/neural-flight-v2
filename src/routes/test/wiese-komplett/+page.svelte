@@ -18,11 +18,22 @@
 	let loading = $state(true);
 
 	const dummy = new THREE.Object3D();
+	const keys = { w: false, a: false, s: false, d: false };
+	const SPEED = 5;
 
 	function loadGLB(url: string): Promise<THREE.Group> {
 		return new Promise((resolve, reject) => {
 			new GLTFLoader().load(url, (gltf) => resolve(gltf.scene), () => {}, reject);
 		});
+	}
+
+	function onKey(e: KeyboardEvent, pressed: boolean) {
+		switch (e.code) {
+			case "KeyW": keys.w = pressed; break;
+			case "KeyA": keys.a = pressed; break;
+			case "KeyS": keys.s = pressed; break;
+			case "KeyD": keys.d = pressed; break;
+		}
 	}
 
 	onMount(() => {
@@ -127,7 +138,31 @@
 			loading = false;
 		});
 
+		addEventListener("keydown", (e) => onKey(e, true));
+		addEventListener("keyup", (e) => onKey(e, false));
+
+		const clock = new THREE.Clock();
+
 		function animate(time: number) {
+			const dt = clock.getDelta();
+			const forward = new THREE.Vector3();
+			camera.getWorldDirection(forward);
+			forward.y = 0;
+			forward.normalize();
+			const right = new THREE.Vector3();
+			right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+			const move = new THREE.Vector3();
+			if (keys.w) move.add(forward);
+			if (keys.s) move.sub(forward);
+			if (keys.d) move.add(right);
+			if (keys.a) move.sub(right);
+			if (move.length() > 0) {
+				move.normalize().multiplyScalar(SPEED * dt);
+				camera.position.add(move);
+				controls.target.add(move);
+			}
+
 			controls.update();
 			renderer.render(scene, camera);
 			animationId = requestAnimationFrame(animate);
@@ -163,7 +198,7 @@
 		{#if loading}
 			<p class="loading">Lade Blumen-Modelle …</p>
 		{/if}
-		<p class="hint">Ziehen zum Drehen • Scrollen zum Zoomen</p>
+		<p class="hint">Ziehen zum Drehen • Scrollen zum Zoomen • WASD zum Bewegen</p>
 	</div>
 </div>
 
