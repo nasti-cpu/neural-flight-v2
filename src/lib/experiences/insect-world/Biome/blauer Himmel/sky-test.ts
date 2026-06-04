@@ -13,7 +13,9 @@ export interface SkyVariant {
 	hemiGround: string;
 	hemiIntensity: number;
 	cloudCoverage: number;
-	cloudColor: string;
+	cloudCount: number;
+	cloudHeightMin: number;
+	cloudHeightMax: number;
 }
 
 export const SKY_VARIANTS: SkyVariant[] = [
@@ -30,7 +32,9 @@ export const SKY_VARIANTS: SkyVariant[] = [
 		hemiGround: "#5a7a4a",
 		hemiIntensity: 0.3,
 		cloudCoverage: 0.2,
-		cloudColor: "#ffffff",
+		cloudCount: 12,
+		cloudHeightMin: 6,
+		cloudHeightMax: 14,
 	},
 	{
 		name: "Leicht bewölkt",
@@ -45,7 +49,9 @@ export const SKY_VARIANTS: SkyVariant[] = [
 		hemiGround: "#5a7a4a",
 		hemiIntensity: 0.4,
 		cloudCoverage: 0.5,
-		cloudColor: "#e8e8f0",
+		cloudCount: 28,
+		cloudHeightMin: 5,
+		cloudHeightMax: 13,
 	},
 	{
 		name: "Warme Morgensonne",
@@ -60,7 +66,9 @@ export const SKY_VARIANTS: SkyVariant[] = [
 		hemiGround: "#7a6a4a",
 		hemiIntensity: 0.3,
 		cloudCoverage: 0.3,
-		cloudColor: "#f0dcc0",
+		cloudCount: 18,
+		cloudHeightMin: 5,
+		cloudHeightMax: 12,
 	},
 	{
 		name: "Strahlend blau",
@@ -75,78 +83,81 @@ export const SKY_VARIANTS: SkyVariant[] = [
 		hemiGround: "#4a6a3a",
 		hemiIntensity: 0.25,
 		cloudCoverage: 0.1,
-		cloudColor: "#ffffff",
+		cloudCount: 6,
+		cloudHeightMin: 7,
+		cloudHeightMax: 16,
 	},
 ];
 
-function createCloudGeometry(
-	segments: number = 3,
+interface PuffDef {
+	puffs: [number, number, number, number][];
+}
+
+const PUFF_SEED_CONFIGS: PuffDef[] = [
+	{ puffs: [[0, 0.4, 0, 1.0], [0.7, 0.6, 0.3, 0.7], [-0.6, 0.5, 0.4, 0.65], [0.3, 0.8, -0.5, 0.6], [-0.4, 0.7, -0.6, 0.55], [0.9, 0.3, -0.3, 0.5], [-0.8, 0.4, -0.2, 0.45]] },
+	{ puffs: [[0, 0.3, 0, 0.9], [0.5, 0.5, -0.5, 0.7], [-0.6, 0.4, 0.5, 0.65], [0.8, 0.5, 0.4, 0.55], [-0.3, 0.7, -0.4, 0.5], [-0.7, 0.3, -0.7, 0.45], [0, 0.6, 0.8, 0.5], [0.3, 0.8, 0.2, 0.4]] },
+	{ puffs: [[0, 0.5, 0, 1.2], [0.6, 0.7, -0.6, 0.8], [-0.7, 0.6, 0.6, 0.75], [0, 0.9, -0.3, 0.6], [-0.5, 0.8, -0.5, 0.5], [0.5, 0.4, 0.7, 0.5], [1.0, 0.5, 0.2, 0.45], [-0.9, 0.5, 0.1, 0.4], [0, 0.3, -0.9, 0.45]] },
+	{ puffs: [[0, 0.3, 0, 0.8], [0.4, 0.5, 0.4, 0.6], [-0.5, 0.4, -0.3, 0.55], [0.7, 0.4, -0.5, 0.5], [-0.3, 0.6, 0.6, 0.45], [-0.7, 0.3, 0.3, 0.4], [0.2, 0.7, -0.6, 0.4], [0.5, 0.7, 0, 0.35]] },
+	{ puffs: [[0, 0.4, 0, 1.1], [-0.8, 0.6, 0.2, 0.75], [0.7, 0.5, -0.4, 0.7], [-0.2, 0.8, 0.7, 0.55], [0.4, 0.7, -0.7, 0.5], [-0.6, 0.9, -0.3, 0.45], [0.9, 0.4, 0.5, 0.4], [-0.9, 0.3, -0.5, 0.35], [0.2, 0.5, 0.9, 0.4]] },
+];
+
+const SPHERE_SEGMENTS = 7;
+
+function buildCloudGeometry(
+	puffDefs: PuffDef,
 ): THREE.BufferGeometry {
-	const group = new THREE.Group();
-	for (let i = 0; i < segments; i++) {
-		const r = 0.3 + Math.random() * 0.5;
-		const geo = new THREE.SphereGeometry(r, 6, 5);
-		const pos = new THREE.Vector3(
-			(Math.random() - 0.5) * 1.2,
-			Math.random() * 0.15,
-			(Math.random() - 0.5) * 0.6,
-		);
-		const mesh = new THREE.Mesh(geo);
-		mesh.position.copy(pos);
-		mesh.scale.y = 0.5 + Math.random() * 0.3;
-		group.add(mesh);
-	}
-	group.updateMatrixWorld(true);
+	const tempSphere = new THREE.SphereGeometry(1, SPHERE_SEGMENTS, Math.ceil(SPHERE_SEGMENTS * 0.7));
+	const posAttr = tempSphere.attributes.position;
+	const norAttr = tempSphere.attributes.normal;
+	const uvAttr = tempSphere.attributes.uv;
 
-	const positions: number[] = [];
-	const normals: number[] = [];
-	const uvs: number[] = [];
+	const allPos: number[] = [];
+	const allNor: number[] = [];
+	const allUv: number[] = [];
 
-	group.traverse((child) => {
-		if (!(child instanceof THREE.Mesh)) return;
-		const geo = child.geometry;
-		const pos = geo.attributes.position;
-		const nor = geo.attributes.normal;
-		const uv = geo.attributes.uv;
-		const matrix = child.matrixWorld;
+	for (const [px, py, pz, r] of puffDefs.puffs) {
+		for (let i = 0; i < posAttr.count; i++) {
+			const x = posAttr.getX(i) * r + px;
+			const y = posAttr.getY(i) * r + py;
+			const z = posAttr.getZ(i) * r + pz;
+			allPos.push(x, y, z);
 
-		for (let i = 0; i < pos.count; i++) {
-			const p = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i));
-			const n = new THREE.Vector3(nor.getX(i), nor.getY(i), nor.getZ(i));
-			p.applyMatrix4(matrix);
-			n.applyMatrix4(matrix).normalize();
-			positions.push(p.x, p.y, p.z);
-			normals.push(n.x, n.y, n.z);
-			const u = uv?.getX(i) ?? 0;
-			const v = uv?.getY(i) ?? 0;
-			uvs.push(u, v);
+			const nx = norAttr.getX(i);
+			const ny = norAttr.getY(i);
+			const nz = norAttr.getZ(i);
+			allNor.push(nx, ny, nz);
+
+			allUv.push(uvAttr.getX(i), uvAttr.getY(i));
 		}
-	});
+	}
 
-	const merged = new THREE.BufferGeometry();
-	merged.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-	merged.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
-	merged.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-	return merged;
+	tempSphere.dispose();
+	const geo = new THREE.BufferGeometry();
+	geo.setAttribute("position", new THREE.Float32BufferAttribute(allPos, 3));
+	geo.setAttribute("normal", new THREE.Float32BufferAttribute(allNor, 3));
+	geo.setAttribute("uv", new THREE.Float32BufferAttribute(allUv, 2));
+	return geo;
+}
+
+const cloudGeometries: THREE.BufferGeometry[] = PUFF_SEED_CONFIGS.map(buildCloudGeometry);
+
+function pickCloudGeometry(): THREE.BufferGeometry {
+	const idx = Math.floor(Math.random() * cloudGeometries.length);
+	return cloudGeometries[idx].clone();
 }
 
 export class SkyScene {
 	private scene: THREE.Scene;
 	private skyDome: THREE.Mesh | null = null;
-	private sunLight: THREE.DirectionalLight;
-	private ambientLight: THREE.AmbientLight;
-	private hemiLight: THREE.HemisphereLight;
-	private clouds: THREE.InstancedMesh | null = null;
-	private cloudGeo: THREE.BufferGeometry | null = null;
-	private cloudMat: THREE.MeshStandardMaterial | null = null;
+	private sunLight: THREE.DirectionalLight | null = null;
+	private ambientLight: THREE.AmbientLight | null = null;
+	private hemiLight: THREE.HemisphereLight | null = null;
 	private sunSphere: THREE.Mesh | null = null;
+	private cloudMeshes: THREE.Mesh[] = [];
 	private isSetup = false;
 
 	constructor(scene: THREE.Scene) {
 		this.scene = scene;
-		this.ambientLight = new THREE.AmbientLight(0x8899bb, 0.4);
-		this.hemiLight = new THREE.HemisphereLight(0x87ceeb, 0x4a7c3f, 0.3);
-		this.sunLight = new THREE.DirectionalLight(0xfff4e0, 2.5);
 	}
 
 	build(variantIndex: number = 0): void {
@@ -231,34 +242,31 @@ export class SkyScene {
 		this.sunSphere.position.copy(sunDir.multiplyScalar(50));
 		this.scene.add(this.sunSphere);
 
-		this.cloudGeo = createCloudGeometry(4);
-		const cloudCount = 20 + Math.round(variant.cloudCoverage * 80);
-		this.cloudMat = new THREE.MeshStandardMaterial({
-			color: variant.cloudColor,
-			roughness: 0.8,
-			flatShading: true,
-			transparent: true,
-			opacity: 0.85,
-		});
+		for (let i = 0; i < variant.cloudCount; i++) {
+			const geo = pickCloudGeometry();
+			const shade = 0.85 + Math.random() * 0.15;
+			const mat = new THREE.MeshStandardMaterial({
+				color: new THREE.Color(shade, shade, shade),
+				roughness: 0.3,
+				metalness: 0.0,
+				flatShading: false,
+			});
+			const mesh = new THREE.Mesh(geo, mat);
 
-		const dummy = new THREE.Object3D();
-		this.clouds = new THREE.InstancedMesh(this.cloudGeo, this.cloudMat, cloudCount);
-
-		for (let i = 0; i < cloudCount; i++) {
 			const angle = Math.random() * Math.PI * 2;
-			const dist = 15 + Math.random() * 35;
-			const y = 5 + Math.random() * 12;
-			const scale = 0.8 + Math.random() * 2.0;
+			const dist = 10 + Math.random() * 50;
+			const height = variant.cloudHeightMin + Math.random() * (variant.cloudHeightMax - variant.cloudHeightMin);
+			const scale = 0.6 + Math.random() * 2.5;
 
-			dummy.position.set(Math.cos(angle) * dist, y, Math.sin(angle) * dist);
-			dummy.scale.set(scale, scale * 0.3, scale);
-			dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
-			dummy.updateMatrix();
-			this.clouds.setMatrixAt(i, dummy.matrix);
+			mesh.position.set(Math.cos(angle) * dist, height, Math.sin(angle) * dist);
+			mesh.scale.set(scale, scale * (0.5 + Math.random() * 0.4), scale);
+			mesh.rotation.set(0, Math.random() * Math.PI * 2, 0);
+			mesh.castShadow = false;
+			mesh.receiveShadow = false;
+
+			this.cloudMeshes.push(mesh);
+			this.scene.add(mesh);
 		}
-		this.clouds.instanceMatrix.needsUpdate = true;
-		this.clouds.castShadow = false;
-		this.scene.add(this.clouds);
 
 		this.scene.background = new THREE.Color(variant.skyBottom);
 		this.scene.fog = new THREE.Fog(variant.skyBottom, 30, 80);
@@ -270,40 +278,47 @@ export class SkyScene {
 	}
 
 	tick(_elapsed: number): void {
-		if (!this.clouds) return;
 		// clouds could drift slowly here
 	}
 
 	private reset(): void {
-		const toRemove: THREE.Object3D[] = [];
-		this.scene.traverse((child) => {
-			if (
-				child instanceof THREE.Mesh ||
-				child instanceof THREE.Light
-			) {
-				toRemove.push(child);
-			}
-		});
-		for (const obj of toRemove) {
-			this.scene.remove(obj);
-			if (obj instanceof THREE.Mesh) {
-				obj.geometry.dispose();
-				if (obj.material instanceof THREE.Material) obj.material.dispose();
-			}
+		for (const mesh of this.cloudMeshes) {
+			this.scene.remove(mesh);
+			mesh.geometry.dispose();
+			if (mesh.material instanceof THREE.Material) mesh.material.dispose();
+		}
+		this.cloudMeshes = [];
+
+		if (this.skyDome) {
+			this.scene.remove(this.skyDome);
+			this.skyDome.geometry.dispose();
+			if (this.skyDome.material instanceof THREE.Material) this.skyDome.material.dispose();
+			this.skyDome = null;
+		}
+		if (this.sunSphere) {
+			this.scene.remove(this.sunSphere);
+			this.sunSphere.geometry.dispose();
+			if (this.sunSphere.material instanceof THREE.Material) this.sunSphere.material.dispose();
+			this.sunSphere = null;
+		}
+		if (this.sunLight) {
+			this.scene.remove(this.sunLight);
+			this.sunLight = null;
+		}
+		if (this.ambientLight) {
+			this.scene.remove(this.ambientLight);
+			this.ambientLight = null;
+		}
+		if (this.hemiLight) {
+			this.scene.remove(this.hemiLight);
+			this.hemiLight = null;
 		}
 		this.scene.fog = null;
 		this.scene.background = null;
-		this.skyDome = null;
-		this.sunSphere = null;
-		this.clouds = null;
 		this.isSetup = false;
 	}
 
 	dispose(): void {
 		this.reset();
-		if (this.cloudGeo) this.cloudGeo.dispose();
-		if (this.cloudMat) this.cloudMat.dispose();
-		this.cloudGeo = null;
-		this.cloudMat = null;
 	}
 }
