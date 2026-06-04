@@ -62,7 +62,7 @@
 					}
 				});
 
-				const GROUP_SCALE = 0.015;
+				const GROUP_SCALE = 0.025;
 				const dummy = new THREE.Object3D();
 
 				for (const { geo: geometry, mat: material, pos: offset } of meshes) {
