@@ -38,8 +38,6 @@ const CORAL_STREAM_RADIUS = 300;
 const CITY_VARIANTS: CityVariant[] = ["altstadt", "zentrum", "vorort"];
 const SEAGRASS_TYPES: ("algae" | "long" | "bushy")[] = SEAGRASS_META.map((m) => m.id);
 const STREAM_INIT_RADIUS = 200;
-const START_CITY_X = 0;
-const START_CITY_Z = -200;
 const CITY_DOME_RADIUS = 65;
 
 // ── Noise ──
@@ -158,6 +156,8 @@ export interface UnderwaterWorldState extends ExperienceState {
 	dolphinModeTimer: number;
 	dolphinPrevMode: string;
 	startCityModelCity: ModelCityResult | null;
+	startCityX: number;
+	startCityZ: number;
 	startCoralReef: THREE.Group | null;
 	jellySwarm: JellySwarm;
 	jellyMode: JellyMode;
@@ -460,59 +460,68 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		jellyMode: "drifting",
 		jellyTimer: 8 + Math.random() * 7,
 		startCityModelCity: null,
+		startCityX: 0,
+		startCityZ: 0,
 		startCoralReef: null,
 	};
 
-	// ── Start City (model) ──
-	// Pre-load model in background; create start city at fixed position
-	const startCityYVal = getTerrainHeight(START_CITY_X, START_CITY_Z, amplitude, scale);
+	// ── Find sand position near start for city + corals ──
+	const SAND_SCAN_STEPS = [
+		[0, -200], [60, -180], [-60, -220], [80, -140], [-80, -260],
+		[0, -140], [40, -250], [-40, -150], [100, -200], [-100, -200],
+		[50, -120], [-50, -280], [120, -160], [-120, -240],
+	];
+	let startSandX = 0, startSandZ = -200;
+	for (const [dx, dz] of SAND_SCAN_STEPS) {
+		const bx = dx, bz = dz;
+		if (getBiome(bx, bz) >= 0.50) {
+			startSandX = bx; startSandZ = bz;
+			break;
+		}
+	}
+	const startSandY = getTerrainHeight(startSandX, startSandZ, amplitude, scale);
+	stateObj.startCityX = startSandX;
+	stateObj.startCityZ = startSandZ;
+
+	// ── Start City (model) on sand ──
 	ensureModelLoaded().then(() => {
 		const mc = createModelCitySync();
 		if (mc) {
-			mc.group.position.set(START_CITY_X, startCityYVal, START_CITY_Z);
+			mc.group.position.set(startSandX, startSandY, startSandZ);
 			mc.group.visible = true;
 			scene.add(mc.group);
 			stateObj.startCityModelCity = mc;
 		}
 	});
 
-	// ── Start Coral Reef (model) near start city ──
-	const startReefY = getTerrainHeight(START_CITY_X, START_CITY_Z, amplitude, scale);
-
-	// Patch 1: around the city perimeter
-	const reef1Y = getTerrainHeight(START_CITY_X - 35, START_CITY_Z - 30, amplitude, scale);
+	// ── Start Coral Reef (model) around city on sand ──
 	stateObj.startCoralReef = new THREE.Group();
 	stateObj.startCoralReef.visible = true;
 	scene.add(stateObj.startCoralReef);
 
-	ensureCoralModelLoaded().then(() => {
-		const rc = scatterCoralModels({
-			count: 12 + Math.floor(Math.random() * 8),
-			radius: 25,
-			cx: START_CITY_X - 35,
-			cz: START_CITY_Z - 30,
-			groundY: reef1Y,
-			scaleRange: [1.5, 3.0],
-			kaleidoChance: 0.5,
+	const patchOffsets = [
+		{ dx: -35, dz: -30, radius: 25, count: [12, 20], scale: [1.5, 3.0] },
+		{ dx: 40, dz: 20, radius: 20, count: [8, 14], scale: [1.0, 2.5] },
+		{ dx: -10, dz: 50, radius: 18, count: [6, 10], scale: [0.8, 2.0] },
+	];
+	for (const p of patchOffsets) {
+		const px = startSandX + p.dx;
+		const pz = startSandZ + p.dz;
+		if (getBiome(px, pz) < 0.50) continue;
+		const py = getTerrainHeight(px, pz, amplitude, scale);
+		ensureCoralModelLoaded().then(() => {
+			const rc = scatterCoralModels({
+				count: p.count[0] + Math.floor(Math.random() * (p.count[1] - p.count[0])),
+				radius: p.radius,
+				cx: px,
+				cz: pz,
+				groundY: py,
+				scaleRange: p.scale as [number, number],
+				kaleidoChance: 0.5,
+			});
+			if (rc) stateObj.startCoralReef!.add(rc);
 		});
-		if (rc) {
-			stateObj.startCoralReef!.add(rc);
-		}
-		// Patch 2: other side of city
-		const reef2Y = getTerrainHeight(START_CITY_X + 40, START_CITY_Z + 20, amplitude, scale);
-		const rc2 = scatterCoralModels({
-			count: 8 + Math.floor(Math.random() * 6),
-			radius: 20,
-			cx: START_CITY_X + 40,
-			cz: START_CITY_Z + 20,
-			groundY: reef2Y,
-			scaleRange: [1.0, 2.5],
-			kaleidoChance: 0.4,
-		});
-		if (rc2) {
-			stateObj.startCoralReef!.add(rc2);
-		}
-	});
+	}
 
 	return stateObj;
 }
@@ -785,7 +794,7 @@ export function tick(
 
 	// ── City dome repel centers ──
 	const repelCenters: { x: number; z: number; radius: number }[] = [];
-	if (s.startCityModelCity) repelCenters.push({ x: START_CITY_X, z: START_CITY_Z, radius: CITY_DOME_RADIUS });
+	if (s.startCityModelCity) repelCenters.push({ x: s.startCityX, z: s.startCityZ, radius: CITY_DOME_RADIUS });
 	for (const e of s.sandEntries) {
 		if (e.modelCity || e.city) repelCenters.push({ x: e.wx, z: e.wz, radius: CITY_DOME_RADIUS });
 	}
@@ -839,7 +848,7 @@ export function tick(
 	// ── Start City ──
 
 	if (s.startCityModelCity) {
-		const sy = getTerrainHeight(START_CITY_X, START_CITY_Z, s.terrainAmplitude, s.terrainScale);
+		const sy = getTerrainHeight(s.startCityX, s.startCityZ, s.terrainAmplitude, s.terrainScale);
 		updateModelCityPulse(s.startCityModelCity, elapsed, true, sy);
 	}
 
