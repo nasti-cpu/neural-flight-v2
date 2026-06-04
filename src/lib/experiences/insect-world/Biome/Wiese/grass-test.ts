@@ -1,0 +1,124 @@
+import * as THREE from "three";
+
+const GRASS_COUNT = 5000;
+const FIELD_SIZE = 45;
+
+interface SwayData {
+	baseX: number;
+	baseZ: number;
+	baseRotY: number;
+	phase: number;
+	speed: number;
+	height: number;
+	scaleX: number;
+	scaleZ: number;
+}
+
+export class GrassMeadow {
+	private scene: THREE.Scene;
+	private grassMesh: THREE.InstancedMesh | null = null;
+	private grassMat: THREE.MeshStandardMaterial | null = null;
+	private grassGeo: THREE.BufferGeometry | null = null;
+	private swayData: SwayData[] = [];
+	private dummy = new THREE.Object3D();
+
+	constructor(scene: THREE.Scene) {
+		this.scene = scene;
+	}
+
+	build(): void {
+		const grassColor = "#6aaf4c";
+
+		const groundGeo = new THREE.PlaneGeometry(FIELD_SIZE + 20, FIELD_SIZE + 20);
+		const groundMat = new THREE.MeshStandardMaterial({ color: grassColor, roughness: 1 });
+		const ground = new THREE.Mesh(groundGeo, groundMat);
+		ground.rotation.x = -Math.PI / 2;
+		ground.position.y = -0.05;
+		ground.receiveShadow = true;
+		this.scene.add(ground);
+
+		const bumpGeo = new THREE.PlaneGeometry(3, 2, 6, 4);
+		const bumpMat = new THREE.MeshStandardMaterial({ color: grassColor, roughness: 1 });
+		for (let i = 0; i < 12; i++) {
+			const bump = new THREE.Mesh(bumpGeo, bumpMat);
+			const angle = Math.random() * Math.PI * 2;
+			const dist = 3 + Math.random() * 14;
+			bump.rotation.x = -Math.PI / 2;
+			bump.position.set(Math.cos(angle) * dist, -0.02, Math.sin(angle) * dist);
+			bump.scale.set(1, 1, 0.4 + Math.random() * 0.8);
+			this.scene.add(bump);
+		}
+
+		this.grassGeo = new THREE.ConeGeometry(0.06, 1, 4);
+		this.grassMat = new THREE.MeshStandardMaterial({
+			color: grassColor,
+			roughness: 0.9,
+			flatShading: true,
+		});
+
+		this.grassMesh = new THREE.InstancedMesh(this.grassGeo, this.grassMat, GRASS_COUNT);
+		this.grassMesh.castShadow = true;
+		this.grassMesh.receiveShadow = true;
+
+		for (let i = 0; i < GRASS_COUNT; i++) {
+			const x = (Math.random() - 0.5) * FIELD_SIZE;
+			const z = (Math.random() - 0.5) * FIELD_SIZE;
+			const height = 0.8 + Math.random() * 2.0;
+			const baseRotY = Math.random() * Math.PI * 2;
+			const sx = 0.5 + Math.random() * 0.8;
+			const sz = 0.5 + Math.random() * 0.8;
+
+			this.dummy.position.set(x, height / 2, z);
+			this.dummy.scale.set(sx, height, sz);
+			this.dummy.rotation.set(0, baseRotY, 0);
+			this.dummy.updateMatrix();
+			this.grassMesh.setMatrixAt(i, this.dummy.matrix);
+
+			this.swayData.push({
+				baseX: x,
+				baseZ: z,
+				baseRotY,
+				phase: Math.random() * Math.PI * 2,
+				speed: 0.5 + Math.random() * 1.5,
+				height,
+				scaleX: sx,
+				scaleZ: sz,
+			});
+		}
+		this.grassMesh.instanceMatrix.needsUpdate = true;
+		this.scene.add(this.grassMesh);
+	}
+
+	tick(elapsed: number): void {
+		const windDir = Math.sin(elapsed * 0.04) * 0.3;
+
+		if (!this.grassMesh) return;
+
+		for (let i = 0; i < GRASS_COUNT; i++) {
+			const d = this.swayData[i];
+			if (!d) continue;
+
+			const swayX = Math.sin(elapsed * d.speed + d.phase + d.baseX * 0.5) * 0.06;
+			const swayZ = Math.sin(elapsed * d.speed * 0.7 + d.phase + d.baseZ * 0.5) * 0.04;
+
+			this.dummy.position.set(d.baseX, d.height / 2, d.baseZ);
+			this.dummy.scale.set(d.scaleX, d.height, d.scaleZ);
+			this.dummy.rotation.set(swayZ * 0.5, d.baseRotY, swayX + windDir * 0.08);
+			this.dummy.updateMatrix();
+			this.grassMesh.setMatrixAt(i, this.dummy.matrix);
+		}
+		this.grassMesh.instanceMatrix.needsUpdate = true;
+	}
+
+	dispose(): void {
+		if (this.grassMesh) {
+			this.scene.remove(this.grassMesh);
+			if (this.grassGeo) this.grassGeo.dispose();
+			if (this.grassMat) this.grassMat.dispose();
+			this.grassMesh = null;
+			this.grassGeo = null;
+			this.grassMat = null;
+		}
+		this.swayData = [];
+	}
+}
