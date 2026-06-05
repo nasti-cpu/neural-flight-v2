@@ -14,7 +14,9 @@ let scene: THREE.Scene;
 let camera: THREE.PerspectiveCamera;
 let clock = new THREE.Clock();
 let system: EchoVariantSystem | null = null;
+let reflectSystem: EchoVariantSystem | null = null;
 let targetGroup: THREE.Group;
+let hitFlash: THREE.Mesh;
 
 let currentVariant = $state<EchoVariant>("scan");
 let autoRotate = $state(true);
@@ -30,7 +32,14 @@ const SOUND_PATHS: Record<EchoVariant, string> = {
 	scan: "/sounds/echo%201.mp3",
 	puls: "/sounds/echo%203.mp3",
 	welle: "/sounds/echo%202.mp3",
+	reflex: "/sounds/echo%201.mp3",
 };
+
+// ── Reflex tracking ──
+const REFLEX_EMIT_OFFSET = new THREE.Vector3(0, 0, -8);
+const TARGET_DIST = 8;
+let reflexTriggered = new Set<string>();
+let reflexFlashTimer = 0;
 
 let audioCtx: AudioContext | null = null;
 const audioBuffers = new Map<EchoVariant, AudioBuffer>();
@@ -77,11 +86,30 @@ function rebuild(variant: EchoVariant) {
 		scene.remove(system.group);
 		system.dispose();
 	}
+	if (reflectSystem) {
+		scene.remove(reflectSystem.group);
+		reflectSystem.dispose();
+		reflectSystem = null;
+	}
 	const config = ECHO_VARIANTS[variant];
 	system = createEchoVariant(config);
 	scene.add(system.group);
 	setSystemAudio(system, variant);
 	emitTimer = 0;
+	reflexTriggered.clear();
+	reflexFlashTimer = 0;
+
+	// Create reflection system for reflex variant
+	if (variant === "reflex") {
+		const refConfig = { ...ECHO_VARIANTS["scan"] };
+		refConfig.color = 0xff8844;
+		refConfig.label = "Reflexion";
+		refConfig.expandSpeed = 6;
+		refConfig.lifetime = 1.0;
+		refConfig.maxOpacity = 0.6;
+		reflectSystem = createEchoVariant(refConfig);
+		scene.add(reflectSystem.group);
+	}
 }
 
 onMount(() => {
@@ -96,6 +124,14 @@ onMount(() => {
 	camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
 	camera.position.set(0, 3, 18);
 	camera.lookAt(0, 0, 0);
+
+	// Small sphere at emission point for reflex
+	const emitterSphere = new THREE.Mesh(
+		new THREE.SphereGeometry(0.15, 8, 8),
+		new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.3 }),
+	);
+	emitterSphere.position.copy(REFLEX_EMIT_OFFSET);
+	scene.add(emitterSphere);
 
 	const ambient = new THREE.AmbientLight(0x404060, 0.4);
 	scene.add(ambient);
@@ -170,6 +206,18 @@ onMount(() => {
 	const glow = new THREE.Mesh(glowGeo, glowMat);
 	targetGroup.add(glow);
 
+	// Hit flash (bright sphere, hidden until reflex hits)
+	const flashGeo = new THREE.SphereGeometry(1.0, 16, 16);
+	const flashMat = new THREE.MeshBasicMaterial({
+		color: 0xff8844,
+		transparent: true,
+		opacity: 0,
+		blending: THREE.AdditiveBlending,
+		depthWrite: false,
+	});
+	hitFlash = new THREE.Mesh(flashGeo, flashMat);
+	targetGroup.add(hitFlash);
+
 	targetGroup.position.set(0, 0, 0);
 	scene.add(targetGroup);
 
@@ -195,10 +243,44 @@ onMount(() => {
 		emitTimer += delta;
 		if (emitTimer >= EMIT_INTERVAL && system) {
 			emitTimer = 0;
-			system.emit(0, 0, 0);
+			if (currentVariant === "reflex") {
+				system.emit(REFLEX_EMIT_OFFSET.x, REFLEX_EMIT_OFFSET.y, REFLEX_EMIT_OFFSET.z);
+			} else {
+				system.emit(0, 0, 0);
+			}
 		}
 
 		if (system) system.update(delta);
+		if (reflectSystem) reflectSystem.update(delta);
+
+		// ── Reflex: detect ring reaching target & trigger reflection ──
+		if (currentVariant === "reflex" && system && reflectSystem) {
+			for (const child of system.group.children) {
+				if (child instanceof THREE.Mesh && child.visible) {
+					const s = child.scale.x;
+					if (s >= TARGET_DIST) {
+						const key = child.uuid;
+						if (!reflexTriggered.has(key)) {
+							reflexTriggered.add(key);
+							reflectSystem.emit(0, 0, 0);
+							hitFlash.scale.setScalar(0.3);
+							reflexFlashTimer = 0.3;
+						}
+					}
+				}
+			}
+		}
+
+		// Hit flash animation
+		if (reflexFlashTimer > 0) {
+			reflexFlashTimer -= delta;
+			(hitFlash.material as THREE.MeshBasicMaterial).opacity = (reflexFlashTimer / 0.3) * 0.7;
+			const fScale = 1 + (1 - reflexFlashTimer / 0.3) * 2;
+			hitFlash.scale.setScalar(fScale);
+			hitFlash.visible = true;
+		} else {
+			hitFlash.visible = false;
+		}
 
 		// Animate target
 		core.rotation.x = elapsed * 0.4;

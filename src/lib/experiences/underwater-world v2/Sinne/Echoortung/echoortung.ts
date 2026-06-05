@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-export type EchoVariant = "scan" | "puls" | "welle";
+export type EchoVariant = "scan" | "puls" | "welle" | "reflex";
 
 export interface EchoConfig {
 	color: number;
@@ -19,7 +19,7 @@ export interface EchoConfig {
 	description: string;
 }
 
-export const ECHO_VARIANT_KEYS: EchoVariant[] = ["scan", "puls", "welle"];
+export const ECHO_VARIANT_KEYS: EchoVariant[] = ["scan", "puls", "welle", "reflex"];
 
 export const ECHO_VARIANTS: Record<EchoVariant, EchoConfig> = {
 	scan: {
@@ -69,6 +69,22 @@ export const ECHO_VARIANTS: Record<EchoVariant, EchoConfig> = {
 		soundGain: 1.2,
 		label: "Wellen-Ring",
 		description: "2 gewellte Ringe — breitet sich langsam aus, flächige Erkundung",
+	},
+	reflex: {
+		color: 0x00e5ff,
+		expandSpeed: 12,
+		lifetime: 1.5,
+		poolSize: 20,
+		burstCount: 1,
+		burstDelay: 0,
+		maxOpacity: 0.9,
+		initialScale: 0.15,
+		ringInner: 0.94,
+		ringOuter: 1.0,
+		wavy: false,
+		soundGain: 0.8,
+		label: "Reflex-Echo",
+		description: "Delfin-Echo: Hauptping + orangefarbener Reflex vom Objekt + Aufleuchten",
 	},
 };
 
