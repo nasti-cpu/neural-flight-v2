@@ -28,6 +28,15 @@ export function applySettings(
 		case "terrainColor":
 			s.terrainColor = value as string;
 			break;
+		case "echolocationEnabled":
+			if (s.echoVR) s.echoVR.enabled = value as boolean;
+			break;
+		case "echolocationRange":
+			if (s.echoVR) s.echoVR.range = value as number;
+			break;
+		case "echolocationInterval":
+			if (s.echoVR) s.echoVR.interval = value as number;
+			break;
 		default:
 			break;
 	}

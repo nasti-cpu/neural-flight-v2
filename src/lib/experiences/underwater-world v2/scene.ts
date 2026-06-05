@@ -25,6 +25,7 @@ import type { GuidancePath } from "$lib/experiences/underwater-world v2/Sinne/Le
 import { createCoralReef, disposeCoralReef } from "$lib/experiences/underwater-world v2/Biome/Korallenriff/korallenriff";
 import type { CoralReef, CoralBiome } from "$lib/experiences/underwater-world v2/Biome/Korallenriff/korallenriff";
 import { scatterCoralModels, disposeScatterGroup, ensureModelLoaded as ensureCoralModelLoaded } from "$lib/experiences/underwater-world v2/Biome/Korallenriff/modelCoralReef";
+import { createEchoVR, updateEchoVR, disposeEchoVR, type EchoVRState } from "$lib/experiences/underwater-world v2/Sinne/Echoortung/echoVRIntegration";
 
 // ── Constants ──
 
@@ -102,6 +103,8 @@ export interface UnderwaterWorldState extends ExperienceState {
 	startCoralReef: THREE.Group | null;
 	cityGuidancePath: GuidancePath | null;
 	cityGuidanceArrived: Set<string>;
+	echoVR: EchoVRState | null;
+	coralMaterials: THREE.MeshStandardMaterial[];
 }
 
 // ── Terrain (moved to welt/terrain.ts + welt/chunks.ts) ──
@@ -185,7 +188,12 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 	camera.rotation.set(0, 0, 0);
 
 	const keys = new Set<string>();
-	const onKeyDown = (e: KeyboardEvent) => { keys.add(e.code); };
+	const onKeyDown = (e: KeyboardEvent) => {
+		keys.add(e.code);
+		if (e.code === "KeyR" && echoVR) {
+			echoVR.enabled = !echoVR.enabled;
+		}
+	};
 	const onKeyUp = (e: KeyboardEvent) => { keys.delete(e.code); };
 	window.addEventListener("keydown", onKeyDown);
 	window.addEventListener("keyup", onKeyUp);
@@ -307,6 +315,15 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		loadAudioAssets(audio);
 	} catch { /* audio unavailable */ }
 
+	// ── Echoortung ──
+	const echoVR = createEchoVR(scene);
+
+	const coralMaterials: THREE.MeshStandardMaterial[] = [];
+	for (const m of coralField.meshes) {
+		const mat = m.material as THREE.MeshStandardMaterial;
+		coralMaterials.push(mat);
+	}
+
 	const stateObj: UnderwaterWorldState = {
 		camera,
 		scene,
@@ -335,6 +352,8 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		startCoralReef: null,
 		cityGuidancePath: null,
 		cityGuidanceArrived: new Set(),
+		echoVR,
+		coralMaterials,
 	};
 
 	// ── Find sand position near start for city + corals ──
@@ -415,11 +434,6 @@ export function tick(
 	if (s.keys.has("KeyD")) ctx.camera.rotation.y -= yawAmt;
 	if (s.keys.has("ArrowLeft")) ctx.camera.rotation.y += yawAmt;
 	if (s.keys.has("ArrowRight")) ctx.camera.rotation.y -= yawAmt;
-
-	const pitchAmt = delta * 0.8;
-	if (s.keys.has("KeyR")) ctx.camera.rotation.x -= pitchAmt;
-	if (s.keys.has("KeyF")) ctx.camera.rotation.x += pitchAmt;
-	ctx.camera.rotation.x = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, ctx.camera.rotation.x));
 
 	const vertAmt = s.wasdSpeed * delta;
 	if (s.keys.has("KeyW")) pos.y += vertAmt;
@@ -704,6 +718,95 @@ export function tick(
 		a.bgGain.gain.value = 0.14 + duck * 0.1;
 	}
 
+	// ── Echoortung ──
+
+	if (s.echoVR) {
+		const echoTargets: { key: string; x: number; z: number }[] = [];
+
+		for (let fi = 0; fi < s.fishSchools.length; fi++) {
+			const p = s.fishSchools[fi].mesh.position;
+			echoTargets.push({ key: `fish_${fi}`, x: p.x, z: p.z });
+		}
+
+		if (s.startCityModelCity) {
+			echoTargets.push({ key: "startCity", x: s.startCityX, z: s.startCityZ });
+		}
+
+		for (let ei = 0; ei < s.sandEntries.length; ei++) {
+			const e = s.sandEntries[ei];
+			if (e.city) echoTargets.push({ key: `city_${ei}`, x: e.wx, z: e.wz });
+			if (e.modelCity) echoTargets.push({ key: `modelCity_${ei}`, x: e.wx, z: e.wz });
+		}
+
+		updateEchoVR(s.echoVR, delta, pos, echoTargets);
+
+		for (let fi = 0; fi < s.fishSchools.length; fi++) {
+			const flash = s.echoVR.flashStates.get(`fish_${fi}`);
+			const school = s.fishSchools[fi];
+			const t = flash ? flash.timer / flash.duration : 0;
+			if (flash) {
+				school.material.emissive = new THREE.Color(0xffff00);
+				school.material.emissiveIntensity = 0.3 + t * t * 1.5;
+			} else {
+				school.material.emissive = new THREE.Color(0x00e5ff);
+				school.material.emissiveIntensity = 0.3 + Math.sin(elapsed * 0.5 + fi) * 0.2;
+			}
+		}
+
+		if (s.startCityModelCity) {
+			const flash = s.echoVR.flashStates.get("startCity");
+			const t = flash ? flash.timer / flash.duration : 0;
+			if (flash) {
+				s.startCityModelCity.domeMat.emissive = new THREE.Color(0xffff00);
+				s.startCityModelCity.domeMat.emissiveIntensity = 0.5 + t * t;
+			} else {
+				s.startCityModelCity.domeMat.emissive = new THREE.Color(0x224466);
+				s.startCityModelCity.domeMat.emissiveIntensity = 0.3 + Math.sin(elapsed * 0.4) * 0.15;
+			}
+		}
+
+		for (let ei = 0; ei < s.sandEntries.length; ei++) {
+			const e = s.sandEntries[ei];
+			if (e.city) {
+				const flash = s.echoVR.flashStates.get(`city_${ei}`);
+				const t = flash ? flash.timer / flash.duration : 0;
+				if (flash) {
+					e.city.domeMat.emissive = new THREE.Color(0xffff00);
+					e.city.domeMat.emissiveIntensity = 0.5 + t * t;
+				} else {
+					e.city.domeMat.emissive = new THREE.Color(0x553311);
+					e.city.domeMat.emissiveIntensity = 0.6 + Math.sin(elapsed * 0.4) * 0.3;
+				}
+			}
+			if (e.modelCity) {
+				const flash = s.echoVR.flashStates.get(`modelCity_${ei}`);
+				const t = flash ? flash.timer / flash.duration : 0;
+				if (flash) {
+					e.modelCity.domeMat.emissive = new THREE.Color(0xffff00);
+					e.modelCity.domeMat.emissiveIntensity = 0.5 + t * t;
+				} else {
+					e.modelCity.domeMat.emissive = new THREE.Color(0x224466);
+					e.modelCity.domeMat.emissiveIntensity = 0.3 + Math.sin(elapsed * 0.4) * 0.15;
+				}
+			}
+		}
+
+		let coralFlash = 0;
+		for (const [, flash] of s.echoVR.flashStates) {
+			const t = flash.timer / flash.duration;
+			coralFlash = Math.max(coralFlash, t * t);
+		}
+		for (const mat of s.coralMaterials) {
+			if (coralFlash > 0.01) {
+				mat.emissive = new THREE.Color(0xffff00);
+				mat.emissiveIntensity = coralFlash * 0.5;
+			} else {
+				mat.emissive = new THREE.Color(0x000000);
+				mat.emissiveIntensity = 0;
+			}
+		}
+	}
+
 	return { state: s };
 }
 
@@ -754,6 +857,8 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 		mesh.geometry.dispose();
 		(mesh.material as THREE.Material).dispose();
 	}
+
+	if (s.echoVR) disposeEchoVR(s.echoVR, scene);
 
 	s.terrainMat.dispose();
 

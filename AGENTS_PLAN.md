@@ -28,7 +28,7 @@
 - **0 errors, 0 warnings** (biome + svelte-check).
 
 ### Ausstehend (nicht angetastet)
-- Echoortung in die VR-Welt integrieren
+- ~~Echoortung in die VR-Welt integrieren~~ **(erledigt)**
 - Wasser-Shader / God Rays / Caustics
 - Delfin-Neuschreibung (wurden entfernt statt neu geschrieben)
 
@@ -59,16 +59,24 @@ Grundstruktur ist erledigt. Offene Verbesserungen:
 **Entfernt statt neugeschrieben.** Delfine wurden rausgenommen — das Leitsystem (Guidance) übernimmt die Orientierung. Falls Delfine zurückkommen sollen, muss ein neuer Ansatz her (nicht an Spieler gebunden, eigenes Patrol).
 
 #### 3. 🔊 Echoortung in die Welt integrieren
-Ziel: Scan-Echo-Ringe aus der Testseite in die VR-Welt einbauen. **Noch offen.**
+Ziel: Scan-Echo-Ringe aus der Testseite in die VR-Welt einbauen. **Erledigt.**
 
-- `Sinne/Echoortung/echoortung.ts` in die Welt einbinden
-- Scan-Ring wird zyklisch (alle ~3s) vom Spieler ausgesendet
-- **Alle Objekte reagieren** bei Ringberührung:
-  - Fische → aufleuchten (wie in Testseite)
-  - Korallen/Riffe → kurzes Glühen
-  - Stadt → Fenster blinken
-  - Gelände → Markierung/Highlight am Auftreffpunkt
-- Ring-Reichweite konfigurierbar (Settings)
+- ✅ `echoVRIntegration.ts` erstellt — kapselt Echo-System + Flash-Management
+- ✅ `scene.ts` — Echo in setup/tick/dispose integriert
+- ✅ Scan-Ring wird alle 3s (konfigurierbar) vom Spieler ausgesendet
+- ✅ **Objektreaktionen** bei Ringberührung:
+  - Fische → `emissiveIntensity` * (1 + 3× Flash-Faktor)
+  - Städte (modelCity + City) → `domeMat.emissiveIntensity` +0.6 Boost
+  - Korallen (CoralField) → flächenhaftes Glühen wenn Ring aktiv ist
+  - Start-City → gleicher Flash wie andere Städte
+- ✅ Q-Taste zum Ein-/Ausschalten
+- ✅ Settings: echolocationEnabled, echolocationRange, echolocationInterval
+- ✅ 0 errors, 0 warnings (biome + svelte-check)
+
+**Nicht implementiert (für später):**
+- Gelände-Highlight (komplex, viele Vertices)
+- Riff-Modell-Korallen (scatterCoralModels) — viele individuelle Meshes
+- Delfin-Neuschreibung (separater Punkt)
 
 #### 4. 🎯 Leitsystem verfeinern
 - Guidance-Linien-Bogen optimieren (Start 10m unter Spieler + Terrain-Clamp)
