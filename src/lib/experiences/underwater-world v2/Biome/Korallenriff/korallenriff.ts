@@ -109,6 +109,18 @@ function createTreeCoralGeometry(): THREE.BufferGeometry {
 	return merged;
 }
 
+/** Sanitize position attribute: replace NaN/Infinity with 0 */
+function sanitizePositions(geo: THREE.BufferGeometry): void {
+	const pos = geo.attributes.position;
+	if (!pos) return;
+	const arr = pos.array as Float32Array;
+	let dirty = false;
+	for (let i = 0; i < arr.length; i++) {
+		if (!isFinite(arr[i])) { arr[i] = 0; dirty = true; }
+	}
+	if (dirty) pos.needsUpdate = true;
+}
+
 /** Merge any array of BufferGeometries */
 function mergeBufferGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
 	const total = geos.reduce((s, g) => s + g.attributes.position.count, 0);
@@ -116,6 +128,7 @@ function mergeBufferGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeomet
 	const nrm = new Float32Array(total * 3);
 	let offset = 0;
 	for (const g of geos) {
+		sanitizePositions(g);
 		g.computeVertexNormals();
 		const p = g.attributes.position.array as Float32Array;
 		const n = g.attributes.normal.array as Float32Array;
@@ -189,7 +202,10 @@ function createFanCoralGeometry(): THREE.BufferGeometry {
 		const branchB = Math.sin(u * 22 + v * 18 + 1.3) * 0.05;
 		const branchC = Math.sin(u * 10 - v * 8) * 0.06;
 		const zOffset = (branchA + branchB + branchC) * mask;
-		pos.setXYZ(i, nx, ny, zOffset);
+		const fx = isFinite(nx) ? nx : 0;
+		const fy = isFinite(ny) ? ny : 0;
+		const fz = isFinite(zOffset) ? zOffset : 0;
+		pos.setXYZ(i, fx, fy, fz);
 	}
 	pos.needsUpdate = true;
 	geo.computeVertexNormals();
@@ -204,7 +220,10 @@ function displaceGeometry(geo: THREE.BufferGeometry, amount: number, freq1: numb
 		const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
 		const d = (Math.sin(x * freq1 + y * freq2) + Math.sin(x * freq2 - y * freq1 + 1.7) + Math.sin(x * freq1 * 1.5 + z * freq2 * 1.3 + 0.9)) * amount;
 		const n = Math.sqrt(x * x + y * y + z * z) || 0.001;
-		pos.setXYZ(i, x + (x / n) * d, y + (y / n) * d, z + (z / n) * d);
+		const nx = x + (x / n) * d;
+		const ny = y + (y / n) * d;
+		const nz = z + (z / n) * d;
+		pos.setXYZ(i, isFinite(nx) ? nx : 0, isFinite(ny) ? ny : 0, isFinite(nz) ? nz : 0);
 	}
 	pos.needsUpdate = true;
 }
@@ -269,14 +288,17 @@ function createDigitateCoralGeometry(): THREE.BufferGeometry {
 }
 
 export function createProceduralCoralGeometry(type: number): THREE.BufferGeometry {
+	let geo: THREE.BufferGeometry;
 	switch (type) {
-		case 0: return createBrainCoralGeometry();
-		case 1: return createTreeCoralGeometry();
-		case 2: return createElkhornCoralGeometry();
-		case 3: return createFanCoralGeometry();
-		case 4: return createDigitateCoralGeometry();
-		default: return createBrainCoralGeometry();
+		case 0: geo = createBrainCoralGeometry(); break;
+		case 1: geo = createTreeCoralGeometry(); break;
+		case 2: geo = createElkhornCoralGeometry(); break;
+		case 3: geo = createFanCoralGeometry(); break;
+		case 4: geo = createDigitateCoralGeometry(); break;
+		default: geo = createBrainCoralGeometry(); break;
 	}
+	sanitizePositions(geo);
+	return geo;
 }
 
 // ── Simple FBM terrain ──
@@ -401,6 +423,7 @@ export interface CoralReef {
 export function createCoralReef(biome: CoralBiome): CoralReef {
 	const cfg = BIOME_CONFIG[biome];
 	const geos = [0, 1, 2, 3, 4].map((t) => createProceduralCoralGeometry(t));
+	for (const g of geos) sanitizePositions(g);
 	const tmpCol = new THREE.Color();
 
 	// ── Terrain (mountainous seabed) ──
@@ -413,7 +436,8 @@ export function createCoralReef(biome: CoralBiome): CoralReef {
 		const z = tPos.getY(i);
 		const h = getHeight(x, z, cfg.terrainAmp);
 		const jagged = Math.sin(x * 0.3 + z * 0.2) * 0.3 + Math.sin(x * 0.7 + z * 0.5) * 0.15;
-		tPos.setZ(i, h + jagged);
+		const hFinal = h + jagged;
+		tPos.setZ(i, isFinite(hFinal) ? hFinal : 0);
 	}
 	tPos.needsUpdate = true;
 	terrainGeo.computeVertexNormals();

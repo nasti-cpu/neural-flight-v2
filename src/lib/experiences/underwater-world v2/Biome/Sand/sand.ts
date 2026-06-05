@@ -62,7 +62,7 @@ export function createDuneSand(): DuneSandResult {
 		const z = pos.getY(i);
 		const n = fbm(x * NOISE_FREQ, z * NOISE_FREQ, OCTAVES);
 		const h = (n - 0.5) * TERRAIN_AMP;
-		pos.setZ(i, h);
+		pos.setZ(i, isFinite(h) ? h : 0);
 	}
 	pos.needsUpdate = true;
 	geo.computeVertexNormals();

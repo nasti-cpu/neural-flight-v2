@@ -189,17 +189,6 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 	camera.position.set(0, 4, 0);
 	camera.rotation.set(0, 0, 0);
 
-	const keys = new Set<string>();
-	const onKeyDown = (e: KeyboardEvent) => {
-		keys.add(e.code);
-		if (e.code === "KeyR" && echoVR) {
-			echoVR.enabled = !echoVR.enabled;
-		}
-	};
-	const onKeyUp = (e: KeyboardEvent) => { keys.delete(e.code); };
-	window.addEventListener("keydown", onKeyDown);
-	window.addEventListener("keyup", onKeyUp);
-
 	// Terrain
 	const terrainMat = new THREE.MeshStandardMaterial({
 		vertexColors: true,
@@ -298,18 +287,10 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		fishSchools.push(school);
 	}
 
-	// Audio
+	// Audio (lazy — created on first user interaction to avoid autoplay warning)
 	let audio: AudioState | null = null;
-	try {
-		const audioCtx = new AudioContext();
-		const masterGain = audioCtx.createGain();
-		masterGain.gain.value = 0.4;
-		masterGain.connect(audioCtx.destination);
-		audio = initAudio(audioCtx, masterGain);
-		loadAudioAssets(audio);
-	} catch { /* audio unavailable */ }
+	let audioInitAttempted = false;
 
-	// ── Echoortung ──
 	const echoVR = createEchoVR(scene);
 
 	const coralMaterials: THREE.MeshStandardMaterial[] = [];
@@ -317,6 +298,31 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		const mat = m.material as THREE.MeshStandardMaterial;
 		coralMaterials.push(mat);
 	}
+
+	const keys = new Set<string>();
+	const onKeyDown = (e: KeyboardEvent) => {
+		keys.add(e.code);
+		if (e.code === "KeyR" && echoVR) {
+			echoVR.enabled = !echoVR.enabled;
+		}
+	};
+	const onKeyUp = (e: KeyboardEvent) => { keys.delete(e.code); };
+	window.addEventListener("keydown", onKeyDown);
+	window.addEventListener("keyup", onKeyUp);
+	const initAudioOnInteraction = () => {
+		if (audioInitAttempted) return;
+		audioInitAttempted = true;
+		try {
+			const audioCtx = new AudioContext();
+			const masterGain = audioCtx.createGain();
+			masterGain.gain.value = 0.4;
+			masterGain.connect(audioCtx.destination);
+			audio = initAudio(audioCtx, masterGain);
+			loadAudioAssets(audio);
+		} catch { /* audio unavailable */ }
+	};
+	window.addEventListener("keydown", initAudioOnInteraction, { once: true });
+	window.addEventListener("pointerdown", initAudioOnInteraction, { once: true });
 
 	const stateObj: UnderwaterWorldState = {
 		camera,
@@ -704,7 +710,6 @@ export function tick(
 
 	if (s.audio) {
 		const a = s.audio;
-		if (a.ctx.state === "suspended") a.ctx.resume();
 
 		const targetSurface = THREE.MathUtils.clamp((pos.y - 460) / 30, 0, 1);
 		a.surfaceBlend += (targetSurface - a.surfaceBlend) * delta * 2;

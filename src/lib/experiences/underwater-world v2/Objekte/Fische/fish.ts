@@ -128,8 +128,6 @@ export function createFishSchool(
 		const c = FISH_COLORS[i % FISH_COLORS.length];
 		colors[i * 3] = c[0]; colors[i * 3 + 1] = c[1]; colors[i * 3 + 2] = c[2];
 	}
-	geo.setAttribute("color", new THREE.InstancedBufferAttribute(colors, 3));
-
 	if (!_cachedFishMat) {
 		_cachedFishMat = new THREE.MeshStandardMaterial({
 			vertexColors: true,
@@ -147,6 +145,7 @@ export function createFishSchool(
 
 	const mesh = new THREE.InstancedMesh(geo, mat, count);
 	mesh.frustumCulled = true;
+	mesh.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
 
 	const dummy = new THREE.Object3D();
 	for (let i = 0; i < count; i++) {
