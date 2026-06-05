@@ -18,12 +18,22 @@ let reflectSystem: EchoVariantSystem | null = null;
 let targetGroup: THREE.Group;
 let hitFlash: THREE.Mesh;
 let hitFlashGlow: THREE.Mesh;
+let fishes: FishObj[] = [];
+
+interface FishObj {
+	group: THREE.Group;
+	glow: THREE.Mesh;
+	xzDist: number;
+	flashTimer: number;
+	lastEmit: number;
+}
 
 let currentVariant = $state<EchoVariant>("scan");
 let autoRotate = $state(true);
 let orbitTheta = 0;
 let orbitPhi = 0.35;
 let emitTimer = 0;
+let fishEmitCount = 0;
 let lastMX = 0;
 let lastMY = 0;
 
@@ -246,6 +256,59 @@ onMount(() => {
 	targetGroup.position.set(0, 0, 0);
 	scene.add(targetGroup);
 
+	// ── 3 Beispiel-Fische ──
+	const FISH_COLORS = [0x44dd88, 0x88ddff, 0xffaa66];
+	const FISH_POSITIONS: [number, number, number][] = [
+		[2.5, 0.3, 1.5],
+		[-1.5, -0.2, 3.0],
+		[1.2, 0.5, -4.0],
+	];
+
+	function createFish(color: number, pos: [number, number, number]): FishObj {
+		const g = new THREE.Group();
+
+		const body = new THREE.Mesh(
+			new THREE.SphereGeometry(0.22, 8, 6),
+			new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.15, metalness: 0.2, roughness: 0.5 }),
+		);
+		body.scale.set(0.8, 0.8, 1.6);
+		g.add(body);
+
+		const tail = new THREE.Mesh(
+			new THREE.ConeGeometry(0.18, 0.25, 4),
+			new THREE.MeshBasicMaterial({ color }),
+		);
+		tail.rotation.x = Math.PI / 2;
+		tail.position.z = -0.45;
+		g.add(tail);
+
+		const glow = new THREE.Mesh(
+			new THREE.SphereGeometry(0.35, 8, 8),
+			new THREE.MeshBasicMaterial({
+				color: 0x44ddff,
+				transparent: true,
+				opacity: 0,
+				blending: THREE.AdditiveBlending,
+				depthWrite: false,
+			}),
+		);
+		g.add(glow);
+
+		g.position.set(pos[0], pos[1], pos[2]);
+		const xzDist = Math.sqrt(pos[0] * pos[0] + pos[2] * pos[2]);
+
+		// random initial rotation
+		g.rotation.y = Math.random() * Math.PI * 2;
+
+		scene.add(g);
+
+		return { group: g, glow, xzDist, flashTimer: 0, lastEmit: -1 };
+	}
+
+	for (let i = 0; i < 3; i++) {
+		fishes.push(createFish(FISH_COLORS[i], FISH_POSITIONS[i]));
+	}
+
 	rebuild(currentVariant);
 
 	renderer.setAnimationLoop(tick);
@@ -271,6 +334,9 @@ onMount(() => {
 			emitTimer = 0;
 			const emitPos = currentVariant === "reflex" ? REFLEX_EMIT_OFFSET : ORIGIN;
 			system.emit(emitPos.x, emitPos.y, emitPos.z);
+			if (currentVariant === "scan") {
+				fishEmitCount++;
+			}
 		}
 
 		if (system) system.update(delta);
@@ -339,6 +405,42 @@ onMount(() => {
 			hitFlashGlow.visible = false;
 		}
 
+		// ── Scan: detect ring crossing fish & trigger flash ──
+		if (currentVariant === "scan" && system) {
+			const expandSpeed = system.config.expandSpeed;
+			for (const child of system.group.children) {
+				if (child instanceof THREE.Mesh && child.visible) {
+					const curRadius = child.scale.x;
+					const prevRadius = curRadius - expandSpeed * delta;
+					for (const fish of fishes) {
+						if (prevRadius < fish.xzDist && curRadius >= fish.xzDist && fish.lastEmit < fishEmitCount) {
+							fish.lastEmit = fishEmitCount;
+							fish.flashTimer = 0.35;
+						}
+					}
+				}
+			}
+		}
+
+		// ── Fish glow animation ──
+		for (const fish of fishes) {
+			const glowMat = fish.glow.material as THREE.MeshBasicMaterial;
+			const bodyMat = (fish.group.children[0] as THREE.Mesh).material as THREE.MeshStandardMaterial;
+			if (fish.flashTimer > 0) {
+				fish.flashTimer -= delta;
+				const t = fish.flashTimer / 0.35;
+				const ease = 1 - t * t;
+				glowMat.opacity = ease * 0.7;
+				const s = 0.6 + ease * 0.8;
+				fish.glow.scale.setScalar(s);
+				fish.glow.visible = true;
+				bodyMat.emissiveIntensity = 0.15 + ease * 0.6;
+			} else {
+				fish.glow.visible = false;
+				bodyMat.emissiveIntensity = 0.15;
+			}
+		}
+
 		// Animate target
 		core.rotation.x = elapsed * 0.4;
 		core.rotation.y = elapsed * 0.6;
@@ -368,6 +470,12 @@ onDestroy(() => {
 	renderer?.setAnimationLoop(null);
 	if (system) system.dispose();
 	if (reflectSystem) reflectSystem.dispose();
+	for (const fish of fishes) {
+		(fish.glow.material as THREE.MeshBasicMaterial).dispose();
+		((fish.group.children[0] as THREE.Mesh).material as THREE.MeshStandardMaterial).dispose();
+		((fish.group.children[1] as THREE.Mesh).material as THREE.MeshBasicMaterial).dispose();
+		scene?.remove(fish.group);
+	}
 	renderer?.dispose();
 });
 </script>
