@@ -176,19 +176,10 @@ export function createJellySwarm(
 	}
 
 	const geo = createJellyGeometry();
-	const colors = new Float32Array(count * 3);
-	for (let i = 0; i < count; i++) {
-		const c = JELLY_COLORS[i % JELLY_COLORS.length];
-		colors[i * 3] = c[0];
-		colors[i * 3 + 1] = c[1];
-		colors[i * 3 + 2] = c[2];
-	}
-	geo.setAttribute("color", new THREE.InstancedBufferAttribute(colors, 3));
 
 	const mat = new THREE.MeshPhysicalMaterial({
-		vertexColors: true,
 		transparent: true,
-		opacity: 0.7,
+		opacity: 0.85,
 		roughness: 0.2,
 		metalness: 0.0,
 		clearcoat: 0.3,
@@ -197,7 +188,15 @@ export function createJellySwarm(
 	});
 
 	const mesh = new THREE.InstancedMesh(geo, mat, count);
-	mesh.frustumCulled = true;
+	mesh.frustumCulled = false;
+
+	const color = new THREE.Color();
+	for (let i = 0; i < count; i++) {
+		const c = JELLY_COLORS[i % JELLY_COLORS.length];
+		color.setRGB(c[0], c[1], c[2]);
+		mesh.setColorAt(i, color);
+	}
+	if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 
 	const dummy = new THREE.Object3D();
 	for (let i = 0; i < count; i++) {
@@ -239,6 +238,8 @@ export function updateJellySwarm(
 	delta: number,
 	elapsed: number,
 	mode: JellyMode,
+	meshWorldPos?: THREE.Vector3,
+	repelCenters?: { x: number; z: number; radius: number }[],
 ): void {
 	const count = swarm.count;
 	const cfg = MODE_CONFIG[mode];
@@ -316,11 +317,34 @@ export function updateJellySwarm(
 			}
 		}
 
-		// Wrapping
-		const BOUNDS = 30;
-		for (let a = 0; a < 3; a++) {
-			if (swarm.positions[i3 + a] > BOUNDS) swarm.positions[i3 + a] = -BOUNDS;
-			if (swarm.positions[i3 + a] < -BOUNDS) swarm.positions[i3 + a] = BOUNDS;
+		// ── Dome repulsion ──
+		if (repelCenters && meshWorldPos) {
+			const wx = meshWorldPos.x + swarm.positions[i3];
+			const wz = meshWorldPos.z + swarm.positions[i3 + 2];
+			for (const c of repelCenters) {
+				const dx = wx - c.x;
+				const dz = wz - c.z;
+				const dist = Math.sqrt(dx * dx + dz * dz);
+				const minDist = c.radius + 5;
+				if (dist < minDist && dist > 0.01) {
+					const strength = (minDist - dist) * 2 * delta;
+					swarm.velocities[i3] += (dx / dist) * strength;
+					swarm.velocities[i3 + 2] += (dz / dist) * strength;
+				}
+			}
+		}
+
+		// Spread control: pull back toward center if too far
+		const dxc = swarm.positions[i3];
+		const dzc = swarm.positions[i3 + 2];
+		const distCenter = Math.sqrt(dxc * dxc + dzc * dzc);
+		if (distCenter > 15) {
+			const pull = (distCenter - 15) * delta * 2;
+			swarm.velocities[i3] -= (dxc / distCenter) * pull;
+			swarm.velocities[i3 + 2] -= (dzc / distCenter) * pull;
+		}
+		if (Math.abs(swarm.positions[i3 + 1]) > 10) {
+			swarm.velocities[i3 + 1] -= swarm.positions[i3 + 1] * delta * 0.5;
 		}
 
 		// ── Pulse: bell contracts (Y squash) and expands (X/Z widen) ──

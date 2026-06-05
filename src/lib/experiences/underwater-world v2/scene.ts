@@ -1,5 +1,11 @@
 import * as THREE from "three";
 import type { ExperienceState, SetupContext, TickContext } from "../types";
+import { hash2d, getBiome, getTerrainHeight } from "./welt/terrain";
+import type { TerrainChunk } from "./welt/terrain";
+import { CHUNK_SIZE } from "./welt/terrain";
+import { createWaterSurface, updateWaterSurface, disposeWaterSurface, WATER_SURFACE_Y } from "./welt/wasser";
+import { createInitialTerrainChunks, disposeTerrainChunk, queueTerrainChunks, processChunkQueue, createCoralField, updateCoralStreaming } from "./welt/chunks";
+import type { CoralField } from "./welt/chunks";
 import { createSeagrassMeadow, updateSeagrassSway, disposeSeagrassMeadow, SEAGRASS_META, type SeagrassMeadow } from "$lib/experiences/underwater-world v2/Objekte/Seegras/seagrass";
 import { createDuneSand, disposeDuneSand } from "$lib/experiences/underwater-world v2/Biome/Sand/sand";
 import type { DuneSandResult } from "$lib/experiences/underwater-world v2/Biome/Sand/sand";
@@ -12,24 +18,16 @@ import {
 	ensureModelLoaded,
 } from "$lib/experiences/underwater-world v2/Biome/Städte/modelCity";
 import type { ModelCityResult } from "$lib/experiences/underwater-world v2/Biome/Städte/modelCity";
-import { createGuidancePath, VARIANT_CONFIGS, type GuidancePath } from "$lib/experiences/underwater-world v2/Sinne/Leitsystem/guidance";
 import { createFishSchool, disposeFishSchool, loadFishGeometry, updateFishSchool, STANDARD_SCHOOL_CONFIGS, type FishSchool } from "$lib/experiences/underwater-world v2/Objekte/Fische/fish";
 import { createProceduralCoralGeometry } from "$lib/experiences/underwater-world v2/Biome/Korallenriff/korallenriff";
-import { createDolphinPod, updateDolphinPod, disposeDolphinPod, loadDolphinGeometry, DOLPHIN_MODE_META, type DolphinPod } from "$lib/experiences/underwater-world v2/Objekte/Delfine/dolphin";
-import { createJellySwarm, updateJellySwarm, disposeJellySwarm, JELLY_MODE_META } from "$lib/experiences/underwater-world v2/Objekte/Quallen/jellyfish";
-import type { JellySwarm, JellyMode } from "$lib/experiences/underwater-world v2/Objekte/Quallen/jellyfish";
+import { createGuidancePath, VARIANT_CONFIGS } from "$lib/experiences/underwater-world v2/Sinne/Leitsystem/guidance";
+import type { GuidancePath } from "$lib/experiences/underwater-world v2/Sinne/Leitsystem/guidance";
 import { createCoralReef, disposeCoralReef } from "$lib/experiences/underwater-world v2/Biome/Korallenriff/korallenriff";
 import type { CoralReef, CoralBiome } from "$lib/experiences/underwater-world v2/Biome/Korallenriff/korallenriff";
 import { scatterCoralModels, disposeScatterGroup, ensureModelLoaded as ensureCoralModelLoaded } from "$lib/experiences/underwater-world v2/Biome/Korallenriff/modelCoralReef";
 
 // ── Constants ──
 
-const CHUNK_SIZE = 400;
-const CHUNK_SEGMENTS = 32;
-const CHUNK_RADIUS = 1;
-const WATER_SURFACE_Y = 500;
-const TERRAIN_BASE_Y = -3;
-const BIOME_FREQ = 0.0025;
 const SAND_PATCH_COUNT = 400;
 const SAND_STREAM_PER_FRAME = 8;
 const CORAL_MAX_PER_TYPE = 500;
@@ -39,63 +37,12 @@ const CITY_VARIANTS: CityVariant[] = ["altstadt", "zentrum", "vorort"];
 const SEAGRASS_TYPES: ("algae" | "long" | "bushy")[] = SEAGRASS_META.map((m) => m.id);
 const STREAM_INIT_RADIUS = 200;
 const CITY_DOME_RADIUS = 65;
+const CITY_SPACING_MIN = 150;
+const CITY_SPACING_MAX = 350;
 
-// ── Noise ──
-
-function hash2d(x: number, y: number): number {
-	const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
-	return n - Math.floor(n);
-}
-
-function noise2d(x: number, y: number): number {
-	const ix = Math.floor(x);
-	const iy = Math.floor(y);
-	const fx = x - ix;
-	const fy = y - iy;
-	const sx = fx * fx * (3 - 2 * fx);
-	const sy = fy * fy * (3 - 2 * fy);
-	const a = hash2d(ix, iy);
-	const b = hash2d(ix + 1, iy);
-	const c = hash2d(ix, iy + 1);
-	const d = hash2d(ix + 1, iy + 1);
-	return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
-}
-
-function fbm(x: number, y: number, octaves: number): number {
-	let value = 0;
-	let amp = 0.5;
-	let freq = 1;
-	for (let i = 0; i < octaves; i++) {
-		value += amp * noise2d(x * freq, y * freq);
-		freq *= 2;
-		amp *= 0.5;
-	}
-	return value;
-}
-
-// ── Biome / Height ──
-
-export function getBiome(wx: number, wz: number): number {
-	return fbm(wx * BIOME_FREQ, wz * BIOME_FREQ, 2);
-}
-
-export function getTerrainHeight(wx: number, wz: number, amplitude: number, scale: number): number {
-	return (fbm(wx * scale, wz * scale, 4) - 0.5) * 2 * amplitude + TERRAIN_BASE_Y;
-}
-
-function getBiomeParams(biome: number): { ampMul: number; scaleMul: number; color: THREE.Color } {
-	if (biome < 0.25) return { ampMul: 1.0, scaleMul: 1.0, color: new THREE.Color(0x3a5a7a) };
-	if (biome < 0.50) return { ampMul: 0.7, scaleMul: 0.8, color: new THREE.Color(0x3a7a5a) };
-	return { ampMul: 0.4, scaleMul: 0.7, color: new THREE.Color(0xc4a87a) };
-}
+// ── Biome / Height (moved to welt/terrain.ts) ──
 
 // ── Types ──
-
-interface TerrainChunk {
-	mesh: THREE.Mesh;
-	gx: number;
-	gz: number;
-}
 
 interface AudioState {
 	ctx: AudioContext;
@@ -146,61 +93,18 @@ export interface UnderwaterWorldState extends ExperienceState {
 	waterSurface: THREE.Mesh;
 	audio: AudioState | null;
 	keys: Set<string>;
-	cityGuidance: { key: string; path: GuidancePath }[];
 	fishSchools: FishSchool[];
-	coralMeshes: THREE.InstancedMesh[];
-	coralGeos: THREE.BufferGeometry[];
-	coralPositions: { wx: number; wz: number; type: number; color: number }[];
-	dolphinPod: DolphinPod;
-	dolphinModeIndex: number;
-	dolphinModeTimer: number;
-	dolphinPrevMode: string;
-	dolphinSpawnTimer: number;
-	jellySpawnTimer: number;
+	coralField: CoralField;
+	coralColors: number[];
 	startCityModelCity: ModelCityResult | null;
 	startCityX: number;
 	startCityZ: number;
 	startCoralReef: THREE.Group | null;
-	jellySwarm: JellySwarm;
-	jellyMode: JellyMode;
-	jellyTimer: number;
+	cityGuidancePath: GuidancePath | null;
+	cityGuidanceArrived: Set<string>;
 }
 
-// ── Terrain ──
-
-function fillTerrainGeometry(geo: THREE.BufferGeometry, cx: number, cz: number, amplitude: number, scale: number, baseColor: THREE.Color): void {
-	const pos = geo.attributes.position.array as Float32Array;
-	const colors = new Float32Array(pos.length);
-	for (let i = 0; i < pos.length; i += 3) {
-		const wx = pos[i] + cx;
-		const wz = pos[i + 2] + cz;
-		const biome = getBiome(wx, wz);
-		const bp = getBiomeParams(biome);
-		pos[i + 1] = (fbm(wx * scale * bp.scaleMul, wz * scale * bp.scaleMul, 4) - 0.5) * 2 * amplitude * bp.ampMul;
-		const c = bp.color.clone().multiply(baseColor);
-		colors[i] = c.r;
-		colors[i + 1] = c.g;
-		colors[i + 2] = c.b;
-	}
-	geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-	geo.computeVertexNormals();
-}
-
-function createTerrainChunk(gx: number, gz: number, amplitude: number, scale: number, baseColor: THREE.Color, mat: THREE.MeshStandardMaterial): TerrainChunk {
-	const cx = gx * CHUNK_SIZE;
-	const cz = gz * CHUNK_SIZE;
-	const geo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, CHUNK_SEGMENTS, CHUNK_SEGMENTS);
-	geo.rotateX(-Math.PI / 2);
-	fillTerrainGeometry(geo, cx, cz, amplitude, scale, baseColor);
-	const mesh = new THREE.Mesh(geo, mat);
-	mesh.position.set(cx, TERRAIN_BASE_Y, cz);
-	return { mesh, gx, gz };
-}
-
-function disposeTerrainChunk(chunk: TerrainChunk, scene: THREE.Scene): void {
-	scene.remove(chunk.mesh);
-	chunk.mesh.geometry.dispose();
-}
+// ── Terrain (moved to welt/terrain.ts + welt/chunks.ts) ──
 
 // ── Audio ──
 
@@ -294,21 +198,8 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		metalness: 0.0,
 	});
 
-	const terrainChunks: TerrainChunk[] = [];
+	const terrainChunks = createInitialTerrainChunks(scene, amplitude, scale, terrainMat);
 	const pendingChunks: { gx: number; gz: number }[] = [];
-	const baseColor = new THREE.Color("#ffffff");
-
-	for (let gx = -1; gx <= 1; gx++) {
-		for (let gz = -1; gz <= 1; gz++) {
-			pendingChunks.push({ gx, gz });
-		}
-	}
-	while (pendingChunks.length > 0) {
-		const { gx, gz } = pendingChunks.pop()!;
-		const chunk = createTerrainChunk(gx, gz, amplitude, scale, baseColor, terrainMat);
-		scene.add(chunk.mesh);
-		terrainChunks.push(chunk);
-	}
 
 	// ── Sand patch positions (sand biome ≥ 0.50) ──
 	// Distribution: 40% seagrass, 20% city, 20% reef, 20% plain
@@ -320,6 +211,7 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		seagrassType?: "algae" | "long" | "bushy";
 		reefBiome?: CoralBiome;
 	}[] = [];
+	const cityCoords: { wx: number; wz: number }[] = [];
 	for (let si = 0; si < SAND_PATCH_COUNT * 4; si++) {
 		const wx = (hash2d(si * 19 + 3, si * 31 + 7) - 0.5) * 2800;
 		const wz = (hash2d(si * 23 + 11, si * 17 + 5) - 0.5) * 2800;
@@ -331,6 +223,22 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 			else if (roll < 0.6) variant = "city";
 			else if (roll < 0.8) variant = "reef";
 			else variant = "plain";
+
+			if (variant === "city") {
+				const tooClose = cityCoords.some((c) => {
+					const dSq = (c.wx - wx) ** 2 + (c.wz - wz) ** 2;
+					return dSq < CITY_SPACING_MIN ** 2;
+				});
+				if (tooClose) {
+					const rr = hash2d(wx * 7, wz * 13);
+					if (rr < 0.5) variant = "seagrass";
+					else if (rr < 0.75) variant = "reef";
+					else variant = "plain";
+				} else {
+					cityCoords.push({ wx, wz });
+				}
+			}
+
 			const entry: typeof sandPositions[number] = { wx, wz, variant };
 			if (variant === "city") entry.cityVariant = CITY_VARIANTS[Math.floor(hash2d(wx * 7, wz * 11) * CITY_VARIANTS.length)];
 			if (variant === "seagrass") entry.seagrassType = SEAGRASS_TYPES[Math.floor(hash2d(wx * 5, wz * 13) * SEAGRASS_TYPES.length)];
@@ -341,19 +249,7 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 	}
 
 	// Water surface
-	const waterMat = new THREE.MeshPhysicalMaterial({
-		color: 0x1a6a9a,
-		transparent: true,
-		opacity: 0.35,
-		roughness: 0.0,
-		metalness: 0.0,
-		side: THREE.DoubleSide,
-	});
-	const water = new THREE.Mesh(new THREE.CircleGeometry(2000, 64), waterMat);
-	water.rotation.x = -Math.PI / 2;
-	water.position.y = WATER_SURFACE_Y;
-	water.renderOrder = 1;
-	scene.add(water);
+	const water = createWaterSurface(scene);
 
 	// Lighting
 	const ambient = new THREE.AmbientLight(0x4488cc, 1.0);
@@ -365,20 +261,12 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 	// Fog
 	scene.fog = new THREE.Fog(0x001020, 10, 180);
 
-	// Coral field
+	// Coral field (slot-tracking)
 	const CORAL_COLORS = [0xff4466, 0xff8844, 0xffcc44, 0x44ff88, 0x66ddff, 0xdd66ff, 0xff66aa, 0x88ff66, 0xffaa44, 0x66ffcc];
 	const coralGeos = [0, 1, 2, 3, 4].map((t) => createProceduralCoralGeometry(t));
-	const coralMeshes: THREE.InstancedMesh[] = [];
-	for (let ti = 0; ti < 5; ti++) {
-		const mat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.6, metalness: 0.05 });
-		const mesh = new THREE.InstancedMesh(coralGeos[ti], mat, CORAL_MAX_PER_TYPE);
-		mesh.frustumCulled = true;
-		const colors = new Float32Array(CORAL_MAX_PER_TYPE * 3);
-		mesh.instanceColor = new THREE.InstancedBufferAttribute(colors, 3);
-		scene.add(mesh);
-		coralMeshes.push(mesh);
-	}
-	const coralPositions: { wx: number; wz: number; type: number; color: number }[] = [];
+	const coralPosArr: number[] = [];
+	const coralTypesArr: number[] = [];
+	const coralColorsArr: number[] = [];
 	for (let ci = 0; ci < CORAL_MAX_PER_TYPE * 5; ci++) {
 		const wx = (hash2d(ci * 37 + 5, ci * 41 + 13) - 0.5) * 3000;
 		const wz = (hash2d(ci * 43 + 17, ci * 29 + 7) - 0.5) * 3000;
@@ -386,9 +274,17 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		if (biome >= 0.25 && biome < 0.50) {
 			const type = Math.floor(hash2d(wx * 11, wz * 17) * 5);
 			const color = CORAL_COLORS[Math.floor(hash2d(wx * 3, wz * 7) * CORAL_COLORS.length)];
-			coralPositions.push({ wx, wz, type, color });
+			coralPosArr.push(wx, wz);
+			coralTypesArr.push(type);
+			coralColorsArr.push(color);
 		}
 	}
+	const coralField = createCoralField(
+		scene, coralGeos, CORAL_MAX_PER_TYPE,
+		new Float32Array(coralPosArr),
+		new Int32Array(coralTypesArr),
+		new Float32Array(coralColorsArr),
+	);
 
 	// Fish
 	const fishModel = await loadFishGeometry();
@@ -399,27 +295,6 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		scene.add(school.mesh);
 		fishSchools.push(school);
 	}
-
-	// Dolphins (hidden, spawns after 2s behind player)
-	const dolphinGeo = await loadDolphinGeometry();
-	const dolphinPod = createDolphinPod(3, dolphinGeo ?? undefined);
-	dolphinPod.mesh.position.set(
-		camera.position.x + 5,
-		Math.max(camera.position.y - 2, 0),
-		camera.position.z - 22,
-	);
-	dolphinPod.mesh.visible = false;
-	scene.add(dolphinPod.mesh);
-
-	// Jellyfish (hidden, spawns after 5s behind player)
-	const jellySwarm = createJellySwarm(6, 6, 4);
-	jellySwarm.mesh.position.set(
-		camera.position.x - 5,
-		Math.max(camera.position.y - 1, 0),
-		camera.position.z - 25,
-	);
-	jellySwarm.mesh.visible = false;
-	scene.add(jellySwarm.mesh);
 
 	// Audio
 	let audio: AudioState | null = null;
@@ -451,24 +326,15 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		waterSurface: water,
 		audio,
 		keys,
-		cityGuidance: [],
 		fishSchools,
-		coralMeshes,
-		coralGeos,
-		coralPositions,
-		dolphinPod,
-		dolphinModeIndex: 0,
-		dolphinModeTimer: 5 + Math.random() * 4,
-		dolphinPrevMode: "leisurely",
-		dolphinSpawnTimer: 2,
-		jellySpawnTimer: 5,
-		jellySwarm,
-		jellyMode: "drifting",
-		jellyTimer: 8 + Math.random() * 7,
+		coralField,
+		coralColors: CORAL_COLORS,
 		startCityModelCity: null,
 		startCityX: 0,
 		startCityZ: 0,
 		startCoralReef: null,
+		cityGuidancePath: null,
+		cityGuidanceArrived: new Set(),
 	};
 
 	// ── Find sand position near start for city + corals ──
@@ -591,39 +457,10 @@ export function tick(
 	if (gx !== s.prevGx || gz !== s.prevGz) {
 		s.prevGx = gx;
 		s.prevGz = gz;
-
-		const keep = new Set<string>();
-		for (let dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
-			for (let dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
-				keep.add(`${gx + dx},${gz + dz}`);
-			}
-		}
-
-		for (let i = s.terrainChunks.length - 1; i >= 0; i--) {
-			const ch = s.terrainChunks[i];
-			if (!keep.has(`${ch.gx},${ch.gz}`)) {
-				disposeTerrainChunk(ch, s.scene);
-				s.terrainChunks.splice(i, 1);
-			}
-		}
-
-		for (const key of keep) {
-			const [cx, cz] = key.split(",").map(Number);
-			if (!s.terrainChunks.some((ch) => ch.gx === cx && ch.gz === cz)) {
-				s.pendingChunks.push({ gx: cx, gz: cz });
-			}
-		}
+		s.terrainChunks = queueTerrainChunks(s.terrainChunks, s.pendingChunks, pos.x, pos.z);
 	}
 
-	if (s.pendingChunks.length > 0) {
-		const batch = s.pendingChunks.splice(0, 2);
-		const baseColor = new THREE.Color(s.terrainColor);
-		for (const p of batch) {
-			const chunk = createTerrainChunk(p.gx, p.gz, s.terrainAmplitude, s.terrainScale, baseColor, s.terrainMat);
-			s.scene.add(chunk.mesh);
-			s.terrainChunks.push(chunk);
-		}
-	}
+	processChunkQueue(s.terrainChunks, s.pendingChunks, s.scene, s.terrainAmplitude, s.terrainScale, s.terrainMat);
 
 	// ── Sand Biome Entries (plain / seagrass / city) ──
 
@@ -736,61 +573,9 @@ export function tick(
 		}
 	}
 
-	// ── City Guidance Paths ──
+	// ── Coral streaming (slot-tracking) ──
 
-	const cityKeys = new Set(s.sandEntries.filter((e) => e.city || e.modelCity).map((e) => `${e.wx},${e.wz}`));
-	for (let i = s.cityGuidance.length - 1; i >= 0; i--) {
-		if (!cityKeys.has(s.cityGuidance[i].key)) {
-			s.scene.remove(s.cityGuidance[i].path.group);
-			s.cityGuidance[i].path.dispose();
-			s.cityGuidance.splice(i, 1);
-		}
-	}
-	for (const e of s.sandEntries) {
-		if (!e.city && !e.modelCity) continue;
-		const key = `${e.wx},${e.wz}`;
-		if (s.cityGuidance.some((g) => g.key === key)) continue;
-		const sy = getTerrainHeight(e.wx, e.wz, s.terrainAmplitude, s.terrainScale);
-		const dir = new THREE.Vector3(e.wx - pos.x, 0, e.wz - pos.z).normalize();
-		const start = new THREE.Vector3(e.wx - dir.x * 120, sy + 12, e.wz - dir.z * 120);
-		const mid = new THREE.Vector3(e.wx - dir.x * 40, sy + 24, e.wz - dir.z * 40);
-		const end = new THREE.Vector3(e.wx, sy + 3, e.wz);
-		const path = createGuidancePath(VARIANT_CONFIGS.city, [start, mid, end]);
-		s.scene.add(path.group);
-		s.cityGuidance.push({ key, path });
-	}
-	for (const g of s.cityGuidance) {
-		g.path.update(elapsed);
-	}
-
-	// ── Coral streaming ──
-
-	const cDummy = new THREE.Object3D();
-	const cCol = new THREE.Color();
-	const typeCounts = [0, 0, 0, 0, 0];
-	for (const cp of s.coralPositions) {
-		const dx = cp.wx - pos.x;
-		const dz = cp.wz - pos.z;
-		if (dx * dx + dz * dz > CORAL_STREAM_RADIUS * CORAL_STREAM_RADIUS) continue;
-		const ti = cp.type;
-		if (typeCounts[ti] >= CORAL_MAX_PER_TYPE) continue;
-		const sy = getTerrainHeight(cp.wx, cp.wz, s.terrainAmplitude, s.terrainScale);
-		const size = 0.4 + hash2d(cp.wx * 7, cp.wz * 13) * 1.8;
-		const si = typeCounts[ti];
-		cDummy.position.set(cp.wx, sy + size * 0.3, cp.wz);
-		cDummy.scale.setScalar(size);
-		cDummy.rotation.set(0, hash2d(cp.wx * 5, cp.wz * 11) * Math.PI * 2, 0);
-		cDummy.updateMatrix();
-		s.coralMeshes[ti].setMatrixAt(si, cDummy.matrix);
-		cCol.setHex(cp.color);
-		s.coralMeshes[ti].setColorAt(si, cCol);
-		typeCounts[ti]++;
-	}
-	for (let ti = 0; ti < 5; ti++) {
-		s.coralMeshes[ti].count = typeCounts[ti];
-		s.coralMeshes[ti].instanceMatrix.needsUpdate = true;
-		s.coralMeshes[ti].instanceColor!.needsUpdate = true;
-	}
+	updateCoralStreaming(s.coralField, pos.x, pos.z, s.terrainAmplitude, s.terrainScale, CORAL_STREAM_RADIUS);
 
 	// ── Fish ──
 
@@ -817,85 +602,6 @@ export function tick(
 		school.material.emissiveIntensity = 0.3 + Math.sin(elapsed * 0.5 + fi) * 0.2;
 	}
 
-	// ── Dolphins (staggered spawn + player-follow) ──
-
-	s.dolphinSpawnTimer -= delta;
-	if (s.dolphinSpawnTimer > 0) {
-		s.dolphinPod.mesh.visible = false;
-	} else {
-		if (!s.dolphinPod.mesh.visible) {
-			s.dolphinPod.mesh.visible = true;
-			const dpos = new THREE.Vector3(
-				pos.x + behindDir.x * 22,
-				Math.max(pos.y - 2, 0),
-				pos.z + behindDir.z * 22,
-			);
-			s.dolphinPod.mesh.position.copy(dpos);
-			for (let di = 0; di < 3; di++) {
-				const di3 = di * 3;
-				s.dolphinPod.positions[di3] = (di - 1) * 6;
-				s.dolphinPod.positions[di3 + 2] = -18 - di * 4;
-			}
-		}
-		const dbehind = new THREE.Vector3(
-			pos.x + behindDir.x * 20,
-			Math.max(pos.y - 2, 0),
-			pos.z + behindDir.z * 20,
-		);
-		s.dolphinPod.mesh.position.copy(dbehind);
-
-		s.dolphinModeTimer -= delta;
-		if (s.dolphinModeTimer <= 0) {
-			s.dolphinModeIndex = (s.dolphinModeIndex + 1) % 3;
-			s.dolphinModeTimer = 8 + Math.random() * 6;
-		}
-		const dMode = DOLPHIN_MODE_META[s.dolphinModeIndex].id;
-
-		if (dMode !== s.dolphinPrevMode) {
-			s.dolphinPrevMode = dMode;
-			for (let di = 0; di < 3; di++) {
-				const di3 = di * 3;
-				s.dolphinPod.velocities[di3] = 0;
-				s.dolphinPod.velocities[di3 + 1] = 0;
-				s.dolphinPod.velocities[di3 + 2] = 0;
-				s.dolphinPod.rotations[di] = 0;
-			}
-		}
-
-		updateDolphinPod(s.dolphinPod, delta, elapsed, dMode, s.dolphinPod.mesh.position, fishTerrain, repelArg);
-	}
-
-	// ── Jellyfish (staggered spawn + player-follow) ──
-
-	s.jellySpawnTimer -= delta;
-	if (s.jellySpawnTimer > 0) {
-		s.jellySwarm.mesh.visible = false;
-	} else {
-		if (!s.jellySwarm.mesh.visible) {
-			s.jellySwarm.mesh.visible = true;
-			const jpos = new THREE.Vector3(
-				pos.x + behindDir.x * 25,
-				Math.max(pos.y - 1, 0),
-				pos.z + behindDir.z * 25,
-			);
-			s.jellySwarm.mesh.position.copy(jpos);
-		}
-		const jbehind = new THREE.Vector3(
-			pos.x + behindDir.x * 24,
-			Math.max(pos.y - 1, 0),
-			pos.z + behindDir.z * 24,
-		);
-		s.jellySwarm.mesh.position.copy(jbehind);
-
-		s.jellyTimer -= delta;
-		if (s.jellyTimer <= 0) {
-			s.jellyMode = s.jellyMode === "drifting" ? "pulsing" : "drifting";
-			s.jellyTimer = 8 + Math.random() * 7;
-		}
-
-		updateJellySwarm(s.jellySwarm, delta, elapsed, s.jellyMode, s.jellySwarm.mesh.position, repelArg);
-	}
-
 	// ── Start City ──
 
 	if (s.startCityModelCity) {
@@ -903,10 +609,86 @@ export function tick(
 		updateModelCityPulse(s.startCityModelCity, elapsed, true, sy);
 	}
 
+	// ── City Guidance (one path → nearest unvisited city) ──
+
+	const ARRIVE_RADIUS = 20;
+	const cityTargets: { wx: number; wz: number; key: string }[] = [];
+	if (s.startCityModelCity) {
+		const key = `${s.startCityX},${s.startCityZ}`;
+		cityTargets.push({ wx: s.startCityX, wz: s.startCityZ, key });
+	}
+	for (const e of s.sandEntries) {
+		if (!e.city && !e.modelCity) continue;
+		const key = `${e.wx},${e.wz}`;
+		if (!s.cityGuidanceArrived.has(key)) {
+			cityTargets.push({ wx: e.wx, wz: e.wz, key });
+		}
+	}
+
+	if (cityTargets.length === 0) {
+		if (s.cityGuidancePath) {
+			s.scene.remove(s.cityGuidancePath.group);
+			s.cityGuidancePath.dispose();
+			s.cityGuidancePath = null;
+		}
+	} else {
+		let nearest = cityTargets[0];
+		let nearDistSq = (nearest.wx - pos.x) ** 2 + (nearest.wz - pos.z) ** 2;
+		for (let i = 1; i < cityTargets.length; i++) {
+			const dSq = (cityTargets[i].wx - pos.x) ** 2 + (cityTargets[i].wz - pos.z) ** 2;
+			if (dSq < nearDistSq) {
+				nearest = cityTargets[i];
+				nearDistSq = dSq;
+			}
+		}
+
+		const dist = Math.sqrt(nearDistSq);
+
+		// Arrived at current target?
+		if (dist < ARRIVE_RADIUS) {
+			s.cityGuidanceArrived.add(nearest.key);
+			if (s.cityGuidancePath) {
+				s.scene.remove(s.cityGuidancePath.group);
+				s.cityGuidancePath.dispose();
+				s.cityGuidancePath = null;
+			}
+		} else {
+			const sy = getTerrainHeight(nearest.wx, nearest.wz, s.terrainAmplitude, s.terrainScale);
+			const toCity = new THREE.Vector3(nearest.wx - pos.x, 0, nearest.wz - pos.z).normalize();
+			const distToCity = Math.sqrt(nearDistSq);
+
+			const playerGround = getTerrainHeight(pos.x, pos.z, s.terrainAmplitude, s.terrainScale);
+			const startY = Math.max(playerGround + 3, pos.y - 10);
+			const endY = sy + 3;
+
+			const midDist = Math.min(distToCity * 0.5, 80);
+			const midGround = getTerrainHeight(
+				pos.x + toCity.x * midDist,
+				pos.z + toCity.z * midDist,
+				s.terrainAmplitude, s.terrainScale,
+			);
+
+			const pts = [
+				new THREE.Vector3(pos.x, startY, pos.z),
+				new THREE.Vector3(pos.x + toCity.x * midDist * 0.3, startY + 2, pos.z + toCity.z * midDist * 0.3),
+				new THREE.Vector3(pos.x + toCity.x * midDist, midGround + 4, pos.z + toCity.z * midDist),
+				new THREE.Vector3(nearest.wx, endY, nearest.wz),
+			];
+
+			if (s.cityGuidancePath) {
+				s.scene.remove(s.cityGuidancePath.group);
+				s.cityGuidancePath.dispose();
+			}
+			const path = createGuidancePath(VARIANT_CONFIGS.city, pts);
+			s.scene.add(path.group);
+			s.cityGuidancePath = path;
+			s.cityGuidancePath.update(elapsed);
+		}
+	}
+
 	// ── Water Surface ──
 
-	s.waterSurface.position.y = WATER_SURFACE_Y + Math.sin(elapsed * 0.1) * 0.5;
-	(s.waterSurface.material as THREE.MeshPhysicalMaterial).opacity = 0.3 + Math.sin(elapsed * 0.15) * 0.08;
+	updateWaterSurface(s.waterSurface, elapsed);
 
 	// ── Audio ──
 
@@ -956,29 +738,22 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 
 	if (s.startCoralReef) disposeScatterGroup(s.startCoralReef, scene);
 
-	for (const g of s.cityGuidance) {
-		g.path.dispose();
-		scene.remove(g.path.group);
+	if (s.cityGuidancePath) {
+		s.cityGuidancePath.dispose();
+		scene.remove(s.cityGuidancePath.group);
 	}
 
-	s.waterSurface.geometry.dispose();
-	(s.waterSurface.material as THREE.MeshPhysicalMaterial).dispose();
-	scene.remove(s.waterSurface);
+	disposeWaterSurface(s.waterSurface, scene);
 
 	for (const school of s.fishSchools) {
 		disposeFishSchool(school, scene);
 	}
 
-	disposeDolphinPod(s.dolphinPod, scene);
-
-	disposeJellySwarm(s.jellySwarm, scene);
-
-	for (const mesh of s.coralMeshes) {
+	for (const mesh of s.coralField.meshes) {
 		scene.remove(mesh);
 		mesh.geometry.dispose();
 		(mesh.material as THREE.Material).dispose();
 	}
-	for (const geo of s.coralGeos) geo.dispose();
 
 	s.terrainMat.dispose();
 

@@ -64,13 +64,53 @@ export const VARIANT_CONFIGS: Record<GuidanceVariant, GuidanceConfig> = {
 	},
 };
 
-const _v = new THREE.Vector3();
+	const _v = new THREE.Vector3();
+const PULSE_SPEED = 0.3;
+const PULSE_WIDTH = 0.15;
+const ARROW_TEX_SIZE = 64;
+
+function createArrowTexture(): THREE.CanvasTexture {
+	const c = document.createElement("canvas");
+	c.width = ARROW_TEX_SIZE;
+	c.height = ARROW_TEX_SIZE;
+	const ctx = c.getContext("2d")!;
+	const s = ARROW_TEX_SIZE;
+	const cx = s / 2;
+	const cy = s / 2;
+	const r = s * 0.4;
+	const hl = s * 0.08;
+
+	ctx.clearRect(0, 0, s, s);
+
+	// Right-pointing arrowhead (→)
+	ctx.fillStyle = "white";
+	// Triangle head
+	ctx.beginPath();
+	ctx.moveTo(cx + r, cy);
+	ctx.lineTo(cx - r * 0.5, cy - r * 0.65);
+	ctx.lineTo(cx - r * 0.2, cy - hl);
+	ctx.closePath();
+	ctx.fill();
+	ctx.beginPath();
+	ctx.moveTo(cx + r, cy);
+	ctx.lineTo(cx - r * 0.5, cy + r * 0.65);
+	ctx.lineTo(cx - r * 0.2, cy + hl);
+	ctx.closePath();
+	ctx.fill();
+	// Stem line
+	ctx.fillRect(cx - r * 0.5, cy - hl, r * 0.6, hl * 2);
+
+	const tex = new THREE.CanvasTexture(c);
+	tex.needsUpdate = true;
+	return tex;
+}
 
 export interface GuidancePath {
 	group: THREE.Group;
 	coreLine: THREE.Line;
 	glowTube: THREE.Mesh;
-	particles: THREE.Points;
+	particles: THREE.Group;
+	arrowMeshes: THREE.Mesh[];
 	target: THREE.Group;
 	config: GuidanceConfig;
 	update: (elapsed: number) => void;
@@ -87,6 +127,7 @@ export function createGuidancePath(
 		color: config.color,
 		transparent: true,
 		opacity: config.opacity,
+		vertexColors: true,
 	});
 
 	const glowMat = new THREE.MeshBasicMaterial({
@@ -98,15 +139,7 @@ export function createGuidancePath(
 		side: THREE.DoubleSide,
 	});
 
-	const pMat = new THREE.PointsMaterial({
-		color: config.particleColor,
-		size: 0.15,
-		transparent: true,
-		opacity: 0.95,
-		blending: THREE.AdditiveBlending,
-		depthWrite: false,
-		sizeAttenuation: true,
-	});
+	const arrowTex = createArrowTexture();
 
 	// Target sphere
 	const targetGroup = new THREE.Group();
@@ -144,35 +177,70 @@ export function createGuidancePath(
 	const glowGeo = new THREE.TubeGeometry(tempCurve, config.curveSegments, config.tubeRadius, 6, false);
 	const glowTube = new THREE.Mesh(glowGeo, glowMat);
 
-	// Particles
+	// Arrow particles
 	const pCount = config.particleCount;
-	const pPos = new Float32Array(pCount * 3);
 	const pProgress = new Float32Array(pCount);
+	const arrowSize = 0.35;
+	const arrowGeo = new THREE.PlaneGeometry(arrowSize, arrowSize);
+	const arrowMat = new THREE.MeshBasicMaterial({
+		map: arrowTex,
+		transparent: true,
+		opacity: 0.9,
+		depthWrite: false,
+		blending: THREE.AdditiveBlending,
+		side: THREE.DoubleSide,
+	});
+	const arrowMeshes: THREE.Mesh[] = [];
 	for (let i = 0; i < pCount; i++) {
 		pProgress[i] = i / pCount;
+		const m = new THREE.Mesh(arrowGeo, arrowMat);
+		arrowMeshes.push(m);
 	}
-	const pGeo = new THREE.BufferGeometry();
-	pGeo.setAttribute("position", new THREE.BufferAttribute(pPos, 3));
-	const particles = new THREE.Points(pGeo, pMat);
+	const particles = new THREE.Group();
+	for (const m of arrowMeshes) particles.add(m);
 
 	group.add(coreLine);
 	group.add(glowTube);
 	group.add(particles);
 	group.add(targetGroup);
 
+	let pulseProgress = 0;
+
+	function setPulseColors(count: number, colAttr: THREE.BufferAttribute): void {
+		const arr = colAttr.array as Float32Array;
+		const bc = new THREE.Color(config.color);
+		for (let i = 0; i < count; i++) {
+			const t = i / (count - 1);
+			const dist = Math.abs(t - pulseProgress);
+			const distWrapped = Math.min(dist, 1 - dist);
+			const intensity = distWrapped < PULSE_WIDTH
+				? 1 - (distWrapped / PULSE_WIDTH) ** 2
+				: 0;
+			const bright = bc.clone().multiplyScalar(1 + intensity * 2);
+			arr[i * 3] = bright.r;
+			arr[i * 3 + 1] = bright.g;
+			arr[i * 3 + 2] = bright.b;
+		}
+		colAttr.needsUpdate = true;
+	}
+
 	function rebuildGeometry(pts: THREE.Vector3[]): THREE.CatmullRomCurve3 {
 		const c = new THREE.CatmullRomCurve3(pts);
 
 		const linePts = c.getPoints(config.curveSegments);
-		const linePos = new Float32Array(linePts.length * 3);
-		for (let i = 0; i < linePts.length; i++) {
+		const count = linePts.length;
+		const linePos = new Float32Array(count * 3);
+		const lineCol = new Float32Array(count * 3);
+		for (let i = 0; i < count; i++) {
 			linePos[i * 3] = linePts[i].x;
 			linePos[i * 3 + 1] = linePts[i].y;
 			linePos[i * 3 + 2] = linePts[i].z;
 		}
+		setPulseColors(count, new THREE.BufferAttribute(lineCol, 3));
 		coreLine.geometry.dispose();
 		coreLine.geometry = new THREE.BufferGeometry();
 		coreLine.geometry.setAttribute("position", new THREE.BufferAttribute(linePos, 3));
+		coreLine.geometry.setAttribute("color", new THREE.BufferAttribute(lineCol, 3));
 
 		glowTube.geometry.dispose();
 		glowTube.geometry = new THREE.TubeGeometry(c, config.curveSegments, config.tubeRadius, 6, false);
@@ -184,22 +252,27 @@ export function createGuidancePath(
 	{
 		const initCurve = new THREE.CatmullRomCurve3(baseControlPoints);
 		const linePts = initCurve.getPoints(config.curveSegments);
-		const linePos = new Float32Array(linePts.length * 3);
-		for (let i = 0; i < linePts.length; i++) {
+		const count = linePts.length;
+		const linePos = new Float32Array(count * 3);
+		const lineCol = new Float32Array(count * 3);
+		for (let i = 0; i < count; i++) {
 			linePos[i * 3] = linePts[i].x;
 			linePos[i * 3 + 1] = linePts[i].y;
 			linePos[i * 3 + 2] = linePts[i].z;
 		}
+		setPulseColors(count, new THREE.BufferAttribute(lineCol, 3));
 		coreLine.geometry.setAttribute("position", new THREE.BufferAttribute(linePos, 3));
+		coreLine.geometry.setAttribute("color", new THREE.BufferAttribute(lineCol, 3));
 
-		const pos = particles.geometry.attributes.position.array as Float32Array;
 		for (let i = 0; i < pCount; i++) {
-			const p = initCurve.getPoint(pProgress[i]);
-			pos[i * 3] = p.x;
-			pos[i * 3 + 1] = p.y;
-			pos[i * 3 + 2] = p.z;
+			const t = pProgress[i];
+			const p = initCurve.getPoint(t);
+			const tan = initCurve.getTangent(t);
+			arrowMeshes[i].position.copy(p);
+			if (tan.lengthSq() > 0.0001) {
+				arrowMeshes[i].quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), tan.normalize());
+			}
 		}
-		particles.geometry.attributes.position.needsUpdate = true;
 	}
 
 	return {
@@ -207,6 +280,7 @@ export function createGuidancePath(
 		coreLine,
 		glowTube,
 		particles,
+		arrowMeshes,
 		target: targetGroup,
 		config,
 		update(elapsed: number) {
@@ -218,31 +292,36 @@ export function createGuidancePath(
 				return _v.clone();
 			});
 
+			pulseProgress = (elapsed * PULSE_SPEED) % 1;
 			const c = rebuildGeometry(wavedPts);
 
 			const speed = config.particleSpeed * 0.008;
-			const pos = particles.geometry.attributes.position.array as Float32Array;
+			const tangent = new THREE.Vector3();
 			for (let i = 0; i < pCount; i++) {
 				pProgress[i] += speed;
 				if (pProgress[i] > 1) pProgress[i] -= 1;
-				const p = c.getPoint(pProgress[i]);
-				pos[i * 3] = p.x;
-				pos[i * 3 + 1] = p.y;
-				pos[i * 3 + 2] = p.z;
+				const t = pProgress[i];
+				const p = c.getPoint(t);
+				const tan = c.getTangent(t);
+				arrowMeshes[i].position.copy(p);
+				if (tan.lengthSq() > 0.0001) {
+					arrowMeshes[i].quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), tan.normalize());
+				}
 			}
-			particles.geometry.attributes.position.needsUpdate = true;
 
 			const pulse = 0.6 + 0.4 * Math.sin(elapsed * 2);
 			targetGroup.children[0].scale.setScalar(pulse);
 			targetGroup.children[1].scale.setScalar(0.8 + 0.2 * Math.sin(elapsed * 3));
+			glowMat.opacity = config.opacity * 0.25 * (0.6 + 0.4 * Math.sin(elapsed * 2));
 		},
 		dispose() {
 			coreLine.geometry.dispose();
 			coreMat.dispose();
 			glowTube.geometry.dispose();
 			glowMat.dispose();
-			particles.geometry.dispose();
-			pMat.dispose();
+			arrowGeo.dispose();
+			arrowMat.dispose();
+			arrowTex.dispose();
 			outerGeo.dispose();
 			outerMat.dispose();
 			innerGeo.dispose();

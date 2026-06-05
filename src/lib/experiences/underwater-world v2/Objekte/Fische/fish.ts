@@ -220,6 +220,8 @@ const SWIM_CONFIG: Record<SwimMode, SwimConfig> = {
 
 // ── Update (v1-style velocity-based physics) ──
 
+export type RepelCenter = { x: number; z: number; radius: number };
+
 export function updateFishSchool(
 	school: FishSchool,
 	delta: number,
@@ -227,6 +229,7 @@ export function updateFishSchool(
 	swimMode: SwimMode,
 	playerPos: THREE.Vector3,
 	terrainFn?: (wx: number, wz: number) => number,
+	repelCenters?: RepelCenter[],
 ): void {
 	if (school.spawnTime < 0) school.spawnTime = elapsed;
 	const fadeElapsed = elapsed - school.spawnTime;
@@ -351,6 +354,23 @@ export function updateFishSchool(
 			}
 		}
 		school.positions[i3 + 1] = Math.max(-50, Math.min(200, school.positions[i3 + 1]));
+
+		// ── Dome repulsion ──
+		if (repelCenters) {
+			const wx = school.mesh.position.x + school.positions[i3];
+			const wz = school.mesh.position.z + school.positions[i3 + 2];
+			for (const c of repelCenters) {
+				const dx = wx - c.x;
+				const dz = wz - c.z;
+				const dist = Math.sqrt(dx * dx + dz * dz);
+				const minDist = c.radius + 5;
+				if (dist < minDist && dist > 0.01) {
+					const strength = (minDist - dist) * 2 * delta;
+					school.velocities[i3] += (dx / dist) * strength;
+					school.velocities[i3 + 2] += (dz / dist) * strength;
+				}
+			}
+		}
 
 		// Rotation from velocity direction (v1-style, YXZ order)
 		const vx = school.velocities[i3];

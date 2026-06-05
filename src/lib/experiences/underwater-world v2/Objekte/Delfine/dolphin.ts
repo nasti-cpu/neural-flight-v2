@@ -93,6 +93,7 @@ export async function loadDolphinGeometry(): Promise<THREE.BufferGeometry | null
 		geo.deleteAttribute("WEIGHTS_0");
 		geo.deleteAttribute("TEXCOORD_0");
 		geo.rotateX(-Math.PI / 2 + 0.35);
+		geo.rotateY(Math.PI);
 		geo.center();
 		return geo;
 	} catch {
@@ -139,7 +140,7 @@ export const DOLPHIN_MODE_META: DolphinModeMeta[] = [
 
 const MODE_CONFIG: Record<DolphinMode, DolphinConfig> = {
 	leisurely: {
-		speed: 4,
+		speed: 1.5,
 		turnRate: 1.5,
 		pitchAmp: 0.08,
 		pitchFreq: 0.6,
@@ -152,7 +153,7 @@ const MODE_CONFIG: Record<DolphinMode, DolphinConfig> = {
 		sepRangeSq: 0,
 	},
 	fast: {
-		speed: 8,
+		speed: 2.5,
 		turnRate: 2.5,
 		pitchAmp: 0.12,
 		pitchFreq: 0.8,
@@ -165,7 +166,7 @@ const MODE_CONFIG: Record<DolphinMode, DolphinConfig> = {
 		sepRangeSq: 0,
 	},
 	pod: {
-		speed: 5,
+		speed: 2.0,
 		turnRate: 1.2,
 		pitchAmp: 0.08,
 		pitchFreq: 0.6,
@@ -199,11 +200,11 @@ export function createDolphinPod(
 
 	for (let i = 0; i < count; i++) {
 		// Formation offsets for pod mode (side by side, staggered)
-		const sideOffset = (i - (count - 1) / 2) * 2;
-		const depthOffset = (i % 2 === 0 ? -0.5 : 0.5);
+		const sideOffset = (i - (count - 1) / 2) * 6;
+		const depthOffset = (i % 2 === 0 ? -3 : 3);
 		offsets[i * 2] = sideOffset;
 		offsets[i * 2 + 1] = depthOffset;
-		speedMults[i] = 0.97 + i * 0.03;
+		speedMults[i] = 0.85 + i * 0.15;
 
 		positions[i * 3] = sideOffset;
 		positions[i * 3 + 1] = (Math.random() - 0.5) * heightRange;
@@ -277,7 +278,9 @@ export function updateDolphinPod(
 	delta: number,
 	elapsed: number,
 	mode: DolphinMode,
-	center: THREE.Vector3,
+	meshWorldPos?: THREE.Vector3,
+	terrainFn?: (wx: number, wz: number) => number,
+	repelCenters?: { x: number; z: number; radius: number }[],
 ): void {
 	const count = pod.count;
 	const cfg = MODE_CONFIG[mode];
@@ -339,13 +342,13 @@ export function updateDolphinPod(
 			const targetZ = avgZ + pod.offsets[i * 2 + 1];
 			const dx = targetX - px;
 			const dz = targetZ - pz;
-			angVel += (dx * (-Math.sin(rot)) + dz * (-Math.cos(rot))) * 0.3;
+			angVel += (dx * Math.cos(rot) - dz * Math.sin(rot)) * 0.3;
 		}
 
 		// Apply heading rotation
 		pod.rotations[i] += angVel * delta * cfg.turnRate;
 		const finalRot = pod.rotations[i];
-		const finalFwdX = Math.sin(finalRot);
+		const finalFwdX = -Math.sin(finalRot);
 		const finalFwdZ = -Math.cos(finalRot);
 
 		// ── Velocity with per-dolphin speed multiplier ──
@@ -377,6 +380,14 @@ export function updateDolphinPod(
 		const depthPull = (pod.heights[i] - pod.positions[i3 + 1]) * 0.02;
 		pod.velocities[i3 + 1] += (yOffset + slowWave + depthPull - pod.velocities[i3 + 1]) * delta * 3;
 
+		// Distance-based centering velocity pull (counteracts swimming away)
+		const pDist = Math.sqrt(pod.positions[i3] * pod.positions[i3] + pod.positions[i3 + 2] * pod.positions[i3 + 2]);
+		if (pDist > 20) {
+			const pullStr = (pDist - 20) * 0.3;
+			pod.velocities[i3] -= (pod.positions[i3] / pDist) * pullStr;
+			pod.velocities[i3 + 2] -= (pod.positions[i3 + 2] / pDist) * pullStr;
+		}
+
 		// ── Move ──
 		pod.positions[i3] += pod.velocities[i3] * delta;
 		pod.positions[i3 + 1] += pod.velocities[i3 + 1] * delta;
@@ -390,17 +401,37 @@ export function updateDolphinPod(
 			pod.positions[i3 + 2] += (targetZ - pod.positions[i3 + 2]) * delta * 1.5;
 		}
 
-		// Gentle centering pull so they stay in view
-		if (mode !== "pod") {
-			pod.positions[i3] *= 0.9995;
-			pod.positions[i3 + 2] *= 0.9995;
+		// Terrain floor — like fish
+		if (terrainFn && meshWorldPos) {
+			const wx = meshWorldPos.x + pod.positions[i3];
+			const wz = meshWorldPos.z + pod.positions[i3 + 2];
+			const worldY = meshWorldPos.y + pod.positions[i3 + 1];
+			const floorY = terrainFn(wx, wz) + 2;
+			const distAbove = worldY - floorY;
+			if (distAbove < 4) {
+				const t = 1 - distAbove / 4;
+				pod.velocities[i3 + 1] += t * t * 5 * delta;
+			}
+			if (distAbove < 0) {
+				pod.velocities[i3 + 1] = Math.abs(pod.velocities[i3 + 1]) * 0.3 + 1;
+			}
 		}
 
-		// Wrapping
-		const BOUNDS = 45;
-		for (let a = 0; a < 3; a++) {
-			if (pod.positions[i3 + a] > BOUNDS) pod.positions[i3 + a] = -BOUNDS;
-			if (pod.positions[i3 + a] < -BOUNDS) pod.positions[i3 + a] = BOUNDS;
+		// ── Dome repulsion ──
+		if (repelCenters && meshWorldPos) {
+			const wx = meshWorldPos.x + pod.positions[i3];
+			const wz = meshWorldPos.z + pod.positions[i3 + 2];
+			for (const c of repelCenters) {
+				const dx = wx - c.x;
+				const dz = wz - c.z;
+				const dist = Math.sqrt(dx * dx + dz * dz);
+				const minDist = c.radius + 5;
+				if (dist < minDist && dist > 0.01) {
+					const strength = (minDist - dist) * 3 * delta;
+					pod.velocities[i3] += (dx / dist) * strength;
+					pod.velocities[i3 + 2] += (dz / dist) * strength;
+				}
+			}
 		}
 
 		// ── Instance matrix ──
