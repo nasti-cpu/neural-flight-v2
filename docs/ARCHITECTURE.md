@@ -1,4 +1,4 @@
-# 🏗️ Architecture
+﻿# 🏗️ Architecture
 
 System design for the ICAROS VR Teaching Platform.
 
@@ -73,40 +73,55 @@ Three.js Render Loop @ 72fps
 | `/controller` | D-Pad input, speed buttons, 3D preview, settings sidebar |
 | `/node-editor` | Visual node editor — modular signal pipeline for VR parameter control |
 | `/shader-playground` | Live TSL shader editor with signal-based modules and 3D preview |
+| `/test/echoortung` | Laboratory for testing bio-inspired sensing systems |
 
-### `lib/experiences/` — Experience System
+## `lib/experiences/` — Experience System
 
-Each experience is a self-contained VR world with 5 files:
+Experiences have evolved from single-file scripts to modular ecosystems.
+
+### 1. Standard Pattern (Template)
+For simple worlds, use the 5-file contract:
+- `manifest.ts`: Declarative I/O (parameters, scene config)
+- `scene.ts`: 3D objects + animation (setup, tick, dispose)
+- `player.ts`: Orientation → movement mapping
+- `settings.ts`: Runtime parameter application
+- `index.ts`: Entry point
+
+### 2. Modular Pattern (Advanced)
+Large-scale worlds (like `underwater-world v2`) use a **Domain-Driven Design** folder structure:
+- `welt/`: Terrain, Water, Environment systems
+- `Sinne/`: Sensory systems (Echoortung, Leitsystem, Seitenlinienorgan)
+- `Objekte/`: Autonomous entities (Boids, Sharks, Cities)
+- `Ambiente/`: Post-processing, Lighting, Atmosphere
+
+This "Senses" (Sinne) architecture allows developers to "borrow" biological abilities for VR navigation.
+
+### Registry
+- **Catalog** registers all experiences via `catalog.ts`.
+- **Loader** manages lifecycle: load → tick → dispose.
+
+## `lib/three/` — Shared 3D Building Blocks
 
 ```
-manifest.ts  ── Declarative I/O contract (parameters, scene config)
-scene.ts ────── 3D objects + animation (setup, tick, dispose)
-player.ts ───── Orientation → movement mapping
-settings.ts ─── Parameter ID → scene mutation
-index.ts ────── Re-export entry point
-```
-
-- **Catalog** registers all experiences (students add 1 import + 1 line)
-- **Loader** manages lifecycle: load → tick → dispose
-- **Manifest** defines parameters that appear in Settings Sidebar + Node Editor
-
-### `lib/three/` — Shared 3D Building Blocks
-
-```
-scene.ts ─── Scene factory (lights, fog)
-player.ts ── FlightPlayer (rig + camera + arcade physics)
-sky.ts ───── Low-poly sky dome (vertex-color gradient)
-clouds.ts ── Procedural cloud groups (drift animation)
-rings.ts ─── Per-chunk collectible rings
-loader.ts ── GLTF loader wrapper
+scene.ts ───────── Scene factory (lights, fog)
+player.ts ──────── FlightPlayer (rig + camera + arcade physics)
+postfx-pipeline.ts  WebXR-compatible EffectComposer (Bloom, Grain, DOF)
+sky.ts ─────────── Low-poly sky dome
+starfield.ts ───── Instanced star system with flickering
+clouds.ts ──────── Procedural cloud groups
+rings.ts ───────── Per-chunk collectible rings
+loader.ts ──────── GLTF loader wrapper
 
 terrain/
 ├── manager.ts ──── Chunk load/unload + object pooling
 ├── chunk.ts ────── Single 128×128 terrain tile
 ├── geometry.ts ─── Heightmap → BufferGeometry
 ├── heightmap.ts ── Simplex noise FBM (5 octaves)
-├── water.ts ────── Flat water plane
-└── decorations.ts  InstancedMesh trees + rocks
+└── water.ts ────── Flat water plane
+
+procedural/
+├── city.ts ────── InstancedMesh building grid
+└── blob-terrain.ts CPU-side FBM displaced plane
 ```
 
 ### `lib/ws/` — WebSocket
@@ -214,3 +229,10 @@ Server broadcasts each message to all connected clients except the sender.
 - **Frustum culling** (Three.js default)
 - **Fog** hides far terrain (100–500 range)
 - **FlatShading** reduces normal computation
+
+## AI-Assisted Development
+
+This project utilizes specialized **AI Agents** for complex feature implementation.
+- `AGENTS.md`: Context guide for LLMs.
+- `AGENTS_PLAN.md`: Strategic roadmap for autonomous tasks.
+- `.agents/skills/`: Domain-specific recipes for level creation.

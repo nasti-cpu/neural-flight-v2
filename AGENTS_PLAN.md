@@ -17,66 +17,47 @@
 - ~~**Delfine & Quallen folgen Spieler** mit verzögertem Spawn (2s/5s).~~
 - ~~**Kuppel-Repulsion** für Fische, Delfine, Quallen.~~
 - ~~**Stadt-Modell**: `la_night_city.glb`, Kuppelradius 65m, fällt auf prozedurale Stadt zurück.~~
-- **`underwater-world v2`**: Komplette Refaktorierung in modulare `welt/`-Struktur (terrain.ts, chunks.ts, wasser.ts). Korallen-Streaming auf Slot-Tracking umgestellt.
-- **Leitsystem (`Sinne/Leitsystem/`)**: Neue Guidance-Komponente — eine Linie zur nächsten unbesuchten Stadt, inklusive:
-  - Core Line + Glow Tube + Partikel-Pfeile (→-Canvas-Textur)
-  - Wandernder Helligkeits-Puls auf der Linie (vertexColors)
-  - Pfeile rotieren entlang Kurventangente zur Stadt
-- **Stadt-Spacing**: `CITY_SPACING_MIN = 150m`, neue City-Varianten werden bei <150m Distanz auf Seagrass/Reef/Plain umgeworfen.
-- **Delfine & Quallen & CityGuidance aus v2 entfernt** — zugunsten von einfachem, fokussiertem Leitsystem.
-- **`getTerrainHeight`** nutzt jetzt `getBiomeParams` → exakte Höhen-Berechnung wie echtes Terrain.
+- ~~**`underwater-world v2`**: Komplette Refaktorierung in modulare `welt/`-Struktur.~~
+- ~~**Leitsystem (`Sinne/Leitsystem/`)**: Neue Guidance-Komponente.~~
+- ~~**Stadt-Spacing**: `CITY_SPACING_MIN = 150m`.~~
+- ~~**Delfine & Quallen & CityGuidance aus v2 entfernt**.~~
+- ~~**`getTerrainHeight`** nutzt jetzt `getBiomeParams`.~~
+- ~~**Bugfix-Runde (Commit `983510e`)**:~~
+  - ~~Doppelte Beleuchtung entfernt (Loader vs. scene.ts)~~
+  - ~~Dead Code: `rebuildCoralInstances()` entfernt~~
+  - ~~Memory-Leaks: `baseGeo` + `coralGeos` disposed~~
+  - ~~Listener-Leak: `removeEventListener` in dispose()~~
+  - ~~Settings: `lightIntensity` skaliert Lights, `terrainColor` färbt `terrainMat`~~
+  - ~~Crash-Risiko: `boundingBox!` → `if(bb)` Guard~~
 - **0 errors, 0 warnings** (biome + svelte-check).
 
-### Ausstehend (nicht angetastet)
-- ~~Echoortung in die VR-Welt integrieren~~ **(erledigt)**
-- Wasser-Shader / God Rays / Caustics
-- Delfin-Neuschreibung (wurden entfernt statt neu geschrieben)
+### Ausstehend
+- ~~Echoortung in die VR-Welt integrieren~~
+- ~~Bugfix-Runde (Doppelbeleuchtung, Leaks, Settings, Crash)~~
+- **Wasser-Shader / God Rays / Caustics**
+- **Delfin-Neuschreibung** (wurden entfernt statt neu geschrieben)
 
 ### Nächste Schritte (geplant)
 
-#### 1. 🌍 Welt-Landschaft (`src/lib/experiences/unterwasser v2/welt/`)
-~~Ziel: Landschafts-Code aus `scene.ts` auslagern und systematisch verbessern.~~
+#### 1. 🐟 Echoortung: Fische nacheinander aufleuchten lassen (Bug)
+**Ziel:** Fische sollen einzeln gelb aufblitzen, wenn der expandierende Ring sie wirklich berührt — nicht alle gleichzeitig.
 
-~~- **Ordner `welt/` anlegen** mit:~~
-  ~~- `terrain.ts` — Geländegenerierung (FBM 4 Oktaven, Biome)~~
-  ~~- `wasser.ts` — Wasseroberfläche (Y=75)~~
-  ~~- `chunks.ts` — Streaming (3×3 Grid, directional 400m/120m)~~
+**Root Cause:** `school.mesh.position` wird von `updateFishSchool` nie aktualisiert → bleibt immer (0,0,0). Alle 80 Fischschwärme melden Position 0 → Echo-System trifft sie alle im selben Frame.
 
-Grundstruktur ist erledigt. Offene Verbesserungen:
-- Realistischeres Wasser (Shader-Wellen, LOD)
-- Terrains smooth transitions zwischen Chunks
-- Unterwasser-Licht (God Rays, Caustics)
-- Biomes: Übergänge weicher machen (aktuell smoothstep, okay)
+**Fix war fertig, wurde auf User-Wunsch verworfen — muss neu gemacht werden:**
+- `FishSchool.centroidX/centroidZ` hinzufügen, live in `updateFishSchool` berechnen
+- `scene.ts` liest `school.centroidX/Z` statt `school.mesh.position`
+- `FLASH_DURATION` 0.5s → 0.15s für sichtbare Welle
 
-#### 2. 🐬 Delfine neu schreiben (`Objekte/Delfine/`)
-~~Ziel: Eigenständiges, natürliches Schwimmverhalten — nicht mehr am Spieler „kleben".~~
+#### 2. 🌊 Wasser-Shader / God Rays / Caustics
+- Unterwasser-Lichtbrechung (Caustics auf Terrain/Korallen)
+- God Rays vom Sonnenlicht
+- Realistische Water-Waves via Shader (statt statischer Plane)
 
-~~- **Komplett neuer `dolphin.ts`**~~
-~~- Eigene Patrol-Logik~~
-~~- Schwimm-Muster: Kreise ziehen, auf- und abtauchen~~
-~~- Terrain-Folge~~
-
-**Entfernt statt neugeschrieben.** Delfine wurden rausgenommen — das Leitsystem (Guidance) übernimmt die Orientierung. Falls Delfine zurückkommen sollen, muss ein neuer Ansatz her (nicht an Spieler gebunden, eigenes Patrol).
-
-#### 3. 🔊 Echoortung in die Welt integrieren
-Ziel: Scan-Echo-Ringe aus der Testseite in die VR-Welt einbauen. **Erledigt.**
-
-- ✅ `echoVRIntegration.ts` erstellt — kapselt Echo-System + Flash-Management
-- ✅ `scene.ts` — Echo in setup/tick/dispose integriert
-- ✅ Scan-Ring wird alle 3s (konfigurierbar) vom Spieler ausgesendet
-- ✅ **Objektreaktionen** bei Ringberührung:
-  - Fische → `emissiveIntensity` * (1 + 3× Flash-Faktor)
-  - Städte (modelCity + City) → `domeMat.emissiveIntensity` +0.6 Boost
-  - Korallen (CoralField) → flächenhaftes Glühen wenn Ring aktiv ist
-  - Start-City → gleicher Flash wie andere Städte
-- ✅ Q-Taste zum Ein-/Ausschalten
-- ✅ Settings: echolocationEnabled, echolocationRange, echolocationInterval
-- ✅ 0 errors, 0 warnings (biome + svelte-check)
-
-**Nicht implementiert (für später):**
-- Gelände-Highlight (komplex, viele Vertices)
-- Riff-Modell-Korallen (scatterCoralModels) — viele individuelle Meshes
-- Delfin-Neuschreibung (separater Punkt)
+#### 3. 🐬 Delfin-Neuschreibung
+- Eigenes Patrol, nicht an Spieler gebunden
+- Kreise ziehen, auf-/abtauchen, Terrain-Folge
+- Optional: Echoortung per Delfin-Klicklaute
 
 #### 4. 🎯 Leitsystem verfeinern
 - Guidance-Linien-Bogen optimieren (Start 10m unter Spieler + Terrain-Clamp)
@@ -85,10 +66,20 @@ Ziel: Scan-Echo-Ringe aus der Testseite in die VR-Welt einbauen. **Erledigt.**
 
 ---
 
+## Bekannte Probleme (Bugs)
+
+| # | Problem | Status |
+|---|---------|--------|
+| 1 | **Fische alle gleichzeitig** — `school.mesh.position` nie geupdated → (0,0,0) | Fix bereit, nicht committet |
+| 2 | **Bekannte Probleme im Codebase** — siehe `AGENTS.md` Critical Context | Nicht angetastet |
+| 3 | **`lightIntensity`-Slider** skaliert alle Szenen-Lichter (Ambient + Directional) proportional | Gefixt in `983510e` |
+| 4 | **Korallen-Flash** flutet alle Korallen gleichzeitig bei jedem Echo-Treffer | Nicht gefixt |
+
 ## Offene Fragen
-- Echoortung: Eigener System-Kanal oder direkt in `tick()` integrieren?
+- Echoortung: Eigener System-Kanal oder direkt in `tick()` integrieren? → Aktuell in `tick()`.
 - Sollen Delfine/Quallen/Haie zurück? Aktuell nur Fische + Städte als Ziele.
 - Guidance: Soll es auch für Riffe/Korallenfelder geben?
+- Fish-Echo: Nur Schul-Position oder jede Instanz einzeln scannen? (Performance vs. Genauigkeit)
 
 ## Wichtige Konstanten (für Wiederaufnahme)
 | Konstante | Wert | Fundort |
