@@ -47,8 +47,8 @@ const SOUND_PATHS: Record<EchoVariant, string> = {
 
 // ── Reflex ──
 const REFLEX_EMIT_OFFSET = new THREE.Vector3(0, 0, -8);
+const ORIGIN = new THREE.Vector3(0, 0, 0);
 const TARGET_DIST = 8;
-let reflexCooldown = 0;
 
 // ── Fächer ──
 const FAN_ANGLES = [-0.3, -0.15, 0, 0.15, 0.3];
@@ -109,7 +109,6 @@ function rebuild(variant: EchoVariant) {
 	scene.add(system.group);
 	setSystemAudio(system, variant);
 	emitTimer = 0;
-	reflexCooldown = 0;
 	prevVisibleMap.clear();
 
 	if (variant === "reflex") {
@@ -270,14 +269,8 @@ onMount(() => {
 		emitTimer += delta;
 		if (emitTimer >= interval && system) {
 			emitTimer = 0;
-			if (currentVariant === "reflex") {
-				reflexCooldown = 1.5;
-				system.emit(REFLEX_EMIT_OFFSET.x, REFLEX_EMIT_OFFSET.y, REFLEX_EMIT_OFFSET.z);
-			} else if (currentVariant === "faecher") {
-				system.emit(0, 0, 0);
-			} else {
-				system.emit(0, 0, 0);
-			}
+			const emitPos = currentVariant === "reflex" ? REFLEX_EMIT_OFFSET : ORIGIN;
+			system.emit(emitPos.x, emitPos.y, emitPos.z);
 		}
 
 		if (system) system.update(delta);
@@ -315,18 +308,16 @@ onMount(() => {
 
 		// ── Reflex: detect ring reaching target & trigger reflection ──
 		if (currentVariant === "reflex" && system && reflectSystem) {
-			reflexCooldown -= delta;
 			for (const child of system.group.children) {
 				if (child instanceof THREE.Mesh && child.visible) {
 					const s = child.scale.x;
-					if (s >= TARGET_DIST && reflexCooldown <= 0) {
+					if (s >= TARGET_DIST) {
 						if (child.userData._reflexDone) continue;
 						child.userData._reflexDone = true;
 						reflectSystem.emit(0, 0, 0);
 						hitFlash.scale.setScalar(0.2);
 						hitFlashGlow.scale.setScalar(0.3);
 						reflexFlashTimer = 0.4;
-						reflexCooldown = 999; // block until next emit resets cooldown
 					}
 				}
 			}
