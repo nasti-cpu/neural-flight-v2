@@ -3,6 +3,8 @@ import { manifest as gradientPrism } from "./gradient-prism";
 import { manifest as mountainFlight } from "./mountain-flight";
 import { manifest as shaderDemo } from "./shader-demo";
 import { manifest as underwaterWorld } from "./underwater-world v2";
+import { manifest as visioTechnologica } from "./visio-technologica";
+import { manifest as visioTechnologicaCityTest } from "./visio-technologica-city-test";
 import type { ExperienceManifest } from "./types";
 
 // ── Registry ──
@@ -19,6 +21,8 @@ const CATALOG: Record<string, ExperienceManifest> = {
 	"mountain-flight": mountainFlight,
 	"shader-demo": shaderDemo,
 	"underwater-world": underwaterWorld,
+	"visio-technologica": visioTechnologica,
+	"visio-technologica-city-test": visioTechnologicaCityTest,
 };
 
 export const DEFAULT_EXPERIENCE_ID = "mountain-flight";

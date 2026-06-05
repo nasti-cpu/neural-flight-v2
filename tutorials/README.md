@@ -16,10 +16,11 @@ The **ICAROS VR Teaching Platform** lets you build immersive VR worlds for the *
 | 2 | 🖥️ **Terminal** | Your command center — where you type commands |
 | 3 | ✏️ **Zed** | Code editor — where you write and read code |
 | 4 | 🔧 **Git + GitHub** | Version control + online collaboration platform |
-| 5 | ⚡ **Bun** | JavaScript runtime — the engine that runs your code |
-| 6 | 🔒 **mkcert** | HTTPS certificates — required for VR in the browser |
-| 7 | 📱 **ADB** | USB bridge to Meta Quest *(optional)* |
-| 8 | 🤖 **OpenCode** | AI coding assistant in your terminal |
+| 5 | 🟢 **Node.js** | JavaScript runtime — needed for WebSocket-related tooling |
+| 6 | ⚡ **Bun** | JavaScript runtime — the engine that runs your code |
+| 7 | 🔒 **mkcert** | HTTPS certificates — required for VR in the browser |
+| 8 | 📱 **ADB** | USB bridge to Meta Quest *(optional)* |
+| 9 | 🤖 **OpenCode** | AI coding assistant in your terminal |
 
 ---
 
@@ -40,6 +41,7 @@ After finishing your OS guide, continue with:
 | 🚀 | [**First Steps**](first-steps.md) | Clone the project, start the server, explore |
 | ⌨️ | [**Terminal Basics**](terminal-basics.md) | Essential commands cheat sheet (navigation, git, files) |
 | 🐙 | [**GitHub Basics**](github-basics.md) | Branches, pull requests, and the team workflow |
+| 📚 | [**Glossary**](glossary.md) | Quick definitions for beginner terminology used across the tutorials |
 
 ---
 
@@ -76,7 +78,7 @@ Learn visually! These videos cover the same tools you'll install:
 1. **Re-read the step** — every command has a ✅ verification to check if it worked
 2. **Check the ⚠️ troubleshooting** below each step
 3. **Ask David** — in class or via email
-4. **Open a GitHub Issue** — [github.com/dweigend/simple_flight/issues](https://github.com/dweigend/simple_flight/issues)
+4. **Open a GitHub Issue** — [github.com/dweigend/neural-flight-template/issues](https://github.com/dweigend/neural-flight-template/issues)
 
 ---
 
