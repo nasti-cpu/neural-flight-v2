@@ -17,6 +17,7 @@ let system: EchoVariantSystem | null = null;
 let reflectSystem: EchoVariantSystem | null = null;
 let targetGroup: THREE.Group;
 let hitFlash: THREE.Mesh;
+let hitFlashGlow: THREE.Mesh;
 
 let currentVariant = $state<EchoVariant>("scan");
 let autoRotate = $state(true);
@@ -26,21 +27,33 @@ let emitTimer = 0;
 let lastMX = 0;
 let lastMY = 0;
 
-const EMIT_INTERVAL = 2.3;
+const EMIT_INTERVALS: Record<EchoVariant, number> = {
+	scan: 2.3,
+	puls: 2.8,
+	welle: 3.5,
+	reflex: 4.0,
+	faecher: 3.0,
+	impuls: 3.0,
+};
 
 const SOUND_PATHS: Record<EchoVariant, string> = {
 	scan: "/sounds/echo%201.mp3",
 	puls: "/sounds/echo%203.mp3",
 	welle: "/sounds/echo%202.mp3",
 	reflex: "/sounds/echo%201.mp3",
+	faecher: "/sounds/echo%203.mp3",
+	impuls: "/sounds/echo%201.mp3",
 };
 
-// ── Reflex tracking ──
+// ── Reflex ──
 const REFLEX_EMIT_OFFSET = new THREE.Vector3(0, 0, -8);
 const TARGET_DIST = 8;
-let reflexTriggered = new Set<string>();
-let reflexFlashTimer = 0;
+let reflexCooldown = 0;
 
+// ── Fächer ──
+const FAN_ANGLES = [-0.3, -0.15, 0, 0.15, 0.3];
+
+// ── Audio ──
 let audioCtx: AudioContext | null = null;
 const audioBuffers = new Map<EchoVariant, AudioBuffer>();
 
@@ -96,21 +109,22 @@ function rebuild(variant: EchoVariant) {
 	scene.add(system.group);
 	setSystemAudio(system, variant);
 	emitTimer = 0;
-	reflexTriggered.clear();
-	reflexFlashTimer = 0;
+	reflexCooldown = 0;
+	prevVisibleMap.clear();
 
-	// Create reflection system for reflex variant
 	if (variant === "reflex") {
 		const refConfig = { ...ECHO_VARIANTS["scan"] };
 		refConfig.color = 0xff8844;
 		refConfig.label = "Reflexion";
 		refConfig.expandSpeed = 6;
-		refConfig.lifetime = 1.0;
-		refConfig.maxOpacity = 0.6;
+		refConfig.lifetime = 1.2;
+		refConfig.maxOpacity = 0.5;
 		reflectSystem = createEchoVariant(refConfig);
 		scene.add(reflectSystem.group);
 	}
 }
+
+const prevVisibleMap = new Map<string, boolean>();
 
 onMount(() => {
 	renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -218,6 +232,18 @@ onMount(() => {
 	hitFlash = new THREE.Mesh(flashGeo, flashMat);
 	targetGroup.add(hitFlash);
 
+	// Additional glow for impact emphasis
+	const flashGlowGeo = new THREE.SphereGeometry(1.6, 16, 16);
+	const flashGlowMat = new THREE.MeshBasicMaterial({
+		color: 0xff8844,
+		transparent: true,
+		opacity: 0,
+		blending: THREE.AdditiveBlending,
+		depthWrite: false,
+	});
+	hitFlashGlow = new THREE.Mesh(flashGlowGeo, flashGlowMat);
+	targetGroup.add(hitFlashGlow);
+
 	targetGroup.position.set(0, 0, 0);
 	scene.add(targetGroup);
 
@@ -233,18 +259,22 @@ onMount(() => {
 			orbitTheta += delta * 0.2;
 		}
 		const dist = 18;
-		const x = Math.sin(orbitTheta) * dist * Math.cos(orbitPhi);
-		const y = Math.sin(orbitPhi) * dist + 2;
-		const z = Math.cos(orbitTheta) * dist * Math.cos(orbitPhi);
-		camera.position.set(x, y, z);
+		const cx = Math.sin(orbitTheta) * dist * Math.cos(orbitPhi);
+		const cy = Math.sin(orbitPhi) * dist + 2;
+		const cz = Math.cos(orbitTheta) * dist * Math.cos(orbitPhi);
+		camera.position.set(cx, cy, cz);
 		camera.lookAt(0, 0, 0);
 
 		// Auto-emit rings at interval
+		const interval = EMIT_INTERVALS[currentVariant];
 		emitTimer += delta;
-		if (emitTimer >= EMIT_INTERVAL && system) {
+		if (emitTimer >= interval && system) {
 			emitTimer = 0;
 			if (currentVariant === "reflex") {
+				reflexCooldown = 1.5;
 				system.emit(REFLEX_EMIT_OFFSET.x, REFLEX_EMIT_OFFSET.y, REFLEX_EMIT_OFFSET.z);
+			} else if (currentVariant === "faecher") {
+				system.emit(0, 0, 0);
 			} else {
 				system.emit(0, 0, 0);
 			}
@@ -253,33 +283,69 @@ onMount(() => {
 		if (system) system.update(delta);
 		if (reflectSystem) reflectSystem.update(delta);
 
+		// ── Fächer: assign rotation to newly activated rings ──
+		if (currentVariant === "faecher" && system) {
+			let fanIdx = 0;
+			for (const child of system.group.children) {
+				if (child instanceof THREE.Mesh) {
+					const nowVis = child.visible;
+					const wasVis = prevVisibleMap.get(child.uuid) ?? false;
+					if (nowVis && !wasVis) {
+						const angle = FAN_ANGLES[fanIdx % FAN_ANGLES.length];
+						child.rotation.y = angle;
+						fanIdx++;
+					}
+					prevVisibleMap.set(child.uuid, nowVis);
+				}
+			}
+		}
+
+		// ── Impuls: pulse ring brightness + slight scale throb ──
+		if (currentVariant === "impuls" && system) {
+			for (const child of system.group.children) {
+				if (child instanceof THREE.Mesh && child.visible) {
+					const mat = child.material as THREE.MeshBasicMaterial;
+					const pulse = 0.5 + 0.5 * Math.sin(elapsed * 7 + child.id * 0.5);
+					const factor = 0.15 + 0.85 * pulse;
+					mat.opacity = mat.opacity * factor;
+					child.scale.setScalar(child.scale.x * (1 + 0.04 * (1 - pulse)));
+				}
+			}
+		}
+
 		// ── Reflex: detect ring reaching target & trigger reflection ──
 		if (currentVariant === "reflex" && system && reflectSystem) {
+			reflexCooldown -= delta;
 			for (const child of system.group.children) {
 				if (child instanceof THREE.Mesh && child.visible) {
 					const s = child.scale.x;
-					if (s >= TARGET_DIST) {
-						const key = child.uuid;
-						if (!reflexTriggered.has(key)) {
-							reflexTriggered.add(key);
-							reflectSystem.emit(0, 0, 0);
-							hitFlash.scale.setScalar(0.3);
-							reflexFlashTimer = 0.3;
-						}
+					if (s >= TARGET_DIST && reflexCooldown <= 0) {
+						if (child.userData._reflexDone) continue;
+						child.userData._reflexDone = true;
+						reflectSystem.emit(0, 0, 0);
+						hitFlash.scale.setScalar(0.2);
+						hitFlashGlow.scale.setScalar(0.3);
+						reflexFlashTimer = 0.4;
+						reflexCooldown = 999; // block until next emit resets cooldown
 					}
 				}
 			}
 		}
 
-		// Hit flash animation
+		// ── Hit flash animation ──
 		if (reflexFlashTimer > 0) {
 			reflexFlashTimer -= delta;
-			(hitFlash.material as THREE.MeshBasicMaterial).opacity = (reflexFlashTimer / 0.3) * 0.7;
-			const fScale = 1 + (1 - reflexFlashTimer / 0.3) * 2;
-			hitFlash.scale.setScalar(fScale);
+			const t = reflexFlashTimer / 0.4;
+			const ease = 1 - t * t;
+			(hitFlash.material as THREE.MeshBasicMaterial).opacity = ease * 0.9;
+			hitFlash.scale.setScalar(0.2 + ease * 1.0);
 			hitFlash.visible = true;
+			(hitFlashGlow.material as THREE.MeshBasicMaterial).opacity = ease * 0.4;
+			hitFlashGlow.scale.setScalar(0.3 + ease * 2.0);
+			hitFlashGlow.visible = true;
 		} else {
 			hitFlash.visible = false;
+			hitFlashGlow.visible = false;
 		}
 
 		// Animate target
@@ -292,13 +358,25 @@ onMount(() => {
 
 		stars.rotation.y += delta * 0.008;
 
+		// Clear reflex flash on reset for subsequent emits
+		if (currentVariant === "reflex" && system && emitTimer < 0.05) {
+			for (const child of system.group.children) {
+				if (child instanceof THREE.Mesh && !child.visible) {
+					child.userData._reflexDone = false;
+				}
+			}
+		}
+
 		renderer.render(scene, camera);
 	}
 });
 
+let reflexFlashTimer = 0;
+
 onDestroy(() => {
 	renderer?.setAnimationLoop(null);
 	if (system) system.dispose();
+	if (reflectSystem) reflectSystem.dispose();
 	renderer?.dispose();
 });
 </script>
@@ -309,7 +387,7 @@ onDestroy(() => {
 
 <div class="ui">
 	<div class="panel">
-		<h2>🔊 Echoortung</h2>
+		<h2>Echoortung — Delfin-Sinne</h2>
 		<div class="buttons">
 			{#each ECHO_VARIANT_KEYS as vk}
 				{@const cfg = ECHO_VARIANTS[vk]}

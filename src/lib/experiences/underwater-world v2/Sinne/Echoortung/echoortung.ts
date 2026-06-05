@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-export type EchoVariant = "scan" | "puls" | "welle" | "reflex";
+export type EchoVariant = "scan" | "puls" | "welle" | "reflex" | "faecher" | "impuls";
 
 export interface EchoConfig {
 	color: number;
@@ -19,7 +19,7 @@ export interface EchoConfig {
 	description: string;
 }
 
-export const ECHO_VARIANT_KEYS: EchoVariant[] = ["scan", "puls", "welle", "reflex"];
+export const ECHO_VARIANT_KEYS: EchoVariant[] = ["scan", "puls", "welle", "reflex", "faecher", "impuls"];
 
 export const ECHO_VARIANTS: Record<EchoVariant, EchoConfig> = {
 	scan: {
@@ -84,7 +84,39 @@ export const ECHO_VARIANTS: Record<EchoVariant, EchoConfig> = {
 		wavy: false,
 		soundGain: 0.8,
 		label: "Reflex-Echo",
-		description: "Delfin-Echo: Hauptping + orangefarbener Reflex vom Objekt + Aufleuchten",
+		description: "Hauptping + orangefarbener Reflex vom Objekt + Aufleuchten",
+	},
+	faecher: {
+		color: 0x66ddff,
+		expandSpeed: 8,
+		lifetime: 1.8,
+		poolSize: 30,
+		burstCount: 5,
+		burstDelay: 0.08,
+		maxOpacity: 0.5,
+		initialScale: 0.15,
+		ringInner: 0.96,
+		ringOuter: 1.0,
+		wavy: false,
+		soundGain: 0.6,
+		label: "Fächer-Scan",
+		description: "5 Ringe im Fächer — Delfin scannt mit Kopfdrehung die Umgebung",
+	},
+	impuls: {
+		color: 0x88ddff,
+		expandSpeed: 7,
+		lifetime: 2.2,
+		poolSize: 15,
+		burstCount: 1,
+		burstDelay: 0,
+		maxOpacity: 0.7,
+		initialScale: 0.2,
+		ringInner: 0.92,
+		ringOuter: 1.0,
+		wavy: false,
+		soundGain: 0.9,
+		label: "Impuls-Ton",
+		description: "Einzelring pulsiert beim Expandieren — Delfin hört auf Echo-Stärke",
 	},
 };
 
