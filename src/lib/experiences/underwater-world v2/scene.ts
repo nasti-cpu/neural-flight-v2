@@ -472,17 +472,16 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 	};
 
 	// ── Find sand position near start for city + corals ──
-	const SAND_SCAN_STEPS = [
-		[0, -200], [60, -180], [-60, -220], [80, -140], [-80, -260],
-		[0, -140], [40, -250], [-40, -150], [100, -200], [-100, -200],
-		[50, -120], [-50, -280], [120, -160], [-120, -240],
-	];
+	// Scan spiral outward from (0, -200) for sand
 	let startSandX = 0, startSandZ = -200;
-	for (const [dx, dz] of SAND_SCAN_STEPS) {
-		const bx = dx, bz = dz;
-		if (getBiome(bx, bz) >= 0.50) {
-			startSandX = bx; startSandZ = bz;
-			break;
+	for (let range = 0; range <= 300; range += 20) {
+		for (let angle = 0; angle < Math.PI * 2; angle += 0.4) {
+			const bx = Math.round(Math.cos(angle) * range / 10) * 10;
+			const bz = Math.round(-200 + Math.sin(angle) * range / 10) * 10;
+			if (getBiome(bx, bz) >= 0.50) {
+				startSandX = bx; startSandZ = bz;
+				range = 999; break;
+			}
 		}
 	}
 	const startSandY = getTerrainHeight(startSandX, startSandZ, amplitude, scale);
@@ -500,17 +499,17 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		}
 	});
 
-	// ── Start Coral Reef (model) around city on sand ──
+	// ── Start Coral Reef (model) — 3 Riffe in unterschiedlichen Entfernungen ──
 	stateObj.startCoralReef = new THREE.Group();
 	stateObj.startCoralReef.visible = true;
 	scene.add(stateObj.startCoralReef);
 
-	const patchOffsets = [
-		{ dx: -35, dz: -30, radius: 25, count: [12, 20], scale: [1.5, 3.0] },
-		{ dx: 40, dz: 20, radius: 20, count: [8, 14], scale: [1.0, 2.5] },
-		{ dx: -10, dz: 50, radius: 18, count: [6, 10], scale: [0.8, 2.0] },
+	const reefPatches = [
+		{ label: "nah",    dx: -30, dz: -25, radius: 18, count: [10, 16], scale: [1.0, 2.5] },
+		{ label: "mittel", dx: 50,  dz: 10,  radius: 22, count: [12, 18], scale: [1.2, 3.0] },
+		{ label: "fern",   dx: -15, dz: 70,  radius: 26, count: [14, 22], scale: [1.5, 3.0] },
 	];
-	for (const p of patchOffsets) {
+	for (const p of reefPatches) {
 		const px = startSandX + p.dx;
 		const pz = startSandZ + p.dz;
 		if (getBiome(px, pz) < 0.50) continue;
