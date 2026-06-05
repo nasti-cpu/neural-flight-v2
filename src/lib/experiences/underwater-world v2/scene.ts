@@ -155,6 +155,8 @@ export interface UnderwaterWorldState extends ExperienceState {
 	dolphinModeIndex: number;
 	dolphinModeTimer: number;
 	dolphinPrevMode: string;
+	dolphinSpawnTimer: number;
+	jellySpawnTimer: number;
 	startCityModelCity: ModelCityResult | null;
 	startCityX: number;
 	startCityZ: number;
@@ -398,23 +400,25 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		fishSchools.push(school);
 	}
 
-	// Dolphins
+	// Dolphins (hidden, spawns after 2s behind player)
 	const dolphinGeo = await loadDolphinGeometry();
 	const dolphinPod = createDolphinPod(3, dolphinGeo ?? undefined);
 	dolphinPod.mesh.position.set(
-		camera.position.x + 12,
+		camera.position.x + 5,
 		Math.max(camera.position.y - 2, 0),
-		camera.position.z - 18,
+		camera.position.z - 22,
 	);
+	dolphinPod.mesh.visible = false;
 	scene.add(dolphinPod.mesh);
 
-	// Jellyfish
+	// Jellyfish (hidden, spawns after 5s behind player)
 	const jellySwarm = createJellySwarm(6, 6, 4);
 	jellySwarm.mesh.position.set(
-		camera.position.x - 12,
+		camera.position.x - 5,
 		Math.max(camera.position.y - 1, 0),
-		camera.position.z - 15,
+		camera.position.z - 25,
 	);
+	jellySwarm.mesh.visible = false;
 	scene.add(jellySwarm.mesh);
 
 	// Audio
@@ -456,6 +460,8 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		dolphinModeIndex: 0,
 		dolphinModeTimer: 5 + Math.random() * 4,
 		dolphinPrevMode: "leisurely",
+		dolphinSpawnTimer: 2,
+		jellySpawnTimer: 5,
 		jellySwarm,
 		jellyMode: "drifting",
 		jellyTimer: 8 + Math.random() * 7,
@@ -812,38 +818,84 @@ export function tick(
 		school.material.emissiveIntensity = 0.3 + Math.sin(elapsed * 0.5 + fi) * 0.2;
 	}
 
-	// ── Dolphins ──
+	// ── Dolphins (staggered spawn + player-follow) ──
 
-	s.dolphinModeTimer -= delta;
-	if (s.dolphinModeTimer <= 0) {
-		s.dolphinModeIndex = (s.dolphinModeIndex + 1) % 3;
-		s.dolphinModeTimer = 8 + Math.random() * 6;
-	}
-	const dMode = DOLPHIN_MODE_META[s.dolphinModeIndex].id;
-
-	// When mode changes, reset velocities so dolphins smoothly transition
-	if (dMode !== s.dolphinPrevMode) {
-		s.dolphinPrevMode = dMode;
-		for (let di = 0; di < 3; di++) {
-			const di3 = di * 3;
-			s.dolphinPod.velocities[di3] = 0;
-			s.dolphinPod.velocities[di3 + 1] = 0;
-			s.dolphinPod.velocities[di3 + 2] = 0;
-			s.dolphinPod.rotations[di] = 0;
+	s.dolphinSpawnTimer -= delta;
+	if (s.dolphinSpawnTimer > 0) {
+		s.dolphinPod.mesh.visible = false;
+	} else {
+		if (!s.dolphinPod.mesh.visible) {
+			s.dolphinPod.mesh.visible = true;
+			const dpos = new THREE.Vector3(
+				pos.x + behindDir.x * 22,
+				Math.max(pos.y - 2, 0),
+				pos.z + behindDir.z * 22,
+			);
+			s.dolphinPod.mesh.position.copy(dpos);
+			for (let di = 0; di < 3; di++) {
+				const di3 = di * 3;
+				s.dolphinPod.positions[di3] = (di - 1) * 6;
+				s.dolphinPod.positions[di3 + 2] = -18 - di * 4;
+			}
 		}
+		const dbehind = new THREE.Vector3(
+			pos.x + behindDir.x * 20,
+			Math.max(pos.y - 2, 0),
+			pos.z + behindDir.z * 20,
+		);
+		s.dolphinPod.mesh.position.copy(dbehind);
+
+		s.dolphinModeTimer -= delta;
+		if (s.dolphinModeTimer <= 0) {
+			s.dolphinModeIndex = (s.dolphinModeIndex + 1) % 3;
+			s.dolphinModeTimer = 8 + Math.random() * 6;
+		}
+		const dMode = DOLPHIN_MODE_META[s.dolphinModeIndex].id;
+
+		if (dMode !== s.dolphinPrevMode) {
+			s.dolphinPrevMode = dMode;
+			for (let di = 0; di < 3; di++) {
+				const di3 = di * 3;
+				s.dolphinPod.velocities[di3] = 0;
+				s.dolphinPod.velocities[di3 + 1] = 0;
+				s.dolphinPod.velocities[di3 + 2] = 0;
+				s.dolphinPod.rotations[di] = 0;
+			}
+		}
+
+		updateDolphinPod(s.dolphinPod, delta, elapsed, dMode, s.dolphinPod.mesh.position, fishTerrain, repelArg);
 	}
 
-	updateDolphinPod(s.dolphinPod, delta, elapsed, dMode, s.dolphinPod.mesh.position, fishTerrain, repelArg);
+	// ── Jellyfish (staggered spawn + player-follow) ──
 
-	// ── Jellyfish ──
+	s.jellySpawnTimer -= delta;
+	if (s.jellySpawnTimer > 0) {
+		s.jellySwarm.mesh.visible = false;
+	} else {
+		if (!s.jellySwarm.mesh.visible) {
+			s.jellySwarm.mesh.visible = true;
+			const jpos = new THREE.Vector3(
+				pos.x + behindDir.x * 25,
+				Math.max(pos.y - 1, 0),
+				pos.z + behindDir.z * 25,
+			);
+			s.jellySwarm.mesh.position.copy(jpos);
+		}
+		const jbehind = new THREE.Vector3(
+			pos.x + behindDir.x * 24,
+			Math.max(pos.y - 1, 0),
+			pos.z + behindDir.z * 24,
+		);
+		s.jellySwarm.mesh.position.copy(jbehind);
 
-	s.jellyTimer -= delta;
-	if (s.jellyTimer <= 0) {
-		s.jellyMode = s.jellyMode === "drifting" ? "pulsing" : "drifting";
-		s.jellyTimer = 8 + Math.random() * 7;
+		s.jellyTimer -= delta;
+		if (s.jellyTimer <= 0) {
+			s.jellyMode = s.jellyMode === "drifting" ? "pulsing" : "drifting";
+			s.jellyTimer = 8 + Math.random() * 7;
+		}
+
+		updateJellySwarm(s.jellySwarm, delta, elapsed, s.jellyMode, s.jellySwarm.mesh.position, repelArg);
 	}
-
-	updateJellySwarm(s.jellySwarm, delta, elapsed, s.jellyMode, s.jellySwarm.mesh.position, repelArg);
 
 	// ── Start City ──
 
