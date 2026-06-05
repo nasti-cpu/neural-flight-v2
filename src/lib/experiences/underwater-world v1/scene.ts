@@ -5,16 +5,6 @@ import { MTLLoader } from "three/examples/jsm/loaders/MTLLoader.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { ExperienceState, SetupContext, TickContext } from "../types";
 import { loadGLTF } from "$lib/three/loader";
-import { getTerrainHeight, getBiome, hash2d, TERRAIN_BASE_Y } from "./welt/terrain";
-import type { TerrainChunk } from "./welt/terrain";
-import {
-	createInitialTerrainChunks, queueTerrainChunks, processChunkQueue,
-	CHUNK_SIZE,
-	createStreamedCoralField, createStreamedKelpField, createStreamedRockField,
-	updateCoralStreaming, updateKelpStreaming, updateRockStreaming,
-} from "./welt/chunks";
-import type { StreamedCoralField, StreamedKelpField, StreamedRockField } from "./welt/chunks";
-import { createWaterSurface, updateWaterSurface, disposeWaterSurface, WATER_SURFACE_Y } from "./welt/wasser";
 
 // ── State ──
 
@@ -25,6 +15,8 @@ export interface UnderwaterWorldState extends ExperienceState {
 	terrainChunkQueue: { gx: number; gz: number }[];
 	terrainLastGx: number;
 	terrainLastGz: number;
+	rockGroup: THREE.InstancedMesh;
+	rockPositions: Float32Array;
 	fish: FishSchool;
 	fishMat: THREE.MeshStandardMaterial;
 	particles: THREE.Points;
@@ -44,9 +36,10 @@ export interface UnderwaterWorldState extends ExperienceState {
 	lightIntensity: number;
 	echolocationEnabled: boolean;
 	echolocationRange: number;
-	coralField: StreamedCoralField;
-	kelpField: StreamedKelpField;
-	rockField: StreamedRockField;
+	coralField: CoralField;
+	coralPending: PendingFloraItem[];
+	kelpField: KelpField;
+	kelpPending: PendingFloraItem[];
 	jellyfish: JellyfishHerd;
 	sharks: LargeFish[];
 	dolphins: LargeFish[];
@@ -59,8 +52,14 @@ export interface UnderwaterWorldState extends ExperienceState {
 // ── Constants ──
 
 const FISH_COUNT = 80;
+export const TERRAIN_BASE_Y = -3;
+const CHUNK_SIZE = 400;
+const CHUNK_SEGMENTS = 48;
+const CHUNK_RADIUS = 1;
+const CHUNK_RADIUS_INIT = 1;
 const CAMERA_Y = 4;
 const ROCK_COUNT = 120;
+const WATER_SURFACE_Y = 75;
 
 // ── Echo-Ringe ──
 const ECHO_RING_POOL_SIZE = 60;
@@ -69,6 +68,12 @@ const ECHO_RING_EXPAND_SPEED = 8;
 const ECHO_EMIT_INTERVAL = 10;
 const ECHO_BURST_DELAY = 0.4;
 const ECHO_DOLPHIN_RANGE = 6;
+
+// ── Streaming ──
+const STREAM_INITIAL_RADIUS = 200;
+const STREAM_LOAD_RADIUS_FWD = 400;
+const STREAM_LOAD_RADIUS_BACK = 120;
+const STREAM_PER_FRAME = 40;
 
 // ── Keyboard ──
 
@@ -93,11 +98,167 @@ function getWASD(): { moveX: number; moveZ: number } {
 	return { moveX: mx, moveZ: mz };
 }
 
-// ── Terrain (moved to welt/) ──
+// ── Noise for terrain ──
+
+function hash2d(x: number, y: number): number {
+	const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+	return n - Math.floor(n);
+}
+
+function noise2d(x: number, y: number): number {
+	const ix = Math.floor(x);
+	const iy = Math.floor(y);
+	const fx = x - ix;
+	const fy = y - iy;
+	const sx = fx * fx * (3 - 2 * fx);
+	const sy = fy * fy * (3 - 2 * fy);
+	const a = hash2d(ix, iy);
+	const b = hash2d(ix + 1, iy);
+	const c = hash2d(ix, iy + 1);
+	const d = hash2d(ix + 1, iy + 1);
+	return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+}
+
+function fbm(x: number, y: number, octaves: number): number {
+	let value = 0;
+	let amp = 0.5;
+	let freq = 1;
+	for (let i = 0; i < octaves; i++) {
+		value += amp * noise2d(x * freq, y * freq);
+		freq *= 2;
+		amp *= 0.5;
+	}
+	return value;
+}
+
+// ── Biomes ──
+
+const BIOME_FREQ = 0.005;
+
+function getBiome(wx: number, wz: number): number {
+	return fbm(wx * BIOME_FREQ, wz * BIOME_FREQ, 2);
+}
+
+function getBiomeParams(biome: number, baseAmp: number, baseScale: number): { amp: number; scale: number; color: THREE.Color } {
+	if (biome < 0.55) {
+		return {
+			amp: baseAmp * 1.0,
+			scale: baseScale * 1.0,
+			color: new THREE.Color(0x3a5a7a),
+		};
+	}
+	if (biome < 0.75) {
+		return {
+			amp: baseAmp * 0.4,
+			scale: baseScale * 0.7,
+			color: new THREE.Color(0xc4a87a),
+		};
+	}
+	return {
+		amp: baseAmp * 0.3,
+		scale: baseScale * 0.6,
+		color: new THREE.Color(0x4a4a6a),
+	};
+}
+
+export function getTerrainHeight(x: number, z: number, amplitude: number, scale: number): number {
+	return (fbm(x * scale, z * scale, 4) - 0.5) * 2 * amplitude + TERRAIN_BASE_Y;
+}
+
+// ── Terrain Chunks ──
+
+interface TerrainChunk {
+	mesh: THREE.Mesh;
+	gx: number;
+	gz: number;
+}
+
+export function fillTerrainGeometry(
+	geo: THREE.BufferGeometry,
+	centerX: number,
+	centerZ: number,
+	baseAmp: number,
+	baseScale: number,
+): void {
+	const pos = geo.attributes.position;
+	let col = geo.attributes.color as THREE.BufferAttribute;
+	if (!col) {
+		const arr = new Float32Array(pos.count * 3);
+		col = new THREE.BufferAttribute(arr, 3);
+		geo.setAttribute("color", col);
+	}
+	for (let i = 0; i < pos.count; i++) {
+		const wx = pos.getX(i) + centerX;
+		const wz = pos.getZ(i) + centerZ;
+		const biome = getBiome(wx, wz);
+		const p = getBiomeParams(biome, baseAmp, baseScale);
+		const h = (fbm(wx * p.scale, wz * p.scale, 4) - 0.5) * 2 * p.amp;
+		pos.setY(i, h);
+		col.setXYZ(i, p.color.r, p.color.g, p.color.b);
+	}
+	pos.needsUpdate = true;
+	col.needsUpdate = true;
+	geo.computeVertexNormals();
+}
+
+function createTerrainChunk(gx: number, gz: number, baseAmp: number, baseScale: number, mat: THREE.MeshStandardMaterial): TerrainChunk {
+	const cx = gx * CHUNK_SIZE;
+	const cz = gz * CHUNK_SIZE;
+	const geo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, CHUNK_SEGMENTS, CHUNK_SEGMENTS);
+	geo.rotateX(-Math.PI / 2);
+	fillTerrainGeometry(geo, cx, cz, baseAmp, baseScale);
+	const mesh = new THREE.Mesh(geo, mat);
+	mesh.position.set(cx, TERRAIN_BASE_Y, cz);
+	mesh.receiveShadow = true;
+	mesh.castShadow = true;
+	return { mesh, gx, gz };
+}
+
+function queueTerrainChunks(
+	s: UnderwaterWorldState,
+	playerX: number,
+	playerZ: number,
+): void {
+	const pgx = Math.round(playerX / CHUNK_SIZE);
+	const pgz = Math.round(playerZ / CHUNK_SIZE);
+	const desired = new Set<string>();
+	for (let dx = -CHUNK_RADIUS; dx <= CHUNK_RADIUS; dx++) {
+		for (let dz = -CHUNK_RADIUS; dz <= CHUNK_RADIUS; dz++) {
+			desired.add(`${pgx + dx},${pgz + dz}`);
+		}
+	}
+	const kept: TerrainChunk[] = [];
+	for (const ch of s.terrainChunks) {
+		const key = `${ch.gx},${ch.gz}`;
+		if (desired.has(key)) {
+			kept.push(ch);
+			desired.delete(key);
+		} else {
+			s.scene.remove(ch.mesh);
+			ch.mesh.geometry.dispose();
+		}
+	}
+	s.terrainChunks = kept;
+	s.terrainChunkQueue = [];
+	for (const key of desired) {
+		const parts = key.split(",");
+		s.terrainChunkQueue.push({ gx: parseInt(parts[0]), gz: parseInt(parts[1]) });
+	}
+}
+
+function processChunkQueue(s: UnderwaterWorldState, limit: number): void {
+	if (s.terrainChunkQueue.length === 0) return;
+	const batch = s.terrainChunkQueue.splice(0, limit);
+	for (const { gx, gz } of batch) {
+		const ch = createTerrainChunk(gx, gz, s.terrainAmplitude, s.terrainScale, s.terrainMat);
+		s.scene.add(ch.mesh);
+		s.terrainChunks.push(ch);
+	}
+}
 
 // ── Rocks ──
 
-function createRocksData(count: number): { geo: THREE.BufferGeometry; mat: THREE.MeshStandardMaterial; positions: Float32Array } {
+function createRocks(count: number): { mesh: THREE.InstancedMesh; positions: Float32Array } {
 	const colors = [0x2a4a5a, 0x3a5a6a, 0x1a2a3a, 0x4a5a6a];
 	const halfRange = 1500;
 	const baseGeo = new THREE.IcosahedronGeometry(1, 1);
@@ -109,7 +270,6 @@ function createRocksData(count: number): { geo: THREE.BufferGeometry; mat: THREE
 	}
 	posAttr.needsUpdate = true;
 	baseGeo.computeVertexNormals();
-	baseGeo.deleteAttribute("color");
 
 	const mat = new THREE.MeshStandardMaterial({
 		color: 0x2a4a5a,
@@ -117,7 +277,9 @@ function createRocksData(count: number): { geo: THREE.BufferGeometry; mat: THREE
 		roughness: 0.9,
 		metalness: 0.05,
 	});
-
+	const mesh = new THREE.InstancedMesh(baseGeo, mat, count);
+	mesh.castShadow = false;
+	mesh.receiveShadow = false;
 	const positions = new Float32Array(count * 3);
 	const _dummy = new THREE.Object3D();
 	const _color = new THREE.Color();
@@ -130,13 +292,18 @@ function createRocksData(count: number): { geo: THREE.BufferGeometry; mat: THREE
 		_dummy.rotation.set(hash2d(gi * 11, gi * 3) * 2, hash2d(gi * 7, gi * 29) * 6, hash2d(gi * 13, gi * 5) * 2);
 		_dummy.scale.setScalar(scale);
 		_dummy.updateMatrix();
+		mesh.setMatrixAt(i, _dummy.matrix);
+		_color.setHex(colors[i % colors.length]);
+		mesh.setColorAt(i, _color);
 		const i3 = i * 3;
 		positions[i3] = _dummy.position.x;
 		positions[i3 + 1] = _dummy.position.y;
 		positions[i3 + 2] = _dummy.position.z;
 	}
-
-	return { geo: baseGeo, mat, positions };
+	mesh.instanceMatrix.needsUpdate = true;
+	mesh.instanceColor!.needsUpdate = true;
+	mesh.frustumCulled = true;
+	return { mesh, positions };
 }
 
 // ── Corals ──
@@ -144,6 +311,23 @@ function createRocksData(count: number): { geo: THREE.BufferGeometry; mat: THREE
 const CORAL_RADIUS = 1500;
 const CORAL_SPACING = 8;
 const CORAL_MAX = 2000;
+
+interface CoralField {
+	meshes: THREE.InstancedMesh[];
+	mats: THREE.MeshStandardMaterial[];
+	positions: Float32Array;
+	count: number;
+}
+
+interface PendingFloraItem {
+	wx: number;
+	wz: number;
+	gx: number;
+	gz: number;
+	slot: number;
+	mi: number;
+	localIdx: number;
+}
 
 interface EchoRingData {
 	mesh: THREE.Mesh;
@@ -186,6 +370,17 @@ const KELP_RADIUS = 1500;
 const KELP_SPACING = 8;
 const KELP_MAX = 2000;
 
+interface KelpField {
+	mesh: THREE.InstancedMesh;
+	mat: THREE.MeshStandardMaterial;
+	positions: Float32Array;
+	heights: Float32Array;
+	scales: Float32Array;
+	rotations: Float32Array;
+	phases: Float32Array;
+	count: number;
+}
+
 function createCoralGeometry(): THREE.BufferGeometry {
 	const geo = new THREE.IcosahedronGeometry(0.8, 3);
 	const pos = geo.attributes.position;
@@ -212,15 +407,28 @@ function createCoralGeometry(): THREE.BufferGeometry {
 	return geo;
 }
 
-function createCoralFieldData(): { positions: Float32Array; colors: Float32Array; gxs: Int32Array; gzs: Int32Array } {
+async function createCoralFieldWorld(scene: THREE.Scene, baseAmp: number, baseScale: number): Promise<{ field: CoralField; pending: PendingFloraItem[] }> {
+	const geo = createCoralGeometry();
+	const mat = new THREE.MeshStandardMaterial({
+		color: 0xff8866,
+		flatShading: true,
+		roughness: 0.7,
+		metalness: 0.05,
+	});
+	const mesh = new THREE.InstancedMesh(geo, mat, CORAL_MAX);
+	mesh.frustumCulled = true;
+	scene.add(mesh);
+
 	const positions = new Float32Array(CORAL_MAX * 2);
-	const colors = new Float32Array(CORAL_MAX * 3);
-	const gxs = new Int32Array(CORAL_MAX);
-	const gzs = new Int32Array(CORAL_MAX);
+	const instanceColors = new Float32Array(CORAL_MAX * 3);
 	const coralPalette = [0xff6644, 0xdd8855, 0xdd77aa, 0xcc8866, 0xff9966, 0xee7766];
 	const tmpCol = new THREE.Color();
+	const dummy = new THREE.Object3D();
 	const half = Math.floor(CORAL_RADIUS / CORAL_SPACING);
+	const pending: PendingFloraItem[] = [];
+	const initRSq = STREAM_INITIAL_RADIUS * STREAM_INITIAL_RADIUS;
 	let idx = 0;
+	let loadedCount = 0;
 
 	for (let cellIdx = 0; cellIdx < (half * 2 + 1) ** 2 && idx < CORAL_MAX; cellIdx++) {
 		const hx = hash2d(cellIdx * 7 + 1, cellIdx * 13 + 3);
@@ -232,20 +440,38 @@ function createCoralFieldData(): { positions: Float32Array; colors: Float32Array
 		const biome = getBiome(wx, wz);
 		if (biome >= 0.55) continue;
 
+		const size = 0.8 + hash2d(gx + 50, gz + 60) * 2.5;
 		const ci = Math.floor(hash2d(gx + 7, gz + 13) * coralPalette.length);
 		tmpCol.setHex(coralPalette[ci]);
-		colors[idx * 3] = tmpCol.r;
-		colors[idx * 3 + 1] = tmpCol.g;
-		colors[idx * 3 + 2] = tmpCol.b;
+		instanceColors[idx * 3] = tmpCol.r;
+		instanceColors[idx * 3 + 1] = tmpCol.g;
+		instanceColors[idx * 3 + 2] = tmpCol.b;
 
 		positions[idx * 2] = wx;
 		positions[idx * 2 + 1] = wz;
-		gxs[idx] = gx;
-		gzs[idx] = gz;
 		idx++;
+
+		const dSq = wx * wx + wz * wz;
+		if (dSq < initRSq) {
+			const h = getTerrainHeight(wx, wz, baseAmp, baseScale);
+			dummy.position.set(wx, h, wz);
+			dummy.scale.setScalar(size);
+			dummy.rotation.set(hash2d(gx, gz) * 0.5, hash2d(gx + 10, gz + 20) * 6, 0);
+			dummy.updateMatrix();
+			mesh.setMatrixAt(loadedCount, dummy.matrix);
+			loadedCount++;
+		} else {
+			pending.push({ wx, wz, gx, gz, slot: loadedCount, mi: 0, localIdx: 0 });
+		}
 	}
 
-	return { positions, colors, gxs, gzs };
+	mesh.count = loadedCount;
+	mesh.instanceMatrix.needsUpdate = true;
+
+	const colAttr = new THREE.InstancedBufferAttribute(instanceColors, 3);
+	mesh.instanceColor = colAttr;
+
+	return { field: { meshes: [mesh], mats: [mat], positions, count: idx }, pending };
 }
 
 // ── Kelp / Seefauna ──
@@ -295,14 +521,34 @@ function createKelpGeometry(): THREE.BufferGeometry {
 	return geo;
 }
 
-function createKelpFieldData(): { positions: Float32Array; heights: Float32Array; scales: Float32Array; rotations: Float32Array } {
+function createKelpField(scene: THREE.Scene, baseAmp: number, baseScale: number): { field: KelpField; pending: PendingFloraItem[] } {
+	const geo = createKelpGeometry();
+	const mat = new THREE.MeshStandardMaterial({
+		color: 0x4a8a4a,
+		flatShading: true,
+		roughness: 0.8,
+		metalness: 0.0,
+		side: THREE.DoubleSide,
+	});
+	const mesh = new THREE.InstancedMesh(geo, mat, KELP_MAX);
+	mesh.frustumCulled = true;
+	scene.add(mesh);
+
 	const positions = new Float32Array(KELP_MAX * 2);
 	const heights = new Float32Array(KELP_MAX);
 	const scales = new Float32Array(KELP_MAX);
 	const rotations = new Float32Array(KELP_MAX);
+	const phases = new Float32Array(KELP_MAX);
+	const greenShades = [0x3a7a3a, 0x4a8a4a, 0x5a9a5a, 0x2a6a3a, 0x6aaa5a, 0x4a7a3a];
+	const instanceColors = new Float32Array(KELP_MAX * 3);
 
 	const half = Math.floor(KELP_RADIUS / KELP_SPACING);
+	const dummy = new THREE.Object3D();
+	const tmpCol = new THREE.Color();
+	const pending: PendingFloraItem[] = [];
+	const initRSq = STREAM_INITIAL_RADIUS * STREAM_INITIAL_RADIUS;
 	let idx = 0;
+	let loadedCount = 0;
 
 	for (let cellIdx = 0; cellIdx < (half * 2 + 1) ** 2 && idx < KELP_MAX; cellIdx++) {
 		const hx = hash2d(cellIdx * 3 + 1, cellIdx * 7 + 3);
@@ -323,19 +569,137 @@ function createKelpFieldData(): { positions: Float32Array; heights: Float32Array
 		if (hash2d(gx * 2, gz * 3) > density) continue;
 
 		const size = scaleMin + hash2d(gx + 3, gz + 5) * (scaleMax - scaleMin);
+		const ci = Math.floor(hash2d(gx + 7, gz + 11) * greenShades.length);
+		tmpCol.setHex(greenShades[ci]);
+		instanceColors[idx * 3] = tmpCol.r;
+		instanceColors[idx * 3 + 1] = tmpCol.g;
+		instanceColors[idx * 3 + 2] = tmpCol.b;
+
 		const baseRot = hash2d(gx + 19, gz + 23) * Math.PI * 2;
 
 		positions[idx * 2] = wx;
 		positions[idx * 2 + 1] = wz;
 		scales[idx] = size;
 		rotations[idx] = baseRot;
+		phases[idx] = hash2d(gx + 31, gz + 37) * Math.PI * 2;
+
+		const dSq = wx * wx + wz * wz;
+		if (dSq < initRSq) {
+			const h = getTerrainHeight(wx, wz, baseAmp, baseScale);
+			heights[idx] = h;
+			dummy.position.set(wx, h, wz);
+			dummy.scale.setScalar(size);
+			dummy.rotation.y = baseRot;
+			dummy.updateMatrix();
+			mesh.setMatrixAt(loadedCount, dummy.matrix);
+			loadedCount++;
+		} else {
+			heights[idx] = 0;
+			pending.push({ wx, wz, gx, gz, slot: loadedCount, mi: 0, localIdx: 0 });
+		}
 		idx++;
 	}
 
-	return { positions, heights, scales, rotations };
+	mesh.count = loadedCount;
+	mesh.instanceMatrix.needsUpdate = true;
+
+	const instCol = new THREE.InstancedBufferAttribute(instanceColors, 3);
+	mesh.geometry.setAttribute("color", instCol);
+	mesh.instanceColor = instCol;
+
+	return { field: { mesh, mat, positions, heights, scales, rotations, phases, count: idx }, pending };
 }
 
 
+// ── Streaming ──
+
+function streamCoral(
+	pending: PendingFloraItem[],
+	meshes: THREE.InstancedMesh[],
+	playerX: number,
+	playerZ: number,
+	fwdX: number,
+	fwdZ: number,
+	baseAmp: number,
+	baseScale: number,
+	delta: number,
+): void {
+	const rFwdSq = STREAM_LOAD_RADIUS_FWD * STREAM_LOAD_RADIUS_FWD;
+	const rBackSq = STREAM_LOAD_RADIUS_BACK * STREAM_LOAD_RADIUS_BACK;
+	const m = meshes[0];
+	const tmpCol = new THREE.Color();
+	let processed = 0;
+	let needsMatrix = false;
+	let needsColor = false;
+	for (let i = 0; i < pending.length && processed < STREAM_PER_FRAME; i++) {
+		const item = pending[i];
+		if (item.wx === Infinity) continue;
+		const dx = item.wx - playerX;
+		const dz = item.wz - playerZ;
+		const dSq = dx * dx + dz * dz;
+		const rSq = (dx * fwdX + dz * fwdZ) >= 0 ? rFwdSq : rBackSq;
+		if (dSq < rSq) {
+			const h = getTerrainHeight(item.wx, item.wz, baseAmp, baseScale);
+			const size = 0.8 + hash2d(item.gx + 50, item.gz + 60) * 2.5;
+			_dummy.position.set(item.wx, h, item.wz);
+			_dummy.scale.setScalar(size);
+			_dummy.rotation.set(hash2d(item.gx, item.gz) * 0.5, hash2d(item.gx + 10, item.gz + 20) * 6, 0);
+			_dummy.updateMatrix();
+			m.setMatrixAt(item.slot, _dummy.matrix);
+			const ci = Math.floor(hash2d(item.gx + 7, item.gz + 13) * 6);
+			tmpCol.setHex([0xff6644, 0xdd8855, 0xdd77aa, 0xcc8866, 0xff9966, 0xee7766][ci]);
+			m.setColorAt(item.slot, tmpCol);
+			m.count = Math.max(m.count, item.slot + 1);
+			item.wx = Infinity;
+			processed++;
+			needsMatrix = true;
+			needsColor = true;
+		}
+	}
+	if (needsMatrix) m.instanceMatrix.needsUpdate = true;
+	if (needsColor && m.instanceColor) m.instanceColor.needsUpdate = true;
+}
+
+function streamKelp(
+	pending: PendingFloraItem[],
+	field: KelpField,
+	playerX: number,
+	playerZ: number,
+	fwdX: number,
+	fwdZ: number,
+	baseAmp: number,
+	baseScale: number,
+	delta: number,
+): void {
+	const rFwdSq = STREAM_LOAD_RADIUS_FWD * STREAM_LOAD_RADIUS_FWD;
+	const rBackSq = STREAM_LOAD_RADIUS_BACK * STREAM_LOAD_RADIUS_BACK;
+	let processed = 0;
+	let anyUpdate = false;
+	for (let i = 0; i < pending.length && processed < STREAM_PER_FRAME; i++) {
+		const item = pending[i];
+		if (item.wx === Infinity) continue;
+		const dx = item.wx - playerX;
+		const dz = item.wz - playerZ;
+		const dSq = dx * dx + dz * dz;
+		const rSq = (dx * fwdX + dz * fwdZ) >= 0 ? rFwdSq : rBackSq;
+		if (dSq < rSq) {
+			const h = getTerrainHeight(item.wx, item.wz, baseAmp, baseScale);
+			const size = field.scales[item.slot];
+			const baseRot = field.rotations[item.slot];
+			field.heights[item.slot] = h;
+			_dummy.position.set(item.wx, h, item.wz);
+			_dummy.scale.setScalar(size);
+			_dummy.rotation.y = baseRot;
+			_dummy.updateMatrix();
+			field.mesh.setMatrixAt(item.slot, _dummy.matrix);
+			field.mesh.count = item.slot + 1;
+			item.wx = Infinity;
+			processed++;
+			anyUpdate = true;
+		}
+	}
+	if (anyUpdate) field.mesh.instanceMatrix.needsUpdate = true;
+}
 const JELLY_COUNT = 10;
 
 interface JellyfishHerd {
@@ -1279,11 +1643,19 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		metalness: 0.0,
 	});
 
-	const terrainChunks = createInitialTerrainChunks(ctx.scene, 35, 0.012, terrainMat);
+	const initChunks: TerrainChunk[] = [];
+	for (let gx = -CHUNK_RADIUS_INIT; gx <= CHUNK_RADIUS_INIT; gx++) {
+		for (let gz = -CHUNK_RADIUS_INIT; gz <= CHUNK_RADIUS_INIT; gz++) {
+			const ch = createTerrainChunk(gx, gz, 35, 0.012, terrainMat);
+			ctx.scene.add(ch.mesh);
+			initChunks.push(ch);
+		}
+	}
+	const terrainChunks = initChunks;
 	const terrainChunkQueue: { gx: number; gz: number }[] = [];
 
-	const rockData = createRocksData(ROCK_COUNT);
-	const rockField = createStreamedRockField(ctx.scene, rockData.geo, rockData.mat, rockData.positions, ROCK_COUNT);
+	const { mesh: rockGroup, positions: rockPositions } = createRocks(ROCK_COUNT);
+	ctx.scene.add(rockGroup);
 
 	// ── Fish (geladenes 3D-Modell) ──
 	let fishGeo: THREE.BufferGeometry | undefined;
@@ -1390,26 +1762,9 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		};
 	} catch { console.warn("AudioContext not available"); }
 
-	const coralGeo = createCoralGeometry();
-	const coralMat = new THREE.MeshStandardMaterial({
-		color: 0xff8866,
-		flatShading: true,
-		roughness: 0.7,
-		metalness: 0.05,
-	});
-	const coralData = createCoralFieldData();
-	const coralField = createStreamedCoralField(ctx.scene, coralGeo, coralMat, coralData.positions, coralData.colors, coralData.gxs, coralData.gzs);
+	const { field: coralField, pending: coralPending } = await createCoralFieldWorld(ctx.scene, 35, 0.012);
 
-	const kelpGeo = createKelpGeometry();
-	const kelpMat = new THREE.MeshStandardMaterial({
-		color: 0x4a8a4a,
-		flatShading: true,
-		roughness: 0.8,
-		metalness: 0.0,
-		side: THREE.DoubleSide,
-	});
-	const kelpData = createKelpFieldData();
-	const kelpField = createStreamedKelpField(ctx.scene, kelpGeo, kelpMat, kelpData.positions, kelpData.heights, kelpData.scales, kelpData.rotations);
+	const { field: kelpField, pending: kelpPending } = createKelpField(ctx.scene, 35, 0.012);
 
 	const jellyfish = createJellyfishHerd(ctx.scene);
 
@@ -1513,7 +1868,22 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 
 	// ── Start-Stadt entfernt — keine vorplatzierte Stadt mehr ──
 
-	const waterSurface = createWaterSurface(ctx.scene);
+	// ── Wasseroberfläche ──
+	const waterGeo = new THREE.CircleGeometry(600, 64);
+	waterGeo.rotateX(-Math.PI / 2);
+	const waterMat = new THREE.MeshPhysicalMaterial({
+		color: 0x1a6a8a,
+		transparent: true,
+		opacity: 0.35,
+		roughness: 0.0,
+		metalness: 0.0,
+		side: THREE.DoubleSide,
+		envMapIntensity: 0.1,
+	});
+	const waterSurface = new THREE.Mesh(waterGeo, waterMat);
+	waterSurface.position.y = WATER_SURFACE_Y;
+	waterSurface.renderOrder = 1;
+	ctx.scene.add(waterSurface);
 
 	return {
 		camera: ctx.camera,
@@ -1527,7 +1897,8 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		terrainColor: "#1a3a5a",
 		terrainMat,
 		waterSurface,
-		rockField,
+		rockGroup,
+		rockPositions,
 		fish,
 		fishMat,
 		particles: biolum.points,
@@ -1543,7 +1914,9 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		echolocationEnabled: false,
 		echolocationRange: 60,
 		coralField,
+		coralPending,
 		kelpField,
+		kelpPending,
 		jellyfish,
 		sharks,
 		dolphins,
@@ -1659,10 +2032,9 @@ export function tick(
 	}
 	processChunkQueue(s, 2);
 
-	// ── Streaming (Flora + Rocks laden/entladen richtungsabhängig) ──
-	updateCoralStreaming(s.coralField, pos.x, pos.z, fwdX, fwdZ, s.terrainAmplitude, s.terrainScale);
-	updateKelpStreaming(s.kelpField, pos.x, pos.z, fwdX, fwdZ, s.terrainAmplitude, s.terrainScale);
-	updateRockStreaming(s.rockField, pos.x, pos.z, s.terrainAmplitude, s.terrainScale);
+	// ── Streaming (Flora nachladen, richtungsabhängig) ──
+	if (s.coralPending.length > 0) streamCoral(s.coralPending, s.coralField.meshes, pos.x, pos.z, fwdX, fwdZ, s.terrainAmplitude, s.terrainScale, delta);
+	if (s.kelpPending.length > 0) streamKelp(s.kelpPending, s.kelpField, pos.x, pos.z, fwdX, fwdZ, s.terrainAmplitude, s.terrainScale, delta);
 	// ── Fish ──
 	updateFishSchool(s.fish, delta, ctx.elapsed, pos, s.terrainAmplitude, s.terrainScale);
 
@@ -1708,7 +2080,9 @@ export function tick(
 		}
 	}
 
-	updateWaterSurface(s.waterSurface, ctx.elapsed);
+	// ── Wasseroberfläche ──
+	s.waterSurface.position.y = WATER_SURFACE_Y + Math.sin(ctx.elapsed * 0.1) * 0.5;
+	(s.waterSurface.material as THREE.MeshPhysicalMaterial).opacity = 0.3 + Math.sin(ctx.elapsed * 0.15) * 0.08;
 
 	// ── Particles (Biolumineszenz + Drift zur Stadt) ──
 	const pPos = s.particles.geometry.attributes.position;
@@ -1744,17 +2118,17 @@ export function tick(
 
 			if (ROCK_COUNT > 0) {
 				const ri = Math.floor(Math.random() * ROCK_COUNT);
-				addEchoBurst(s.echoRingPool, s.echoBurstQueue, s.rockField.positions[ri * 3], s.rockField.positions[ri * 3 + 1], s.rockField.positions[ri * 3 + 2], 2, ECHO_BURST_DELAY);
+				addEchoBurst(s.echoRingPool, s.echoBurstQueue, s.rockPositions[ri * 3], s.rockPositions[ri * 3 + 1], s.rockPositions[ri * 3 + 2], 2, ECHO_BURST_DELAY);
 			}
-			if (s.coralField.totalItems > 0) {
-				const ci = Math.floor(Math.random() * s.coralField.totalItems);
+			if (s.coralField.count > 0) {
+				const ci = Math.floor(Math.random() * s.coralField.count);
 				const cx = s.coralField.positions[ci * 2];
 				const cz = s.coralField.positions[ci * 2 + 1];
 				const cy = getTerrainHeight(cx, cz, s.terrainAmplitude, s.terrainScale);
 				addEchoBurst(s.echoRingPool, s.echoBurstQueue, cx, cy, cz, 2, ECHO_BURST_DELAY);
 			}
-			if (s.kelpField.totalItems > 0) {
-				const ki = Math.floor(Math.random() * s.kelpField.totalItems);
+			if (s.kelpField.count > 0) {
+				const ki = Math.floor(Math.random() * s.kelpField.count);
 				const kx = s.kelpField.positions[ki * 2];
 				const kz = s.kelpField.positions[ki * 2 + 1];
 				const ky = getTerrainHeight(kx, kz, s.terrainAmplitude, s.terrainScale);
@@ -1819,9 +2193,9 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 	}
 	if (s.terrainMat) s.terrainMat.dispose();
 
-	scene.remove(s.rockField.mesh);
-	s.rockField.mesh.geometry.dispose();
-	(s.rockField.mesh.material as THREE.Material).dispose();
+	scene.remove(s.rockGroup);
+	s.rockGroup.geometry.dispose();
+	(s.rockGroup.material as THREE.Material).dispose();
 
 	s.fish.mesh.geometry.dispose();
 	(s.fish.mesh.material as THREE.Material).dispose();
@@ -1831,13 +2205,15 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 	s.particleMat.dispose();
 	scene.remove(s.particles);
 
-	scene.remove(s.coralField.mesh);
-	s.coralField.mesh.geometry.dispose();
-	(s.coralField.mesh.material as THREE.Material).dispose();
+	for (let mi = 0; mi < s.coralField.meshes.length; mi++) {
+		s.coralField.meshes[mi].geometry.dispose();
+		s.coralField.mats[mi].dispose();
+		scene.remove(s.coralField.meshes[mi]);
+	}
 
-	scene.remove(s.kelpField.mesh);
 	s.kelpField.mesh.geometry.dispose();
-	(s.kelpField.mesh.material as THREE.Material).dispose();
+	s.kelpField.mat.dispose();
+	scene.remove(s.kelpField.mesh);
 
 	// City
 	s.city.group.traverse((child) => {
@@ -1866,7 +2242,9 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 		scene.remove(ring.mesh);
 	}
 
-	disposeWaterSurface(s.waterSurface, scene);
+	s.waterSurface.geometry.dispose();
+	(s.waterSurface.material as THREE.MeshPhysicalMaterial).dispose();
+	scene.remove(s.waterSurface);
 
 	s.jellyfish.mesh.geometry.dispose();
 	s.jellyfish.mat.dispose();

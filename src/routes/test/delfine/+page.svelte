@@ -51,13 +51,11 @@ onMount(async () => {
 	pod = createDolphinPod(def.count, modelGeo ?? undefined);
 	scene.add(pod.mesh);
 
-	const center = new THREE.Vector3();
-
 	renderer.setAnimationLoop(() => {
 		const delta = Math.min(clock.getDelta(), 0.05);
 		if (pod) {
 			const def = DOLPHIN_MODE_META.find((m) => m.id === currentMode)!;
-			updateDolphinPod(pod, delta, clock.elapsedTime, def.id, center);
+			updateDolphinPod(pod, delta, clock.elapsedTime, def.id);
 		}
 		camera.position.set(0, 5, 40);
 		camera.lookAt(0, 0, 0);
