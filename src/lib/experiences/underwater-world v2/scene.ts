@@ -70,6 +70,8 @@ export interface UnderwaterWorldState extends ExperienceState {
 	pendingChunks: { gx: number; gz: number }[];
 	prevGx: number;
 	prevGz: number;
+	onKeyDown: (e: KeyboardEvent) => void;
+	onKeyUp: (e: KeyboardEvent) => void;
 	terrainMat: THREE.MeshStandardMaterial;
 	sandEntries: {
 		wx: number; wz: number;
@@ -259,15 +261,7 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 	// Water surface
 	const water = createWaterSurface(scene);
 
-	// Lighting
-	const ambient = new THREE.AmbientLight(0x4488cc, 1.0);
-	scene.add(ambient);
-	const sun = new THREE.DirectionalLight(0xffeedd, 2.0);
-	sun.position.set(200, 300, -100);
-	scene.add(sun);
-
-	// Fog
-	scene.fog = new THREE.Fog(0x001020, 10, 180);
+	// Lighting + Fog handled by Loader via manifest.ts config
 
 	// Coral field (slot-tracking)
 	const CORAL_COLORS = [0xff4466, 0xff8844, 0xffcc44, 0x44ff88, 0x66ddff, 0xdd66ff, 0xff66aa, 0x88ff66, 0xffaa44, 0x66ffcc];
@@ -343,6 +337,8 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 		waterSurface: water,
 		audio,
 		keys,
+		onKeyDown,
+		onKeyUp,
 		fishSchools,
 		coralField,
 		coralColors: CORAL_COLORS,
@@ -815,18 +811,12 @@ export function tick(
 export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 	const s = state as UnderwaterWorldState;
 
+	window.removeEventListener("keydown", s.onKeyDown);
+	window.removeEventListener("keyup", s.onKeyUp);
+
 	for (const ch of s.terrainChunks) {
 		disposeTerrainChunk(ch, scene);
 	}
-
-	const toRemove: THREE.Object3D[] = [];
-	scene.traverse((child) => {
-		if (child instanceof THREE.AmbientLight || child instanceof THREE.DirectionalLight) {
-			toRemove.push(child);
-		}
-	});
-	for (const l of toRemove) scene.remove(l);
-	scene.fog = null;
 
 	for (const e of s.sandEntries) {
 		if (e.dune) disposeDuneSand(e.dune, scene);

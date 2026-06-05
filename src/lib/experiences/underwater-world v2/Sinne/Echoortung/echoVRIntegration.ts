@@ -24,6 +24,7 @@ export interface EchoVRState {
 	interval: number;
 	range: number;
 	flashStates: Map<string, EchoFlashState>;
+	baseGeo: THREE.RingGeometry;
 }
 
 interface EchoRingData {
@@ -68,6 +69,7 @@ export function createEchoVR(_scene: THREE.Scene): EchoVRState {
 		interval: EMIT_INTERVAL,
 		range: ECHO_RANGE,
 		flashStates: new Map(),
+		baseGeo,
 	};
 }
 
@@ -156,5 +158,6 @@ export function disposeEchoVR(state: EchoVRState, scene: THREE.Scene): void {
 		ring.mesh.geometry.dispose();
 		(ring.mesh.material as THREE.MeshBasicMaterial).dispose();
 	}
+	state.baseGeo.dispose();
 	state.flashStates.clear();
 }

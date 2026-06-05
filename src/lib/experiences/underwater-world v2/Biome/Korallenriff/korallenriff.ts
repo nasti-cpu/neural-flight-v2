@@ -103,8 +103,8 @@ function createTreeCoralGeometry(): THREE.BufferGeometry {
 
 	const merged = mergeBufferGeometries(geos);
 	merged.computeBoundingBox();
-	const minY = merged.boundingBox!.min.y;
-	merged.translate(0, -minY, 0);
+	const bb = merged.boundingBox;
+	if (bb) merged.translate(0, -bb.min.y, 0);
 	addWhiteVertexColors(merged);
 	return merged;
 }
@@ -161,8 +161,8 @@ function createElkhornCoralGeometry(): THREE.BufferGeometry {
 
 	const merged = mergeBufferGeometries(geos);
 	merged.computeBoundingBox();
-	const minY = merged.boundingBox!.min.y;
-	merged.translate(0, -minY, 0);
+	const bb = merged.boundingBox;
+	if (bb) merged.translate(0, -bb.min.y, 0);
 	addWhiteVertexColors(merged);
 	return merged;
 }
@@ -262,8 +262,8 @@ function createDigitateCoralGeometry(): THREE.BufferGeometry {
 
 	const merged = mergeBufferGeometries(geos);
 	merged.computeBoundingBox();
-	const minY = merged.boundingBox!.min.y;
-	merged.translate(0, -minY, 0);
+	const bb = merged.boundingBox;
+	if (bb) merged.translate(0, -bb.min.y, 0);
 	addWhiteVertexColors(merged);
 	return merged;
 }
@@ -393,6 +393,7 @@ export interface CoralReef {
 	rockMaterial: THREE.MeshStandardMaterial;
 	coralMeshes: THREE.InstancedMesh[];
 	coralMaterials: THREE.MeshStandardMaterial[];
+	coralGeos: THREE.BufferGeometry[];
 }
 
 // ── Create ──
@@ -564,6 +565,7 @@ export function createCoralReef(biome: CoralBiome): CoralReef {
 		terrain, terrainMaterial: terrainMat,
 		rocks: rockMesh, rockMaterial: rockMat,
 		coralMeshes, coralMaterials,
+		coralGeos: geos,
 	};
 }
 
@@ -582,5 +584,8 @@ export function disposeCoralReef(reef: CoralReef, scene: THREE.Scene): void {
 	}
 	for (const mat of reef.coralMaterials) {
 		mat.dispose();
+	}
+	for (const g of reef.coralGeos) {
+		g.dispose();
 	}
 }
