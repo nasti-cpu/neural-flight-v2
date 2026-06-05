@@ -250,7 +250,8 @@ export function createEchoVariant(config: EchoConfig): EchoVariantSystem {
 				const age = config.lifetime - ring.timer;
 				const scale = Math.max(0.3, age * config.expandSpeed);
 				ring.mesh.scale.setScalar(scale + config.initialScale);
-				(ring.mesh.material as THREE.MeshBasicMaterial).opacity = (ring.timer / config.lifetime) * config.maxOpacity;
+				const fade = ring.timer / config.lifetime;
+			(ring.mesh.material as THREE.MeshBasicMaterial).opacity = fade * fade * config.maxOpacity;
 			}
 		},
 		dispose() {
