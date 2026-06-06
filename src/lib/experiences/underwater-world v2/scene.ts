@@ -76,7 +76,7 @@ import {
 
 // ── Constants ──
 
-const SAND_PATCH_COUNT = 400;
+const SAND_PATCH_COUNT = 600;
 const SAND_STREAM_PER_FRAME = 8;
 const CORAL_MAX_PER_TYPE = 500;
 const CORAL_STREAM_RADIUS = 300;
@@ -287,7 +287,7 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
   const pendingChunks: { gx: number; gz: number }[] = [];
 
   // ── Sand patch positions (sand biome ≥ 0.50) ──
-  // Distribution: 40% seagrass, 20% city, 20% reef, 20% plain
+  // Distribution: 50% seagrass, 30% reef, 10% city, 10% plain
 
   const sandPositions: {
     wx: number;
@@ -305,9 +305,9 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
     if (biome >= 0.5) {
       const roll = hash2d(wx * 13, wz * 17);
       let variant: "plain" | "seagrass" | "city" | "reef";
-      if (roll < 0.4) variant = "seagrass";
-      else if (roll < 0.6) variant = "city";
+      if (roll < 0.5) variant = "seagrass";
       else if (roll < 0.8) variant = "reef";
+      else if (roll < 0.9) variant = "city";
       else variant = "plain";
 
       if (variant === "city") {
@@ -317,8 +317,8 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
         });
         if (tooClose) {
           const rr = hash2d(wx * 7, wz * 13);
-          if (rr < 0.5) variant = "seagrass";
-          else if (rr < 0.75) variant = "reef";
+          if (rr < 0.6) variant = "seagrass";
+          else if (rr < 0.9) variant = "reef";
           else variant = "plain";
         } else {
           cityCoords.push({ wx, wz });
