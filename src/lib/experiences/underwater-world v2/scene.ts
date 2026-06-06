@@ -40,13 +40,6 @@ import type {
   CityVariant,
 } from "$lib/experiences/underwater-world v2/Biome/Städte/city";
 import {
-  createModelCitySync,
-  updateModelCityPulse,
-  disposeModelCity,
-  ensureModelLoaded,
-} from "$lib/experiences/underwater-world v2/Biome/Städte/modelCity";
-import type { ModelCityResult } from "$lib/experiences/underwater-world v2/Biome/Städte/modelCity";
-import {
   createFishSchool,
   disposeFishSchool,
   loadFishGeometry,
@@ -138,7 +131,6 @@ export interface UnderwaterWorldState extends ExperienceState {
     dune?: DuneSandResult;
     meadow?: SeagrassMeadow;
     city?: CityResult;
-    modelCity?: ModelCityResult;
     reef?: CoralReef;
     modelCoralReef?: THREE.Group;
   }[];
@@ -156,7 +148,8 @@ export interface UnderwaterWorldState extends ExperienceState {
   fishSchools: FishSchool[];
   coralField: CoralField;
   coralColors: number[];
-  startCityModelCity: ModelCityResult | null;
+  startCityCity: CityResult | null;
+  startCityCityVariant: CityVariant | null;
   startCityX: number;
   startCityZ: number;
   startCoralReef: THREE.Group | null;
@@ -459,7 +452,8 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
     fishSchools,
     coralField,
     coralColors: CORAL_COLORS,
-    startCityModelCity: null,
+    startCityCity: null,
+    startCityCityVariant: null,
     startCityX: 0,
     startCityZ: 0,
     startCoralReef: null,
@@ -477,13 +471,14 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
   };
 
   // ── Find sand position near start for city + corals ──
-  // Scan spiral outward from (0, -200) for sand
+  // Scan spiral outward from (0, -50) so the city is visible from the spawn
+  // (player spawns at (0, 4, 0); fogFar=180; aim for city 30-80m away)
   let startSandX = 0,
-    startSandZ = -200;
-  for (let range = 0; range <= 300; range += 20) {
+    startSandZ = -50;
+  for (let range = 0; range <= 100; range += 10) {
     for (let angle = 0; angle < Math.PI * 2; angle += 0.4) {
       const bx = Math.round((Math.cos(angle) * range) / 10) * 10;
-      const bz = Math.round(-200 + (Math.sin(angle) * range) / 10) * 10;
+      const bz = Math.round(-50 + (Math.sin(angle) * range) / 10) * 10;
       if (getBiome(bx, bz) >= 0.5) {
         startSandX = bx;
         startSandZ = bz;
@@ -496,16 +491,17 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
   stateObj.startCityX = startSandX;
   stateObj.startCityZ = startSandZ;
 
-  // ── Start City (model) on sand ──
-  ensureModelLoaded().then(() => {
-    const mc = createModelCitySync();
-    if (mc) {
-      mc.group.position.set(startSandX, startSandY, startSandZ);
-      mc.group.visible = true;
-      scene.add(mc.group);
-      stateObj.startCityModelCity = mc;
-    }
-  });
+  // ── Start City (procedural, altstadt or vorort, random pick) ──
+  {
+    const startVariant: "altstadt" | "vorort" =
+      Math.random() < 0.5 ? "altstadt" : "vorort";
+    const sc = createCity(startVariant);
+    sc.group.position.set(startSandX, startSandY, startSandZ);
+    sc.group.visible = true;
+    scene.add(sc.group);
+    stateObj.startCityCity = sc;
+    stateObj.startCityCityVariant = startVariant;
+  }
 
   // ── Start Coral Reef (model) — 3 Riffe in unterschiedlichen Entfernungen ──
   stateObj.startCoralReef = new THREE.Group();
@@ -651,8 +647,7 @@ export function tick(
       if (e.meadow) disposeSeagrassMeadow(e.meadow, s.scene);
       if (e.modelCoralReef) disposeScatterGroup(e.modelCoralReef, s.scene);
       else if (e.reef) disposeCoralReef(e.reef, s.scene);
-      if (e.modelCity) disposeModelCity(e.modelCity, s.scene);
-      else if (e.city) disposeCity(e.city, s.scene);
+      if (e.city) disposeCity(e.city, s.scene);
       s.sandEntries.splice(i, 1);
     }
   }
@@ -685,7 +680,6 @@ export function tick(
 
       let meadow: SeagrassMeadow | undefined;
       let city: CityResult | undefined;
-      let modelCity: ModelCityResult | undefined;
 
       if (sp.variant === "seagrass" && sp.seagrassType) {
         meadow = createSeagrassMeadow(sp.seagrassType, (x, z) =>
@@ -695,19 +689,15 @@ export function tick(
       }
 
       if (sp.variant === "city") {
-        // Try model city first, fall back to procedural
-        const mc = createModelCitySync();
-        if (mc) {
-          mc.group.position.set(sp.wx, sy, sp.wz);
-          mc.group.visible = true;
-          s.scene.add(mc.group);
-          modelCity = mc;
-        } else if (sp.cityVariant) {
-          city = createCity(sp.cityVariant);
-          city.group.position.set(sp.wx, sy, sp.wz);
-          city.group.visible = true;
-          s.scene.add(city.group);
-        }
+        // Random procedural city (altstadt or vorort). No model city — the 154 MB
+        // GLB was a one-off from a model-swap test, the procedural variants are
+        // cheap (instanced meshes) and match what /test/staedte shows.
+        const variant: "altstadt" | "vorort" =
+          Math.random() < 0.5 ? "altstadt" : "vorort";
+        city = createCity(variant);
+        city.group.position.set(sp.wx, sy, sp.wz);
+        city.group.visible = true;
+        s.scene.add(city.group);
       }
 
       let reef: CoralReef | undefined;
@@ -749,7 +739,6 @@ export function tick(
         dune,
         meadow,
         city,
-        modelCity,
         reef,
         modelCoralReef,
       });
@@ -759,15 +748,7 @@ export function tick(
   for (const e of s.sandEntries) {
     if (e.meadow && e.seagrassType)
       updateSeagrassSway(e.meadow, elapsed, e.seagrassType);
-    if (e.modelCity) {
-      const sy = getTerrainHeight(
-        e.wx,
-        e.wz,
-        s.terrainAmplitude,
-        s.terrainScale,
-      );
-      updateModelCityPulse(e.modelCity, elapsed, true, sy);
-    } else if (e.city && e.cityVariant) {
+    if (e.city && e.cityVariant) {
       const sy = getTerrainHeight(
         e.wx,
         e.wz,
@@ -799,14 +780,14 @@ export function tick(
 
   // ── City dome repel centers ──
   const repelCenters: { x: number; z: number; radius: number }[] = [];
-  if (s.startCityModelCity)
+  if (s.startCityCity)
     repelCenters.push({
       x: s.startCityX,
       z: s.startCityZ,
       radius: CITY_DOME_RADIUS,
     });
   for (const e of s.sandEntries) {
-    if (e.modelCity || e.city)
+    if (e.city)
       repelCenters.push({ x: e.wx, z: e.wz, radius: CITY_DOME_RADIUS });
   }
   const repelArg = repelCenters.length > 0 ? repelCenters : undefined;
@@ -841,19 +822,19 @@ export function tick(
       s.terrainAmplitude,
       s.terrainScale,
     );
-    updateModelCityPulse(s.startCityModelCity, elapsed, true, sy);
+    if (s.startCityCity) updateCityPulse(s.startCityCity, elapsed, true, sy);
   }
 
   // ── City Guidance (one path → nearest unvisited city) ──
 
   const ARRIVE_RADIUS = 20;
   const cityTargets: { wx: number; wz: number; key: string }[] = [];
-  if (s.startCityModelCity) {
+  if (s.startCityCity) {
     const key = `${s.startCityX},${s.startCityZ}`;
     cityTargets.push({ wx: s.startCityX, wz: s.startCityZ, key });
   }
   for (const e of s.sandEntries) {
-    if (!e.city && !e.modelCity) continue;
+    if (!e.city) continue;
     const key = `${e.wx},${e.wz}`;
     if (!s.cityGuidanceArrived.has(key)) {
       cityTargets.push({ wx: e.wx, wz: e.wz, key });
@@ -972,15 +953,13 @@ export function tick(
       echoTargets.push({ key: `fish_${fi}`, x: p.x, z: p.z });
     }
 
-    if (s.startCityModelCity) {
+    if (s.startCityCity) {
       echoTargets.push({ key: "startCity", x: s.startCityX, z: s.startCityZ });
     }
 
     for (let ei = 0; ei < s.sandEntries.length; ei++) {
       const e = s.sandEntries[ei];
       if (e.city) echoTargets.push({ key: `city_${ei}`, x: e.wx, z: e.wz });
-      if (e.modelCity)
-        echoTargets.push({ key: `modelCity_${ei}`, x: e.wx, z: e.wz });
     }
 
     updateEchoVR(s.echoVR, delta, pos, echoTargets);
@@ -999,15 +978,20 @@ export function tick(
       }
     }
 
-    if (s.startCityModelCity) {
+    if (s.startCityCity) {
       const flash = s.echoVR.flashStates.get("startCity");
       const t = flash ? flash.timer / flash.duration : 0;
+      // altstadt = 0x553311, vorort = 0x446644
+      const base =
+        s.startCityCityVariant === "altstadt"
+          ? s._domeAltstadtColor
+          : s._domeVorortColor;
       if (flash) {
-        s.startCityModelCity.domeMat.emissive.copy(s._flashColor);
-        s.startCityModelCity.domeMat.emissiveIntensity = 0.5 + t * t;
+        s.startCityCity.domeMat.emissive.copy(s._flashColor);
+        s.startCityCity.domeMat.emissiveIntensity = 0.5 + t * t;
       } else {
-        s.startCityModelCity.domeMat.emissive.copy(s._domeModelCityColor);
-        s.startCityModelCity.domeMat.emissiveIntensity =
+        s.startCityCity.domeMat.emissive.copy(base);
+        s.startCityCity.domeMat.emissiveIntensity =
           0.3 + Math.sin(elapsed * 0.4) * 0.15;
       }
     }
@@ -1033,18 +1017,7 @@ export function tick(
             0.6 + Math.sin(elapsed * 0.4) * 0.3;
         }
       }
-      if (e.modelCity) {
-        const flash = s.echoVR.flashStates.get(`modelCity_${ei}`);
-        const t = flash ? flash.timer / flash.duration : 0;
-        if (flash) {
-          e.modelCity.domeMat.emissive.copy(s._flashColor);
-          e.modelCity.domeMat.emissiveIntensity = 0.5 + t * t;
-        } else {
-          e.modelCity.domeMat.emissive.copy(s._domeModelCityColor);
-          e.modelCity.domeMat.emissiveIntensity =
-            0.3 + Math.sin(elapsed * 0.4) * 0.15;
-        }
-      }
+      // e.modelCity no longer set anywhere; city-pulse handled above.
     }
 
     let coralFlash = 0;
@@ -1083,11 +1056,10 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
     if (e.meadow) disposeSeagrassMeadow(e.meadow, scene);
     if (e.modelCoralReef) disposeScatterGroup(e.modelCoralReef, scene);
     else if (e.reef) disposeCoralReef(e.reef, scene);
-    if (e.modelCity) disposeModelCity(e.modelCity, scene);
-    else if (e.city) disposeCity(e.city, scene);
+    if (e.city) disposeCity(e.city, scene);
   }
 
-  if (s.startCityModelCity) disposeModelCity(s.startCityModelCity, scene);
+  if (s.startCityCity) disposeCity(s.startCityCity, scene);
 
   if (s.startCoralReef) disposeScatterGroup(s.startCoralReef, scene);
 
