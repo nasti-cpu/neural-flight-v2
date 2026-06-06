@@ -18,6 +18,18 @@
         SeagrassType,
         SeagrassMeadow,
     } from "$lib/experiences/underwater-world v2/Objekte/Seegras/seagrass";
+    import { createProceduralFishGeometry } from "$lib/experiences/underwater-world v2/Objekte/Fische/fish";
+
+    const SCALE_FISHES: {
+        label: string;
+        color: number;
+        pos: [number, number, number];
+        scale: number;
+    }[] = [
+        { label: "klein", color: 0x00cccc, pos: [-15, 1.5, -10], scale: 0.4 },
+        { label: "mittel", color: 0xcc8844, pos: [5, 1.5, 8], scale: 0.7 },
+        { label: "groß", color: 0xcc66aa, pos: [-5, 1.5, -5], scale: 1.1 },
+    ];
 
     let canvas: HTMLCanvasElement;
     let renderer: THREE.WebGLRenderer;
@@ -25,6 +37,8 @@
     let camera: THREE.PerspectiveCamera;
     let sand: DuneSandResult | null = null;
     let meadow: SeagrassMeadow | null = null;
+    let scaleFishes: THREE.Mesh[] = [];
+    let fishMaterial: THREE.MeshStandardMaterial;
     let elapsed = 0;
 
     let currentMode = $state<SeagrassType>("algae");
@@ -70,11 +84,43 @@
 
         meadow = createSeagrassMeadow("algae", getSandHeight);
 
+        // Add 3 scale-reference fish
+        const fishGeo = createProceduralFishGeometry();
+        fishMaterial = new THREE.MeshStandardMaterial({
+            roughness: 0.3,
+            metalness: 0.1,
+            flatShading: true,
+            emissive: new THREE.Color(0x004466),
+            emissiveIntensity: 0.4,
+        });
+        for (const sf of SCALE_FISHES) {
+            const mat = fishMaterial.clone();
+            mat.color.set(sf.color);
+            const mesh = new THREE.Mesh(fishGeo, mat);
+            mesh.position.set(
+                sf.pos[0],
+                getSandHeight(sf.pos[0], sf.pos[2]) + sf.pos[1],
+                sf.pos[2],
+            );
+            mesh.scale.setScalar(sf.scale);
+            mesh.rotation.y = 0.3;
+            scene.add(mesh);
+            scaleFishes.push(mesh);
+        }
+
         renderer.setAnimationLoop(() => {
             elapsed += 0.016;
             camera.position.set(0, 12, 28);
             camera.lookAt(0, 0, 0);
             if (meadow) updateSeagrassSway(meadow, elapsed, currentMode);
+            // Gentle fish bob
+            for (const m of scaleFishes) {
+                m.position.y =
+                    getSandHeight(m.position.x, m.position.z) +
+                    1.5 +
+                    Math.sin(elapsed * 2 + m.position.x) * 0.3;
+                m.rotation.z = Math.sin(elapsed * 1.5 + m.position.z) * 0.08;
+            }
             renderer.render(scene, camera);
         });
     });
@@ -83,6 +129,12 @@
         renderer?.setAnimationLoop(null);
         if (meadow) disposeSeagrassMeadow(meadow, scene);
         if (sand) disposeDuneSand(sand, scene);
+        for (const m of scaleFishes) {
+            scene.remove(m);
+            m.geometry.dispose();
+            (m.material as THREE.Material).dispose();
+        }
+        fishMaterial.dispose();
         renderer?.dispose();
     });
 </script>
