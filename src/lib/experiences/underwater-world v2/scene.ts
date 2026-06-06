@@ -343,6 +343,15 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
     }
   }
 
+  // DEBUG: count variants
+  const seas = sandPositions.filter((p) => p.variant === "seagrass").length;
+  const rf = sandPositions.filter((p) => p.variant === "reef").length;
+  const cts = sandPositions.filter((p) => p.variant === "city").length;
+  const pln = sandPositions.filter((p) => p.variant === "plain").length;
+  console.log(
+    `[SEAGRASS] Setup: ${sandPositions.length} sand positions (seagrass:${seas} reef:${rf} city:${cts} plain:${pln})`,
+  );
+
   // Water surface
   const water = createWaterSurface(scene);
 
@@ -676,6 +685,24 @@ export function tick(
   }
 
   if (s.sandEntries.length < 30) {
+    // DEBUG
+    if (!(s as { _streamStarted?: boolean })._streamStarted) {
+      (s as { _streamStarted?: boolean })._streamStarted = true;
+      let inRadius = 0;
+      for (const sp of s.sandPositions) {
+        const dx = sp.wx - pos.x;
+        const dz = sp.wz - pos.z;
+        if (dx * dx + dz * dz <= STREAM_INIT_RADIUS * STREAM_INIT_RADIUS)
+          inRadius++;
+      }
+      console.log(
+        `[SEAGRASS] Stream check: entries=${s.sandEntries.length}, ` +
+          `positions=${s.sandPositions.length} total, ` +
+          `${inRadius} within ${STREAM_INIT_RADIUS}m radius, ` +
+          `player at (${pos.x.toFixed(0)}, ${pos.z.toFixed(0)})`,
+      );
+    }
+
     const loaded = new Set(s.sandEntries.map((e) => `${e.wx},${e.wz}`));
     for (const sp of s.sandPositions) {
       if (s.sandEntries.length >= 30 + SAND_STREAM_PER_FRAME) break;
