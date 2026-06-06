@@ -1,6 +1,17 @@
 import * as THREE from "three";
 import { loadGLTF } from "$lib/three/loader";
 
+// ── Feature flag ──
+// When false, model-based coral reefs are disabled and `scatterCoralModels`
+// returns null, so callers fall back to the procedural `createCoralReef`.
+// To re-enable the Meshy / Kaleidoscope GLB models:
+//   1. Flip this flag to `true`.
+//   2. Make sure the .glb files still exist in static/models/.
+//      (See AGENTS_PLAN for the original asset list: Garden 51MB,
+//       Kaleidoscope 89MB — plus the five OBJs in static/models/Korallen/.)
+// No other code changes needed — the fallback path is already wired up in scene.ts.
+const ENABLE_MODEL_CORALS = false;
+
 const GARDEN_PATH = "/models/Meshy_AI_Coral_Reef_Garden_0604160957_texture.glb";
 const KALEIDO_PATH = "/models/Meshy_AI_Kaleidoscope_Coral_Re_0604163348_texture.glb";
 
@@ -27,7 +38,10 @@ const CORAL_COLORS = [
 ];
 
 // Defer loading to client-side only (SSR can't load relative URLs)
-if (typeof window !== "undefined") {
+if (!ENABLE_MODEL_CORALS) {
+	_loadPromise = Promise.resolve();
+	_modelLoadFailed = true;
+} else if (typeof window !== "undefined") {
 	_loadPromise = new Promise((resolve) => { _loadResolve = resolve; });
 	_loadBoth();
 } else {
