@@ -694,7 +694,7 @@ export function tick(
       const dune =
         sp.variant !== "reef"
           ? (() => {
-              const d = createDuneSand();
+              const d = createDuneSand(s.terrainAmplitude, s.terrainScale);
               d.terrain.position.set(sp.wx, sy, sp.wz);
               s.scene.add(d.terrain);
               return d;
