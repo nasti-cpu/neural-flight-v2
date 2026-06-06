@@ -471,14 +471,15 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
   };
 
   // ── Find sand position near start for city + corals ──
-  // Scan spiral outward from (0, -50) so the city is visible from the spawn
-  // (player spawns at (0, 4, 0); fogFar=180; aim for city 30-80m away)
+  // Scan spiral outward from (0, -150) so the city is far enough that the
+  // player has to swim toward it (player spawns at (0, 4, 0); fogFar=180;
+  // aim for city 100-180m away so it sits in the middle of the visible range).
   let startSandX = 0,
-    startSandZ = -50;
-  for (let range = 0; range <= 100; range += 10) {
+    startSandZ = -150;
+  for (let range = 0; range <= 180; range += 10) {
     for (let angle = 0; angle < Math.PI * 2; angle += 0.4) {
       const bx = Math.round((Math.cos(angle) * range) / 10) * 10;
-      const bz = Math.round(-50 + (Math.sin(angle) * range) / 10) * 10;
+      const bz = Math.round(-150 + (Math.sin(angle) * range) / 10) * 10;
       if (getBiome(bx, bz) >= 0.5) {
         startSandX = bx;
         startSandZ = bz;
@@ -487,7 +488,10 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
       }
     }
   }
-  const startSandY = getTerrainHeight(startSandX, startSandZ, amplitude, scale);
+  const baseSandY = getTerrainHeight(startSandX, startSandZ, amplitude, scale);
+  // Lift the city above the terrain — otherwise its base sits in the dunes
+  // and the player spawns inside the dome / buildings.
+  const startSandY = baseSandY + 2.0;
   stateObj.startCityX = startSandX;
   stateObj.startCityZ = startSandZ;
 
