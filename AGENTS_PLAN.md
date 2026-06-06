@@ -33,6 +33,11 @@
   - ~~**`guidance.ts` allokationsfrei**: `TubeGeometry`/`BufferGeometry`/`Color` werden nicht mehr pro Frame neu erzeugt. Float32-Arrays vorab allokiert, in-place mutiert, parallel-transport-Frame in Scratch-Vektoren.~~
   - ~~**`scene.ts` Color-Pooling**: 7 geteilte `THREE.Color`-Instanzen (`_flashColor`, `_fishBaseColor`, drei Dome-Farben, `_coralIdleColor`) auf State. Eliminiert ~10× `new THREE.Color()` pro Frame.~~
   - ~~**City Domes**: `MeshPhysicalMaterial` → `MeshStandardMaterial` (kein Clearcoat-BRDF-Layer). Spart eine volle PBR-Berechnung pro Fragment auf großer transparenter Doppelseiten-Kuppel.~~
+- **4. Stadt-Variante `Kolonie`** (`Biome/Städte/city.ts`) — biomorphes Unterwasser-Habitat inspiriert von Conshelf/Tektite/Aquarius/SeaOrbiter/Rougeries Galathée. Hauptkörper + 6 Pods + 4 Pylone + Sensor-Mast. Reine Mesh-Komposition, kein InstancedMesh.
+- **Städte-Testseite** (`/test/staedte`) — 4 Buttons (altstadt/zentrum/vorort/kolonie), unabhängige WebGLRenderer-Szene, Kamera (0, 45, 110).
+- **Stadt-Zufallspick** in der VR-Experience: Start-City und Sand-Entry-Cities = zufällig `altstadt` oder `vorort` (50/50). Kein Model-City mehr im canonical Pfad.
+- **Start-City Position**: Spiralscan ab (0, -150), Range 0–180m → 100–180m vom Spawn entfernt. +2.0m Y-Offset damit die Stadt nicht im Boden sitzt.
+- **`modelCity.ts` SSR-Fix**: `_loadGLB()` short-circuited in Node (`window === undefined`), `ensureModelLoaded()` startet lazy. Verhindert "Failed to parse URL" Crash bei SSR.
 - **0 errors, 0 warnings** (biome + svelte-check).
 
 ### Ausstehend
@@ -116,19 +121,39 @@
 ## Wichtige Konstanten (für Wiederaufnahme)
 | Konstante | Wert | Fundort |
 |-----------|------|---------|
-| CHUNK_SIZE | 400m | welt/chunks.ts |
+| CHUNK_SIZE | 400m | welt/terrain.ts |
 | CHUNK_SEGMENTS | 48 | welt/terrain.ts |
 | CORAL_STREAM_RADIUS | 300m | welt/chunks.ts |
-| SAND_STREAM_PER_FRAME | 8 | Biome/Sand/sand.ts |
-| SAND_PATCH_COUNT | 400 | Biome/Sand/sand.ts |
+| SAND_STREAM_PER_FRAME | 8 | scene.ts |
+| SAND_PATCH_COUNT | 400 | scene.ts |
 | CITY_SPACING_MIN | 150m | scene.ts |
 | GUIDANCE_ARRIVAL_RADIUS | 20m | scene.ts |
-| DOME_RADIUS | 65m | modelCity.ts |
-| ECHO_RING_EXPAND_SPEED | 8m/s | echoortung.ts |
+| DOME_RADIUS | 65m | Biome/Städte/city.ts |
+| ECHO_RING_EXPAND_SPEED | 8m/s | echoVRIntegration.ts |
+| START_CITY_SPIRAL_CENTER | (0, -150) | scene.ts |
+| START_CITY_SPIRAL_RANGE | 180m | scene.ts |
+| START_CITY_SPIRAL_STEP | 10m | scene.ts |
+| START_CITY_Y_OFFSET | +2.0m | scene.ts |
+| CITY_VARIANTS_IN_VR | `altstadt` \| `vorort` (50/50) | scene.ts |
+| CITY_VARIANTS_IN_TEST | `altstadt` \| `zentrum` \| `vorort` \| `kolonie` | test/staedte/+page.svelte |
+| ECHO_RING_POOL_SIZE | 40 | echoVRIntegration.ts |
+| ECHO_RING_LIFETIME | 3s | echoVRIntegration.ts |
+| COLONY_MAIN_HULL_LENGTH | 32m | Biome/Städte/city.ts |
+| COLONY_POD_RING_RADIUS | 22m | Biome/Städte/city.ts |
+| COLONY_POD_COUNT | 6 | Biome/Städte/city.ts |
+| COLONY_PYLON_COUNT | 4 | Biome/Städte/city.ts |
+| WATER_SURFACE_Y | 500 | welt/wasser.ts |
+| FOG_NEAR/FAR | 10 / 180 | manifest.ts (loader) |
 
 ## Letzte Commits (für Kontext)
 
 ```
+be18adb fix(scene): move start-city to 100-180m and lift 2m above terrain
+c6f58e7 chore(test/staedte): pull camera back for all 4 variants
+1e125f0 feat(scene): procedural start-city (no 154MB GLB), 30-80m from spawn
+c810afc fix(modelCity): SSR-safe GLB load (no Invalid URL, no premature fetch)
+4a30123 feat(city): add 4th variant 'Kolonie' — underwater human habitat colony
+59db68d docs(AGENTS_PLAN): document perf wins, add 5 next-step items
 23fedb5 perf(underwater-world-v2): allocation-free per-frame hot paths
 12c70c4 chore(deps): add three-mesh-bvh, update AGENTS_PLAN + architecture docs
 894036e chore(assets): add underwater-world v2 model + audio assets
@@ -139,3 +164,66 @@ b1d658a fix: NaN positions in coral geo, shared instanceColor buffer, AudioConte
 47dc15b Echoortung in VR-Welt integriert (Punkt 1)
 947c134 AGENTS_PLAN: abgeschlossene Punkte durchgestrichen, v2-Fortschritt dokumentiert
 ```
+
+---
+
+## Resume-Instructions für eine neue KI-Session
+
+Wenn diese Datei gelesen wird, um eine neue Session zu starten:
+
+### Sofort prüfen
+1. `bun install` ausgeführt? (Lockfile ist `bun.lock`)
+2. `git log --oneline -15` — die letzten Commits sind die "working set"
+3. `git status` — sollte clean sein (außer `tmp_dev_*.txt` Dev-Logs)
+4. `bunx svelte-check --threshold error` — muss 0/0 sein
+5. `bunx biome check .` — sollte clean sein
+
+### Dev-Server starten
+```bash
+bun run dev
+# HTTPS-Warnung im Browser wegklicken (Zertifikat-Problematik, siehe 894036e)
+# Oder mit mkcert sauber einrichten (siehe AGENTS_PLAN oben)
+```
+
+### Aktive Branches
+- `underwater-world-v2` (working branch) — hat alle aktuellen Änderungen
+- `main` — 25 Commits hinter `origin/main`, lokaler Stand vom merge-upstream
+
+### Wo der Code wohnt
+- **Active experience**: `src/lib/experiences/underwater-world v2/`
+- **Test pages**: `src/routes/test/{staedte,fische,haie,...}/+page.svelte`
+- **Main VR scene**: `src/routes/vr/+page.svelte`
+- **Controller UI**: `src/routes/controller/`
+- **Shared 3D primitives**: `src/lib/three/`
+- **WebSocket bridge**: `src/lib/ws/`
+
+### Konventionen
+- Tabs for indentation, double quotes for strings, semicolons required
+- All Three.js allocations for hot paths go in module-level scratch objects
+- Materials: prefer `MeshStandardMaterial` over `MeshPhysicalMaterial` unless you need clearcoat/iridescence
+- Per-frame updates: avoid `new` for `THREE.*`, `Geometry`, `Color` etc.
+- All hot paths validated by `bunx svelte-check` + `bunx biome check`
+- `config/flight.ts` is the source of truth for tuning values
+- Don't add dependencies without researching first; check existing ones
+
+### Aktuelle offene Tasks (sortiert nach Impact)
+1. **Seagrass → InstancedMesh** (Item 2a) — drastische Draw-Call-Reduktion
+2. **Water Surface → ShaderMaterial** (Item 2b) — GPU statt JS für Wellen
+3. **Fish-Echo: dirty-flag** (Item 2c) — nur setzen wenn Wert sich ändert
+4. **`scene.ts` pulse-update** für Echo: Color-Update ohne allokieren ist **done**; Mesh-Update mit dirty-flag fehlt noch
+5. **Wasser-Shader / God Rays / Caustics** (Item 3) — visuelles Upgrade
+6. **Delfin-Neuschreibung** (Item 4) — zurück ins Spiel
+
+### Quick Context: was funktioniert bereits
+- ✅ 4 Stadt-Varianten prozedural in `Biome/Städte/city.ts`
+- ✅ Test-Seite `/test/staedte` mit allen 4 Buttons
+- ✅ VR-Experience: prozedurale Städte (kein GLB-Download mehr), 100-180m vom Spawn
+- ✅ Echoortung in VR integriert
+- ✅ Performance: guidance allokationsfrei, scene.ts Color-Pooling, dome ohne clearcoat
+
+### Was der User typischerweise will
+- Mehr Polish (Wasser, Lighting, Sound)
+- Bessere Performance (s.o. Item 2a-2e)
+- Neue Kreaturen / Biome
+- VR-Tests auf der echten Quest-Brille
+- Manchmal: einfach Commit + Push zum feature branch
