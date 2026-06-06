@@ -39,6 +39,9 @@
 - **Start-City Position**: Spiralscan ab (0, -150), Range 0–180m → 100–180m vom Spawn entfernt. +2.0m Y-Offset damit die Stadt nicht im Boden sitzt.
 - **`modelCity.ts` SSR-Fix**: `_loadGLB()` short-circuited in Node (`window === undefined`), `ensureModelLoaded()` startet lazy. Verhindert "Failed to parse URL" Crash bei SSR.
 - **0 errors, 0 warnings** (biome + svelte-check).
+- **Bug #1 Fix: Fische blitzen einzeln auf** (Commit `4047dad`) — `FishSchool.centroidX/Y/Z` wird in `updateFishSchool` live als `mesh.position + mean(local positions)` berechnet. `scene.ts` Echo-Targets lesen `school.centroidX/Z` statt `school.mesh.position`. `FLASH_DURATION` 0.5s → 0.15s damit Flashes zwischen Ring-Sweeps sauber abklingen. Behebt Bug #1 + Bug #4 (Korallen-Flash-Cascade).
+- **Korallen-Modelle deaktiviert** (Commit `f1fc2de`) — Feature-Flag `ENABLE_MODEL_CORALS = false` in `Biome/Korallenriff/modelCoralReef.ts`. Spart **~140MB** VRAM+Netzwerk (Garden 51MB + Kaleidoscope 89MB GLB). Prozeduraler `createCoralReef`-Fallback läuft automatisch. Re-Aktivierung = 1 Zeile auf `true` + ggf. `git restore` der GLBs aus static/models/.
+- **Fisch-Farben dunkler** (Teil von Commit `4047dad`) — `FISH_COLORS` mit Faktor 0.45 multipliziert (8x Farben). Besserer Kontrast zur Wasser-Atmosphäre, weniger "Leuchten aus dem Wasser".
 
 ### Ausstehend
 - ~~Echoortung in die VR-Welt integrieren~~
@@ -50,15 +53,15 @@
 
 ### Nächste Schritte (geplant)
 
-#### 1. 🐟 Echoortung: Fische nacheinander aufleuchten lassen (Bug)
-**Ziel:** Fische sollen einzeln gelb aufblitzen, wenn der expandierende Ring sie wirklich berührt — nicht alle gleichzeitig.
+#### 1. ~~🐟 Echoortung: Fische nacheinander aufleuchten lassen (Bug)~~
+~~**Ziel:** Fische sollen einzeln gelb aufblitzen, wenn der expandierende Ring sie wirklich berührt — nicht alle gleichzeitig.~~
 
-**Root Cause:** `school.mesh.position` wird von `updateFishSchool` nie aktualisiert → bleibt immer (0,0,0). Alle 80 Fischschwärme melden Position 0 → Echo-System trifft sie alle im selben Frame.
+~~**Root Cause:** `school.mesh.position` wurde von `updateFishSchool` zwar gesetzt, aber `scene.ts` Echo-Targets nutzten den **InstancedMesh-Anker** (= Spawn-Punkt hinter dem Spieler), nicht den **tatsächlichen Schwarm-Centroid**. Fische schwimmen im 30-50m Spread um den Anker → Ring traf alle 3 Schulen nacheinander an Spawn-Positionen. `FLASH_DURATION=0.5s` ≈ Ring-Intervall → wahrgenommener "alle-gleichzeitig"-Glow.~~
 
-**Fix war fertig, wurde auf User-Wunsch verworfen — muss neu gemacht werden:**
-- `FishSchool.centroidX/centroidZ` hinzufügen, live in `updateFishSchool` berechnen
-- `scene.ts` liest `school.centroidX/Z` statt `school.mesh.position`
-- `FLASH_DURATION` 0.5s → 0.15s für sichtbare Welle
+~~**Fix (Commit `4047dad`):**~~
+- ~~`FishSchool.centroidX/Y/Z` hinzugefügt, live in `updateFishSchool` als `mesh.position + mean(local positions)` berechnet~~
+- ~~`scene.ts` liest `school.centroidX/Z` statt `school.mesh.position`~~
+- ~~`FLASH_DURATION` 0.5s → 0.15s für sichtbare Einzel-Flashes~~
 
 #### 2. ⚡ Mittlere Performance-Items (Quick Wins nach den 3 großen)
 
@@ -105,10 +108,10 @@
 
 | # | Problem | Status |
 |---|---------|--------|
-| 1 | **Fische alle gleichzeitig** — `school.mesh.position` nie geupdated → (0,0,0) | Fix bereit, nicht committet |
+| 1 | **Fische alle gleichzeitig** — `scene.ts` Echo-Targets nutzten Mesh-Anker statt Schwarm-Centroid | **Gefixt in `4047dad`** |
 | 2 | **Bekannte Probleme im Codebase** — siehe `AGENTS.md` Critical Context | Nicht angetastet |
 | 3 | **`lightIntensity`-Slider** skaliert alle Szenen-Lichter (Ambient + Directional) proportional | Gefixt in `983510e` |
-| 4 | **Korallen-Flash** flutet alle Korallen gleichzeitig bei jedem Echo-Treffer | Nicht gefixt (durch Bug #1 verursacht) |
+| 4 | **Korallen-Flash** flutet alle Korallen gleichzeitig bei jedem Echo-Treffer | **Gefixt in `4047dad`** (Cascade-Fix von Bug #1) |
 | 5 | **Seagrass 2.200+ Meshes** im Szenegraph | Optimierung geplant (Item 2a) |
 | 6 | **`getTerrainHeight` jeden Frame** pro Sand-Entry (8 noise-calls) | Optimierung geplant (Item 2d) |
 
@@ -148,6 +151,9 @@
 ## Letzte Commits (für Kontext)
 
 ```
+f1fc2de feat(coral): add ENABLE_MODEL_CORALS flag, default off — spart ~140MB VRAM+Netzwerk, prozeduraler Fallback läuft automatisch
+4047dad fix(fish-echo): use live world-space centroid for per-school flash (Bug #1 + #4) + FISH_COLORS mit Faktor 0.45 abgedunkelt
+8da92c7 docs(AGENTS_PLAN, ARCHITECTURE): sync with current state (Kolonie, perf, spawn)
 be18adb fix(scene): move start-city to 100-180m and lift 2m above terrain
 c6f58e7 chore(test/staedte): pull camera back for all 4 variants
 1e125f0 feat(scene): procedural start-city (no 154MB GLB), 30-80m from spawn
@@ -218,8 +224,9 @@ bun run dev
 - ✅ 4 Stadt-Varianten prozedural in `Biome/Städte/city.ts`
 - ✅ Test-Seite `/test/staedte` mit allen 4 Buttons
 - ✅ VR-Experience: prozedurale Städte (kein GLB-Download mehr), 100-180m vom Spawn
-- ✅ Echoortung in VR integriert
+- ✅ Echoortung in VR integriert mit per-Schwarm-Tracking (Bug #1 Fix in `4047dad`)
 - ✅ Performance: guidance allokationsfrei, scene.ts Color-Pooling, dome ohne clearcoat
+- ✅ Korallen-Modelle deaktiviert (~140MB gespart): `ENABLE_MODEL_CORALS = false` → prozeduraler Riff-Fallback läuft
 
 ### Was der User typischerweise will
 - Mehr Polish (Wasser, Lighting, Sound)
