@@ -22,6 +22,7 @@ import {
   createSeagrassMeadow,
   updateSeagrassSway,
   disposeSeagrassMeadow,
+  initSeagrassSystem,
   SEAGRASS_META,
   type SeagrassMeadow,
 } from "$lib/experiences/underwater-world v2/Objekte/Seegras/seagrass";
@@ -107,6 +108,7 @@ interface AudioState {
 
 export interface UnderwaterWorldState extends ExperienceState {
   camera: THREE.PerspectiveCamera;
+  rig: THREE.Group;
   scene: THREE.Scene;
   driftSpeed: number;
   wasdSpeed: number;
@@ -165,6 +167,8 @@ export interface UnderwaterWorldState extends ExperienceState {
   _domeVorortColor: THREE.Color;
   _domeModelCityColor: THREE.Color;
   _coralIdleColor: THREE.Color;
+  fishYaw: number;
+  fishFollowPos: THREE.Vector3;
 }
 
 // ── Terrain (moved to welt/terrain.ts + welt/chunks.ts) ──
@@ -256,7 +260,14 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
   const amplitude = 50;
   const scale = 0.012;
 
-  camera.position.set(0, 4, 0);
+  // Create a camera rig for VR. The rig is moved/rotated by the simulation,
+  // while the camera itself is moved by the VR headset tracking.
+  const rig = new THREE.Group();
+  rig.position.set(0, 4, 0);
+  rig.add(camera);
+  scene.add(rig);
+
+  camera.position.set(0, 0, 0);
   camera.rotation.set(0, 0, 0);
 
   // Terrain
@@ -370,6 +381,8 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
     new Float32Array(coralColorsArr),
   );
 
+  initSeagrassSystem(scene);
+
   // Fish
   const fishModel = await loadFishGeometry();
   const fishSchools: FishSchool[] = [];
@@ -430,6 +443,7 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
 
   const stateObj: UnderwaterWorldState = {
     camera,
+    rig,
     scene,
     driftSpeed: 2,
     wasdSpeed: 6,
@@ -468,6 +482,8 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
     _domeVorortColor: new THREE.Color(0x446644),
     _domeModelCityColor: new THREE.Color(0x224466),
     _coralIdleColor: new THREE.Color(0x000000),
+    fishYaw: 0,
+    fishFollowPos: new THREE.Vector3(),
   };
 
   // ── Find sand position near start for city + corals ──
@@ -569,16 +585,17 @@ export function tick(
 ): { state: ExperienceState; outputs?: Record<string, number> } {
   const s = state as UnderwaterWorldState;
   const delta = Math.min(ctx.delta, 0.05);
-  const pos = ctx.camera.position;
+  const rig = s.rig;
+  const pos = rig.position;
   const elapsed = ctx.elapsed;
 
   // ── Keyboard ──
 
   const yawAmt = s.wasdSpeed * delta * 0.25;
-  if (s.keys.has("KeyA")) ctx.camera.rotation.y += yawAmt;
-  if (s.keys.has("KeyD")) ctx.camera.rotation.y -= yawAmt;
-  if (s.keys.has("ArrowLeft")) ctx.camera.rotation.y += yawAmt;
-  if (s.keys.has("ArrowRight")) ctx.camera.rotation.y -= yawAmt;
+  if (s.keys.has("KeyA")) rig.rotation.y += yawAmt;
+  if (s.keys.has("KeyD")) rig.rotation.y -= yawAmt;
+  if (s.keys.has("ArrowLeft")) rig.rotation.y += yawAmt;
+  if (s.keys.has("ArrowRight")) rig.rotation.y -= yawAmt;
 
   const vertAmt = s.wasdSpeed * delta;
   if (s.keys.has("KeyW")) pos.y += vertAmt;
@@ -598,9 +615,11 @@ export function tick(
   }
 
   // Auto-drift
-  const driftDir = new THREE.Vector3(0, 0, -1).applyQuaternion(
-    ctx.camera.quaternion,
-  );
+  // We use the combined orientation (rig + headset) for drift direction.
+  const worldQuaternion = new THREE.Quaternion();
+  ctx.camera.getWorldQuaternion(worldQuaternion);
+
+  const driftDir = new THREE.Vector3(0, 0, -1).applyQuaternion(worldQuaternion);
   driftDir.y = 0;
   driftDir.normalize();
   pos.add(driftDir.multiplyScalar(s.driftSpeed * delta));
@@ -686,8 +705,11 @@ export function tick(
       let city: CityResult | undefined;
 
       if (sp.variant === "seagrass" && sp.seagrassType) {
-        meadow = createSeagrassMeadow(sp.seagrassType, (x, z) =>
-          getTerrainHeight(x, z, s.terrainAmplitude, s.terrainScale),
+        meadow = createSeagrassMeadow(
+          sp.seagrassType,
+          (x, z) => getTerrainHeight(x, z, s.terrainAmplitude, s.terrainScale),
+          sp.wx,
+          sp.wz,
         );
         s.scene.add(meadow.group);
       }
@@ -776,9 +798,32 @@ export function tick(
 
   // ── Fish ──
 
-  const behindDir = new THREE.Vector3(0, 0, 1).applyQuaternion(
+  // Extract horizontal (yaw) component of the camera rotation.
+  const headEuler = new THREE.Euler().setFromQuaternion(
     ctx.camera.quaternion,
+    "YXZ",
   );
+  const currentYaw = headEuler.y;
+
+  // 1. Slow-follow for Anchor Yaw
+  // This prevents fish from swinging wildly when turning the head quickly.
+  // We handle angle wrapping to ensure smooth rotation across the PI/-PI boundary.
+  const yawDiff = currentYaw - s.fishYaw;
+  const wrappedYawDiff = Math.atan2(Math.sin(yawDiff), Math.cos(yawDiff));
+  s.fishYaw += wrappedYawDiff * Math.min(1, delta * 0.8);
+
+  // 2. Slow-follow for Player Position
+  // Anchors fish to a slightly delayed position to decouple from head-bob/neck-pivot jitter.
+  if (s.fishFollowPos.lengthSq() === 0) {
+    s.fishFollowPos.copy(pos);
+  } else {
+    s.fishFollowPos.lerp(pos, Math.min(1, delta * 2.0));
+  }
+
+  const stabilizedBehindDir = new THREE.Vector3(0, 0, 1).applyEuler(
+    new THREE.Euler(0, s.fishYaw, 0),
+  );
+
   const fishTerrain = (wx: number, wz: number) =>
     getTerrainHeight(wx, wz, s.terrainAmplitude, s.terrainScale);
 
@@ -798,18 +843,25 @@ export function tick(
 
   for (let fi = 0; fi < s.fishSchools.length; fi++) {
     const school = s.fishSchools[fi];
-    const behind = new THREE.Vector3(
-      pos.x + behindDir.x * (8 + fi * 4),
-      Math.max(pos.y - 3, 0),
-      pos.z + behindDir.z * (8 + fi * 4),
+    const targetPos = new THREE.Vector3(
+      s.fishFollowPos.x + stabilizedBehindDir.x * (8 + fi * 4),
+      Math.max(s.fishFollowPos.y - 3, 0),
+      s.fishFollowPos.z + stabilizedBehindDir.z * (8 + fi * 4),
     );
-    school.mesh.position.copy(behind);
+
+    // Smooth follow for the mesh itself
+    if (school.mesh.position.lengthSq() === 0) {
+      school.mesh.position.copy(targetPos);
+    } else {
+      school.mesh.position.lerp(targetPos, Math.min(1, delta * 1.5));
+    }
+
     updateFishSchool(
       school,
       delta,
       elapsed,
       STANDARD_SCHOOL_CONFIGS[fi].swimMode,
-      behind,
+      targetPos,
       fishTerrain,
       repelArg,
     );
@@ -958,7 +1010,11 @@ export function tick(
       // anchor is fixed at the player-relative spawn point and every school
       // gets hit by the echo ring on the same frame.
       const school = s.fishSchools[fi];
-      echoTargets.push({ key: `fish_${fi}`, x: school.centroidX, z: school.centroidZ });
+      echoTargets.push({
+        key: `fish_${fi}`,
+        x: school.centroidX,
+        z: school.centroidZ,
+      });
     }
 
     if (s.startCityCity) {
@@ -1051,6 +1107,7 @@ export function tick(
 
 export function dispose(state: ExperienceState, scene: THREE.Scene): void {
   const s = state as UnderwaterWorldState;
+  scene.remove(s.rig);
 
   window.removeEventListener("keydown", s.onKeyDown);
   window.removeEventListener("keyup", s.onKeyUp);

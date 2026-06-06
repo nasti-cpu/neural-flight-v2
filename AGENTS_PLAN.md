@@ -40,6 +40,8 @@
 - **`modelCity.ts` SSR-Fix**: `_loadGLB()` short-circuited in Node (`window === undefined`), `ensureModelLoaded()` startet lazy. Verhindert "Failed to parse URL" Crash bei SSR.
 - **0 errors, 0 warnings** (biome + svelte-check).
 - **Bug #1 Fix: Fische blitzen einzeln auf** (Commit `4047dad`) — `FishSchool.centroidX/Y/Z` wird in `updateFishSchool` live als `mesh.position + mean(local positions)` berechnet. `scene.ts` Echo-Targets lesen `school.centroidX/Z` statt `school.mesh.position`. `FLASH_DURATION` 0.5s → 0.15s damit Flashes zwischen Ring-Sweeps sauber abklingen. Behebt Bug #1 + Bug #4 (Korallen-Flash-Cascade).
+- **Bug #7 Fix: Fische-Jitter in VR** — Fische folgen nun dem Spieler mit gedämpftem `lerp` und ignorieren Kopf-Pitch/Roll (nur Yaw wird für Ankerpunkt genutzt). Verhindert "Mitschwingen" bei Kopfdrehungen.
+- **Bug #8 Fix: Controller im VR** — `updatePlayer` implementiert und Kamera-Rig eingeführt. Ermöglicht Steuerung via Pitch/Roll-Controller in VR (Kamera-Elternobjekt wird bewegt, damit Headset-Tracking die Simulation nicht überschreibt).
 - **Korallen-Modelle deaktiviert** (Commit `f1fc2de`) — Feature-Flag `ENABLE_MODEL_CORALS = false` in `Biome/Korallenriff/modelCoralReef.ts`. Spart **~140MB** VRAM+Netzwerk (Garden 51MB + Kaleidoscope 89MB GLB). Prozeduraler `createCoralReef`-Fallback läuft automatisch. Re-Aktivierung = 1 Zeile auf `true` + ggf. `git restore` der GLBs aus static/models/.
 - **Fisch-Farben dunkler** (Teil von Commit `4047dad`) — `FISH_COLORS` mit Faktor 0.45 multipliziert (8x Farben). Besserer Kontrast zur Wasser-Atmosphäre, weniger "Leuchten aus dem Wasser".
 
