@@ -44,12 +44,18 @@
 - **Bug #8 Fix: Controller im VR** — `updatePlayer` implementiert und Kamera-Rig eingeführt. Ermöglicht Steuerung via Pitch/Roll-Controller in VR (Kamera-Elternobjekt wird bewegt, damit Headset-Tracking die Simulation nicht überschreibt).
 - **Korallen-Modelle deaktiviert** (Commit `f1fc2de`) — Feature-Flag `ENABLE_MODEL_CORALS = false` in `Biome/Korallenriff/modelCoralReef.ts`. Spart **~140MB** VRAM+Netzwerk (Garden 51MB + Kaleidoscope 89MB GLB). Prozeduraler `createCoralReef`-Fallback läuft automatisch. Re-Aktivierung = 1 Zeile auf `true` + ggf. `git restore` der GLBs aus static/models/.
 - **Fisch-Farben dunkler** (Teil von Commit `4047dad`) — `FISH_COLORS` mit Faktor 0.45 multipliziert (8x Farben). Besserer Kontrast zur Wasser-Atmosphäre, weniger "Leuchten aus dem Wasser".
+- **Seagrass → InstancedMesh (Item 2a)** (Commit `ffd5f75`) — 3 geteilte `InstancedMesh` (algae/long/bushy) ersetzen ~2.200 separate Meshes. Slot-System (max 12 meadows/type). `DynamicDrawUsage`, `initSeagrassSystem()`, `updateSeagrassSway()` schreibt direkt `instanceMatrix`. Test-Seite (`/test/seegras`) angepasst.
+- **VR-Controller + Kamera-Rig (Bugs #7, #8)** (Commit `ffd5f75`) — `updatePlayer` liest Pitch/Roll/Speed vom Controller und steuert das neue Kamera-Rig (`THREE.Group` als `camera`-Parent). Fische folgen gedämpftem `fishYaw` + `fishFollowPos` statt rohem Headset-Pose. Auto-drift nutzt `getWorldQuaternion` für korrekte kombinierte Orientierung.
 
 ### Ausstehend
 - ~~Echoortung in die VR-Welt integrieren~~
 - ~~Bugfix-Runde (Doppelbeleuchtung, Leaks, Settings, Crash)~~
 - ~~Erste 3 Performance-Wins (Guidance / Color / Dome-Material)~~
-- **Mittlere Performance-Items**: Seagrass → InstancedMesh, Water Surface → Shader, Fish-Echo-Update nur bei Delta
+- ~~Seagrass → InstancedMesh~~
+- **Water Surface → ShaderMaterial** (Item 2b)
+- **Fish-Echo dirty-flag** (Item 2c)
+- **Sand-Entry Terrain cachen** (Item 2d)
+- **`scene.traverse` in `applySettings` ersetzen** (Item 2e)
 - **Wasser-Shader / God Rays / Caustics**
 - **Delfin-Neuschreibung** (wurden entfernt statt neu geschrieben)
 
@@ -114,8 +120,10 @@
 | 2 | **Bekannte Probleme im Codebase** — siehe `AGENTS.md` Critical Context | Nicht angetastet |
 | 3 | **`lightIntensity`-Slider** skaliert alle Szenen-Lichter (Ambient + Directional) proportional | Gefixt in `983510e` |
 | 4 | **Korallen-Flash** flutet alle Korallen gleichzeitig bei jedem Echo-Treffer | **Gefixt in `4047dad`** (Cascade-Fix von Bug #1) |
-| 5 | **Seagrass 2.200+ Meshes** im Szenegraph | Optimierung geplant (Item 2a) |
+| 5 | **Seagrass 2.200+ Meshes** im Szenegraph | **Gefixt in `ffd5f75`** (InstancedMesh) |
 | 6 | **`getTerrainHeight` jeden Frame** pro Sand-Entry (8 noise-calls) | Optimierung geplant (Item 2d) |
+| 7 | **Fische-Jitter in VR** — Fische schwingen bei Kopfdrehung mit | **Gefixt in `ffd5f75`** (fishYaw/fishFollowPos Lerp) |
+| 8 | **Kein Controller-Support im VR** — `updatePlayer` war leer | **Gefixt in `ffd5f75`** (Pitch→Vertikal, Roll→Yaw via Rig) |
 
 ## Offene Fragen
 - Echoortung: Eigener System-Kanal oder direkt in `tick()` integrieren? → Aktuell in `tick()`.
@@ -153,6 +161,7 @@
 ## Letzte Commits (für Kontext)
 
 ```
+ffd5f75 perf(seagrass): InstancedMesh slot-based (Item 2a) + fix(player): VR controller steering (Bug #8) + fix(fish): damped follow prevents VR jitter (Bug #7)
 f1fc2de feat(coral): add ENABLE_MODEL_CORALS flag, default off — spart ~140MB VRAM+Netzwerk, prozeduraler Fallback läuft automatisch
 4047dad fix(fish-echo): use live world-space centroid for per-school flash (Bug #1 + #4) + FISH_COLORS mit Faktor 0.45 abgedunkelt
 8da92c7 docs(AGENTS_PLAN, ARCHITECTURE): sync with current state (Kolonie, perf, spawn)
@@ -215,10 +224,10 @@ bun run dev
 - Don't add dependencies without researching first; check existing ones
 
 ### Aktuelle offene Tasks (sortiert nach Impact)
-1. **Seagrass → InstancedMesh** (Item 2a) — drastische Draw-Call-Reduktion
-2. **Water Surface → ShaderMaterial** (Item 2b) — GPU statt JS für Wellen
-3. **Fish-Echo: dirty-flag** (Item 2c) — nur setzen wenn Wert sich ändert
-4. **`scene.ts` pulse-update** für Echo: Color-Update ohne allokieren ist **done**; Mesh-Update mit dirty-flag fehlt noch
+1. **Water Surface → ShaderMaterial** (Item 2b) — GPU statt JS für Wellen
+2. **Fish-Echo: dirty-flag** (Item 2c) — nur setzen wenn Wert sich ändert
+3. **Sand-Entry Terrain cachen** (Item 2d) — 8 noise-calls/frame sparen
+4. **`scene.traverse` in `applySettings` ersetzen** (Item 2e) — Lichtquellen direkt referenzieren
 5. **Wasser-Shader / God Rays / Caustics** (Item 3) — visuelles Upgrade
 6. **Delfin-Neuschreibung** (Item 4) — zurück ins Spiel
 
@@ -227,12 +236,13 @@ bun run dev
 - ✅ Test-Seite `/test/staedte` mit allen 4 Buttons
 - ✅ VR-Experience: prozedurale Städte (kein GLB-Download mehr), 100-180m vom Spawn
 - ✅ Echoortung in VR integriert mit per-Schwarm-Tracking (Bug #1 Fix in `4047dad`)
-- ✅ Performance: guidance allokationsfrei, scene.ts Color-Pooling, dome ohne clearcoat
+- ✅ Performance: guidance allokationsfrei, scene.ts Color-Pooling, dome ohne clearcoat, Seagrass → InstancedMesh
 - ✅ Korallen-Modelle deaktiviert (~140MB gespart): `ENABLE_MODEL_CORALS = false` → prozeduraler Riff-Fallback läuft
+- ✅ VR-Controller-Steuerung via Kamera-Rig, Fische gedämpft (kein Headset-Jitter mehr)
 
 ### Was der User typischerweise will
 - Mehr Polish (Wasser, Lighting, Sound)
-- Bessere Performance (s.o. Item 2a-2e)
+- Bessere Performance (s.o. Items 2b-2e)
 - Neue Kreaturen / Biome
 - VR-Tests auf der echten Quest-Brille
 - Manchmal: einfach Commit + Push zum feature branch
