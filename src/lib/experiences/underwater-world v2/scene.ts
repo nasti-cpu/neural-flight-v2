@@ -343,6 +343,53 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
     }
   }
 
+  // ── Guarantee sand patches near player spawn (grid scan within 400m) ──
+  // The random hash2d distribution above can leave gaps — especially near (0,0).
+  // This ensures the player always sees flora from the first frame.
+  {
+    const existingKeys = new Set(sandPositions.map((p) => `${p.wx},${p.wz}`));
+    const GRID_STEP = 40;
+    const SPAWN_SCAN_RADIUS = 400;
+    for (
+      let gx = -SPAWN_SCAN_RADIUS;
+      gx <= SPAWN_SCAN_RADIUS;
+      gx += GRID_STEP
+    ) {
+      for (
+        let gz = -SPAWN_SCAN_RADIUS;
+        gz <= SPAWN_SCAN_RADIUS;
+        gz += GRID_STEP
+      ) {
+        const key = `${gx},${gz}`;
+        if (existingKeys.has(key)) continue;
+        const biome = getBiome(gx, gz);
+        if (biome < 0.5) continue;
+
+        // Bias heavily toward seagrass near spawn (fewer cities/reefs so start is calm)
+        const roll = hash2d(gx * 13, gz * 17);
+        let variant: "plain" | "seagrass" | "city" | "reef";
+        if (roll < 0.65) variant = "seagrass";
+        else if (roll < 0.85) variant = "reef";
+        else variant = "plain";
+
+        const entry: (typeof sandPositions)[number] = {
+          wx: gx,
+          wz: gz,
+          variant,
+        };
+        if (variant === "seagrass")
+          entry.seagrassType =
+            SEAGRASS_TYPES[
+              Math.floor(hash2d(gx * 5, gz * 13) * SEAGRASS_TYPES.length)
+            ];
+        if (variant === "reef")
+          entry.reefBiome = hash2d(gx * 3, gz * 7) < 0.5 ? "shallow" : "deep";
+        sandPositions.push(entry);
+        existingKeys.add(key);
+      }
+    }
+  }
+
   // DEBUG: count variants
   const seas = sandPositions.filter((p) => p.variant === "seagrass").length;
   const rf = sandPositions.filter((p) => p.variant === "reef").length;
