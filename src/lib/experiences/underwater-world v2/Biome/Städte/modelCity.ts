@@ -10,17 +10,30 @@ let _domeRadius = 12;
 let _domeHeight = 10;
 let _modelLoadFailed = false;
 let _loadResolve: (() => void) | null = null;
-let _loadPromise: Promise<void>;
+let _loadPromise: Promise<void> | null = null;
 
-// Start loading immediately
-_loadPromise = new Promise((resolve) => {
-  _loadResolve = resolve;
-});
-_loadGLB();
+function _ensureLoadStarted(): void {
+  if (_loadPromise) return; // already started
+  _loadPromise = new Promise((resolve) => {
+    _loadResolve = resolve;
+  });
+  _loadGLB().catch(() => {
+    // Errors already logged by _loadGLB; ensure promise resolves.
+  });
+}
 
 async function _loadGLB(): Promise<void> {
+  // Skip entirely on the server: fetch("/models/...") has no origin in SSR.
+  if (typeof window === "undefined") {
+    _modelLoadFailed = true;
+    _loadResolve?.();
+    return;
+  }
   try {
-    const gltf = await loadGLTF(MODEL_PATH);
+    // Resolve absolute /models/... path against the current origin so it
+    // works whether we're on https://localhost:5173 or http://<lan-ip>:5173.
+    const url = new URL(MODEL_PATH, window.location.origin).href;
+    const gltf = await loadGLTF(url);
     const src = gltf.scene;
     src.updateWorldMatrix(true, false);
 
@@ -59,7 +72,8 @@ async function _loadGLB(): Promise<void> {
 }
 
 export function ensureModelLoaded(): Promise<void> {
-  return _loadPromise;
+  _ensureLoadStarted();
+  return _loadPromise as Promise<void>;
 }
 
 export function isModelReady(): boolean {
