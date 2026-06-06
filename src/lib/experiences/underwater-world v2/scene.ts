@@ -712,6 +712,16 @@ export function tick(
           sp.wz,
         );
         s.scene.add(meadow.group);
+        // DEBUG: confirm seagrass creation
+        if (!(s as { _seagrassCreated?: boolean })._seagrassCreated) {
+          (s as { _seagrassCreated?: boolean })._seagrassCreated = true;
+          console.log(
+            `[SEAGRASS] Created first meadow: type=${sp.seagrassType} ` +
+              `pos=(${sp.wx.toFixed(0)},${sp.wz.toFixed(0)}) ` +
+              `blades=${meadow.blades.length} slot=${meadow.slotIndex} ` +
+              `playerDist=${Math.sqrt((sp.wx - pos.x) ** 2 + (sp.wz - pos.z) ** 2).toFixed(0)}m`,
+          );
+        }
       }
 
       if (sp.variant === "city") {
@@ -783,6 +793,27 @@ export function tick(
       );
       updateCityPulse(e.city, elapsed, true, sy);
     }
+  }
+
+  // DEBUG: one-time stats dump
+  if (
+    !(s as { _statsDumped?: boolean })._statsDumped &&
+    s.sandEntries.length > 0
+  ) {
+    (s as { _statsDumped?: boolean })._statsDumped = true;
+    const seagrassEntries = s.sandEntries.filter((e) => e.meadow);
+    const types = seagrassEntries.map((e) => e.seagrassType);
+    const totalBlades = seagrassEntries.reduce(
+      (sum, e) => sum + (e.meadow?.blades.length ?? 0),
+      0,
+    );
+    console.log(
+      `[SEAGRASS] Active sand entries: ${s.sandEntries.length} total, ` +
+        `${seagrassEntries.length} seagrass (${types.join(",")}), ` +
+        `${totalBlades} blades, ` +
+        `${s.sandEntries.filter((e) => e.city).length} cities, ` +
+        `${s.sandEntries.filter((e) => e.reef || e.modelCoralReef).length} reefs`,
+    );
   }
 
   // ── Coral streaming (slot-tracking) ──

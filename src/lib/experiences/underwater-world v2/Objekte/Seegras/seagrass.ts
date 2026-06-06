@@ -230,7 +230,12 @@ export interface SeagrassMeadow {
 
 function writeMeadowMatrices(meadow: SeagrassMeadow, elapsed: number): void {
   const imesh = instanceMeshes[meadow.type];
-  if (!imesh) return;
+  if (!imesh) {
+    console.warn(
+      `[SEAGRASS] No InstancedMesh for type "${meadow.type}" — did you call initSeagrassSystem()?`,
+    );
+    return;
+  }
 
   const cfg = CONFIG[meadow.type];
   const offset = meadow.slotIndex * 220;
@@ -332,6 +337,9 @@ export function initSeagrassSystem(scene: THREE.Scene): void {
   (Object.keys(CONFIG) as SeagrassType[]).forEach((type) => {
     ensureResources(type, scene);
   });
+  console.log(
+    `[SEAGRASS] System init: 3 InstancedMesh, ${MAX_BLADES_PER_TYPE} blades/type`,
+  );
 }
 
 // ── Dispose ──
