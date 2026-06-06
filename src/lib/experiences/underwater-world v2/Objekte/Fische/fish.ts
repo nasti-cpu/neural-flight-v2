@@ -21,6 +21,12 @@ export interface FishSchool {
 	migrateLastChangeAt: number;
 	spawnTime: number;
 	dirChangeTimer: number;
+	// World-space centroid of the school (mesh.position + mean(local positions)).
+	// Echo system uses this so each school is targeted where its fish actually are,
+	// not at the InstancedMesh origin.
+	centroidX: number;
+	centroidY: number;
+	centroidZ: number;
 }
 
 // ── Factory ──
@@ -74,9 +80,9 @@ export async function loadFishGeometry(): Promise<THREE.BufferGeometry | null> {
 }
 
 const FISH_COLORS: [number, number, number][] = [
-	[0.0, 1.0, 1.0], [1.0, 0.6, 0.2], [1.0, 0.2, 0.8],
-	[0.2, 1.0, 0.6], [1.0, 1.0, 0.2], [0.6, 0.2, 1.0],
-	[1.0, 0.4, 0.4], [0.2, 0.8, 1.0],
+	[0.0, 0.45, 0.45], [0.45, 0.27, 0.09], [0.45, 0.09, 0.36],
+	[0.09, 0.45, 0.27], [0.45, 0.45, 0.09], [0.27, 0.09, 0.45],
+	[0.45, 0.18, 0.18], [0.09, 0.36, 0.45],
 ];
 
 export interface StandardSchoolConfig {
@@ -164,6 +170,9 @@ export function createFishSchool(
 		migrateLastChangeAt: -999,
 		spawnTime: -1,
 		dirChangeTimer: 2 + Math.random() * 4,
+		centroidX: 0,
+		centroidY: 0,
+		centroidZ: 0,
 	};
 }
 
@@ -285,6 +294,12 @@ export function updateFishSchool(
 	avgZ /= count;
 	const aLen = Math.sqrt(avgVx * avgVx + avgVy * avgVy + avgVz * avgVz);
 	if (aLen > 0.01) { avgVx /= aLen; avgVy /= aLen; avgVz /= aLen; }
+
+	// Store world-space centroid so echo / collision systems can target the school
+	// where the fish actually are, not the InstancedMesh anchor.
+	school.centroidX = school.mesh.position.x + avgX;
+	school.centroidY = school.mesh.position.y + avgY;
+	school.centroidZ = school.mesh.position.z + avgZ;
 
 	for (let i = 0; i < count; i++) {
 		const i3 = i * 3;

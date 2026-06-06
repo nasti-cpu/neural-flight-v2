@@ -953,8 +953,12 @@ export function tick(
     const echoTargets: { key: string; x: number; z: number }[] = [];
 
     for (let fi = 0; fi < s.fishSchools.length; fi++) {
-      const p = s.fishSchools[fi].mesh.position;
-      echoTargets.push({ key: `fish_${fi}`, x: p.x, z: p.z });
+      // Use the live world-space centroid computed by updateFishSchool
+      // (mesh.position + mean local positions). Otherwise the InstancedMesh
+      // anchor is fixed at the player-relative spawn point and every school
+      // gets hit by the echo ring on the same frame.
+      const school = s.fishSchools[fi];
+      echoTargets.push({ key: `fish_${fi}`, x: school.centroidX, z: school.centroidZ });
     }
 
     if (s.startCityCity) {
