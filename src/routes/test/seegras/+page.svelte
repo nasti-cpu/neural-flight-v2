@@ -18,7 +18,10 @@
         SeagrassType,
         SeagrassMeadow,
     } from "$lib/experiences/underwater-world v2/Objekte/Seegras/seagrass";
-    import { createProceduralFishGeometry } from "$lib/experiences/underwater-world v2/Objekte/Fische/fish";
+    import {
+        loadFishGeometry,
+        createProceduralFishGeometry,
+    } from "$lib/experiences/underwater-world v2/Objekte/Fische/fish";
 
     const SCALE_FISHES: {
         label: string;
@@ -55,7 +58,7 @@
         building = false;
     }
 
-    onMount(() => {
+    onMount(async () => {
         renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -84,8 +87,11 @@
 
         meadow = createSeagrassMeadow("algae", getSandHeight);
 
-        // Add 3 scale-reference fish
-        const fishGeo = createProceduralFishGeometry();
+        // Try loading the GLTF fish model (same as VR), fall back to procedural
+        const modelGeo =
+            (await loadFishGeometry()) ?? createProceduralFishGeometry();
+
+        // Add 3 scale-reference fish using the same model as VR v2
         fishMaterial = new THREE.MeshStandardMaterial({
             roughness: 0.3,
             metalness: 0.1,
@@ -96,7 +102,7 @@
         for (const sf of SCALE_FISHES) {
             const mat = fishMaterial.clone();
             mat.color.set(sf.color);
-            const mesh = new THREE.Mesh(fishGeo, mat);
+            const mesh = new THREE.Mesh(modelGeo, mat);
             mesh.position.set(
                 sf.pos[0],
                 getSandHeight(sf.pos[0], sf.pos[2]) + sf.pos[1],
