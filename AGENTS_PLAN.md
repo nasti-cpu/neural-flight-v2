@@ -46,6 +46,12 @@
 - **Fisch-Farben dunkler** (Teil von Commit `4047dad`) — `FISH_COLORS` mit Faktor 0.45 multipliziert (8x Farben). Besserer Kontrast zur Wasser-Atmosphäre, weniger "Leuchten aus dem Wasser".
 - **Seagrass → InstancedMesh (Item 2a)** (Commit `ffd5f75`) — 3 geteilte `InstancedMesh` (algae/long/bushy) ersetzen ~2.200 separate Meshes. Slot-System (max 12 meadows/type). `DynamicDrawUsage`, `initSeagrassSystem()`, `updateSeagrassSway()` schreibt direkt `instanceMatrix`. Test-Seite (`/test/seegras`) angepasst.
 - **VR-Controller + Kamera-Rig (Bugs #7, #8)** (Commit `ffd5f75`) — `updatePlayer` liest Pitch/Roll/Speed vom Controller und steuert das neue Kamera-Rig (`THREE.Group` als `camera`-Parent). Fische folgen gedämpftem `fishYaw` + `fishFollowPos` statt rohem Headset-Pose. Auto-drift nutzt `getWorldQuaternion` für korrekte kombinierte Orientierung.
+- **Float-Speed Boost** (Commit `2cd4c03`) — Basis-Drift 2→4 m/s, Space-Boost Max 20→30, WASD 6→10, sanfterer Decay nach Boost (min 4 statt 1.5).
+- **Sand-Dünen organisch** (Commit `13e8ac1`) — Radialer Smoothstep-Edge-Falloff (10m Zone), Höhe fades weich zu 0 an den Rändern. Dünen matchen Terrain-Amplitude/Scale. Keine harten Quadrat-Kanten mehr.
+- **Seagrass-InstancedMesh-Fix** (Commit `2ce5283`) — `writeMeadowMatrices()` sofort nach `createSeagrassMeadow` aufgerufen. Blades vorher unsichtbar bis zum ersten Sway-Frame (alle Instanzen bei scale:0).
+- **Biome-Verteilung dichter** (Commit `9e21a9b`) — Seegras 40→50%, Riff 20→30%, SAND_PATCH_COUNT 400→600. 50% mehr Patches, 80% Flora.
+- **Test-Seite Seegras** (Commits `6f5ee7c`, `2a7d89c`) — 3 Skalierungs-Fische (klein/mittel/groß) zum Größenvergleich, GLTF-Modell wie in VR v2.
+- **Sand-Streaming-Fix (Bug #9)** (Commits `6f136cb`, `cd6d1fb`) — Root Cause: `hash2d`-Positionen über ±1400m, 0 innerhalb 350m vom Spawn → kein Seegras. Fix: Cap 10→30, Init-Radius 200→350, Stream-Rate 8→16 + Grid-Scan 40m-Raster ±400m um Spawn (65% Seegras).
 
 ### Ausstehend
 - ~~Echoortung in die VR-Welt integrieren~~
@@ -124,6 +130,7 @@
 | 6 | **`getTerrainHeight` jeden Frame** pro Sand-Entry (8 noise-calls) | Optimierung geplant (Item 2d) |
 | 7 | **Fische-Jitter in VR** — Fische schwingen bei Kopfdrehung mit | **Gefixt in `ffd5f75`** (fishYaw/fishFollowPos Lerp) |
 | 8 | **Kein Controller-Support im VR** — `updatePlayer` war leer | **Gefixt in `ffd5f75`** (Pitch→Vertikal, Roll→Yaw via Rig) |
+| 9 | **Seegras unsichtbar in VR** — 0 Sand-Patches innerhalb 350m vom Spawn (hash2d-Verteilung) | **Gefixt in `cd6d1fb`** (Grid-Scan + Cap/Radius-Erhöhung) |
 
 ## Offene Fragen
 - Echoortung: Eigener System-Kanal oder direkt in `tick()` integrieren? → Aktuell in `tick()`.
@@ -137,8 +144,15 @@
 | CHUNK_SIZE | 400m | welt/terrain.ts |
 | CHUNK_SEGMENTS | 48 | welt/terrain.ts |
 | CORAL_STREAM_RADIUS | 300m | welt/chunks.ts |
-| SAND_STREAM_PER_FRAME | 8 | scene.ts |
-| SAND_PATCH_COUNT | 400 | scene.ts |
+| SAND_STREAM_PER_FRAME | 16 | scene.ts |
+| SAND_PATCH_COUNT | 600 | scene.ts |
+| STREAM_INIT_RADIUS | 350m | scene.ts |
+| SAND_ENTRY_CAP | 30 | scene.ts |
+| SPAWN_SCAN_RADIUS | 400m | scene.ts |
+| DUNE_FALLOFF_ZONE | 10m | Biome/Sand/sand.ts |
+| DRIFT_SPEED_BASE | 4 m/s | scene.ts |
+| DRIFT_SPEED_MAX | 30 m/s | scene.ts |
+| WASD_SPEED | 10 m/s | scene.ts |
 | CITY_SPACING_MIN | 150m | scene.ts |
 | GUIDANCE_ARRIVAL_RADIUS | 20m | scene.ts |
 | DOME_RADIUS | 65m | Biome/Städte/city.ts |
@@ -161,25 +175,21 @@
 ## Letzte Commits (für Kontext)
 
 ```
+cd6d1fb fix(sand): grid-scan 400m around spawn to guarantee seagrass near player — random hash2d left gaps
+f8d0b3a debug(seagrass): add setup + stream entrypoint logs to trace why meadows don't spawn
+87a5b8a debug(seagrass): add console logs to trace meadow creation in VR experience
+6f136cb fix(sand): increase active cap 10→30, init radius 200→350, stream/frame 8→16 — seagrass was barely spawning
+2a7d89c fix(test/seegras): use GLTF fish model (same as VR v2), procedural fallback
+6f5ee7c feat(test/seegras): add 3 scale-reference fish (small/medium/large) for size comparison
+9e21a9b feat(biome): increase seagrass 40→50%, reef 20→30%, patches 400→600 for denser flora
+2ce5283 fix(seagrass): write instance matrices on creation — blades were invisible until first sway frame
+13e8ac1 feat(sand): organic dune blending — radial smoothstep edge falloff, match terrain amp/scale
+2cd4c03 feat(speed): boost float speed — base 2→4 m/s, max 20→30, wasd 6→10, gentler decay after boost
+d81f191 docs(AGENTS_PLAN): mark Seagrass (2a), Bug #7, #8 as done; bump open tasks
 ffd5f75 perf(seagrass): InstancedMesh slot-based (Item 2a) + fix(player): VR controller steering (Bug #8) + fix(fish): damped follow prevents VR jitter (Bug #7)
-f1fc2de feat(coral): add ENABLE_MODEL_CORALS flag, default off — spart ~140MB VRAM+Netzwerk, prozeduraler Fallback läuft automatisch
-4047dad fix(fish-echo): use live world-space centroid for per-school flash (Bug #1 + #4) + FISH_COLORS mit Faktor 0.45 abgedunkelt
-8da92c7 docs(AGENTS_PLAN, ARCHITECTURE): sync with current state (Kolonie, perf, spawn)
-be18adb fix(scene): move start-city to 100-180m and lift 2m above terrain
-c6f58e7 chore(test/staedte): pull camera back for all 4 variants
-1e125f0 feat(scene): procedural start-city (no 154MB GLB), 30-80m from spawn
-c810afc fix(modelCity): SSR-safe GLB load (no Invalid URL, no premature fetch)
-4a30123 feat(city): add 4th variant 'Kolonie' — underwater human habitat colony
-59db68d docs(AGENTS_PLAN): document perf wins, add 5 next-step items
-23fedb5 perf(underwater-world-v2): allocation-free per-frame hot paths
-12c70c4 chore(deps): add three-mesh-bvh, update AGENTS_PLAN + architecture docs
-894036e chore(assets): add underwater-world v2 model + audio assets
-8ea73c2 feat(underwater-world-v2): restructure into Biome/Objekte/Sinne/welt modules
-4c79c45 merge upstream/main: keep both underwater-world and visio-technologica experiences
-b1d658a fix: NaN positions in coral geo, shared instanceColor buffer, AudioContext lazy init
-983510e fix: doppelte Beleuchtung entfernt, 6 High-Priority Bugs gefixt
-47dc15b Echoortung in VR-Welt integriert (Punkt 1)
-947c134 AGENTS_PLAN: abgeschlossene Punkte durchgestrichen, v2-Fortschritt dokumentiert
+105b841 docs(AGENTS_PLAN): sync with bug #1 fix + coral disable + fish colors
+f1fc2de feat(coral): add ENABLE_MODEL_CORALS flag, default off
+4047dad fix(fish-echo): use live world-space centroid for per-school flash
 ```
 
 ---
@@ -230,6 +240,7 @@ bun run dev
 4. **`scene.traverse` in `applySettings` ersetzen** (Item 2e) — Lichtquellen direkt referenzieren
 5. **Wasser-Shader / God Rays / Caustics** (Item 3) — visuelles Upgrade
 6. **Delfin-Neuschreibung** (Item 4) — zurück ins Spiel
+7. **Debug-Logs entfernen** — `[SEAGRASS]` Console-Logs aus `scene.ts` + `seagrass.ts` nach Bestätigung des Fixes
 
 ### Quick Context: was funktioniert bereits
 - ✅ 4 Stadt-Varianten prozedural in `Biome/Städte/city.ts`
@@ -239,6 +250,9 @@ bun run dev
 - ✅ Performance: guidance allokationsfrei, scene.ts Color-Pooling, dome ohne clearcoat, Seagrass → InstancedMesh
 - ✅ Korallen-Modelle deaktiviert (~140MB gespart): `ENABLE_MODEL_CORALS = false` → prozeduraler Riff-Fallback läuft
 - ✅ VR-Controller-Steuerung via Kamera-Rig, Fische gedämpft (kein Headset-Jitter mehr)
+- ✅ Schnelleres Floating (4 m/s Basis, 30 m/s Boost, WASD 10 m/s)
+- ✅ Sand-Dünen mit weichem Edge-Falloff, matchen Terrain-Amplitude
+- ✅ Seegras-Streaming: Grid-Scan garantiert Patches ≤400m vom Spawn, 80% Flora (50% Seegras + 30% Riff)
 
 ### Was der User typischerweise will
 - Mehr Polish (Wasser, Lighting, Sound)
