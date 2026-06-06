@@ -77,7 +77,7 @@ import {
 // ── Constants ──
 
 const SAND_PATCH_COUNT = 600;
-const SAND_STREAM_PER_FRAME = 8;
+const SAND_STREAM_PER_FRAME = 16;
 const CORAL_MAX_PER_TYPE = 500;
 const CORAL_STREAM_RADIUS = 300;
 
@@ -85,7 +85,7 @@ const CITY_VARIANTS: CityVariant[] = ["altstadt", "zentrum", "vorort"];
 const SEAGRASS_TYPES: ("algae" | "long" | "bushy")[] = SEAGRASS_META.map(
   (m) => m.id,
 );
-const STREAM_INIT_RADIUS = 200;
+const STREAM_INIT_RADIUS = 350;
 const CITY_DOME_RADIUS = 65;
 const CITY_SPACING_MIN = 150;
 const CITY_SPACING_MAX = 350;
@@ -675,10 +675,10 @@ export function tick(
     }
   }
 
-  if (s.sandEntries.length < 10) {
+  if (s.sandEntries.length < 30) {
     const loaded = new Set(s.sandEntries.map((e) => `${e.wx},${e.wz}`));
     for (const sp of s.sandPositions) {
-      if (s.sandEntries.length >= 10 + SAND_STREAM_PER_FRAME) break;
+      if (s.sandEntries.length >= 30 + SAND_STREAM_PER_FRAME) break;
       const key = `${sp.wx},${sp.wz}`;
       if (loaded.has(key)) continue;
       const dx = sp.wx - pos.x;
