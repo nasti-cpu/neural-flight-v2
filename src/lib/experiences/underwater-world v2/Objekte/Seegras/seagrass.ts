@@ -226,6 +226,28 @@ export interface SeagrassMeadow {
   group: THREE.Group; // Keep for scene hierarchy compatibility, but remains empty
 }
 
+// ── Write blade matrices (shared between init and per-frame sway) ──
+
+function writeMeadowMatrices(meadow: SeagrassMeadow, elapsed: number): void {
+  const imesh = instanceMeshes[meadow.type];
+  if (!imesh) return;
+
+  const cfg = CONFIG[meadow.type];
+  const offset = meadow.slotIndex * 220;
+
+  for (let i = 0; i < meadow.blades.length; i++) {
+    const b = meadow.blades[i];
+    const sway = Math.sin(elapsed * cfg.speed + b.phase) * b.amp;
+
+    _dummy.position.set(b.pos.x + sway, b.pos.y, b.pos.z);
+    _dummy.rotation.copy(b.rot);
+    _dummy.scale.copy(b.scale);
+    _dummy.updateMatrix();
+    imesh.setMatrixAt(offset + i, _dummy.matrix);
+  }
+  imesh.instanceMatrix.needsUpdate = true;
+}
+
 // ── Create meadow ──
 
 const _mat4 = new THREE.Matrix4();
@@ -288,6 +310,9 @@ export function createSeagrassMeadow(
     blades.push(b);
   }
 
+  // Write blades immediately (not just on first sway update)
+  writeMeadowMatrices({ type, slotIndex, blades, group }, 0);
+
   return { type, slotIndex, blades, group };
 }
 
@@ -296,28 +321,9 @@ export function createSeagrassMeadow(
 export function updateSeagrassSway(
   meadow: SeagrassMeadow,
   elapsed: number,
-  type: SeagrassType,
+  _type: SeagrassType,
 ): void {
-  // Ensure the mesh exists (if created before first update or in test page)
-  // We need a scene reference. In VR experience, we can rely on scene.ts calling init.
-  // But for robustness, we'll check if the mesh exists.
-  const imesh = instanceMeshes[type];
-  if (!imesh) return;
-
-  const cfg = CONFIG[type];
-  const offset = meadow.slotIndex * 220;
-
-  for (let i = 0; i < meadow.blades.length; i++) {
-    const b = meadow.blades[i];
-    const sway = Math.sin(elapsed * cfg.speed + b.phase) * b.amp;
-
-    _dummy.position.set(b.pos.x + sway, b.pos.y, b.pos.z);
-    _dummy.rotation.copy(b.rot);
-    _dummy.scale.copy(b.scale);
-    _dummy.updateMatrix();
-    imesh.setMatrixAt(offset + i, _dummy.matrix);
-  }
-  imesh.instanceMatrix.needsUpdate = true;
+  writeMeadowMatrices(meadow, elapsed);
 }
 
 // ── Global Init (for scene.ts) ──
