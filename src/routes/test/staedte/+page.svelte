@@ -76,7 +76,7 @@
             0.1,
             500,
         );
-        camera.position.set(0, 30, 85);
+        camera.position.set(0, 45, 110);
         camera.lookAt(0, 0, 0);
 
         const ambient = new THREE.AmbientLight(0xffffff, 0.3);
@@ -88,7 +88,7 @@
 
         renderer.setAnimationLoop(() => {
             const elapsed = clock.elapsedTime;
-            camera.position.set(0, 30, 85);
+            camera.position.set(0, 45, 110);
             camera.lookAt(0, 0, 0);
             if (city) updateCityPulse(city, elapsed, true, 0);
             renderer.render(scene, camera);
