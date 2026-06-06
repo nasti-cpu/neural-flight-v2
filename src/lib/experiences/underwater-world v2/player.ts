@@ -23,8 +23,8 @@ export function updatePlayer(
 
   // 3. Speed Commands
   if (speed.accelerate) {
-    s.driftSpeed = Math.min(20, s.driftSpeed + delta * 15);
+    s.driftSpeed = Math.min(30, s.driftSpeed + delta * 25);
   } else if (speed.brake) {
-    s.driftSpeed = Math.max(1.5, s.driftSpeed - delta * 10);
+    s.driftSpeed = Math.max(4, s.driftSpeed - delta * 5);
   }
 }

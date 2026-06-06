@@ -445,8 +445,8 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldState> {
     camera,
     rig,
     scene,
-    driftSpeed: 2,
-    wasdSpeed: 6,
+    driftSpeed: 4,
+    wasdSpeed: 10,
     lightIntensity: 1.5,
     terrainAmplitude: amplitude,
     terrainScale: scale,
@@ -604,13 +604,13 @@ export function tick(
   // Space boost
   const spaceDown = s.keys.has("Space");
   if (spaceDown) {
-    s.driftSpeed = Math.min(20, s.driftSpeed + delta * 30);
+    s.driftSpeed = Math.min(30, s.driftSpeed + delta * 50);
     if (s.audio && !s.audio.wasSpace) {
       s.audio.wasSpace = true;
       playMovementSound(s.audio);
     }
   } else {
-    s.driftSpeed = Math.max(1.5, s.driftSpeed - delta * 8);
+    s.driftSpeed = Math.max(4, s.driftSpeed - delta * 4);
     if (s.audio) s.audio.wasSpace = false;
   }
 
