@@ -9,7 +9,7 @@
 	import { CITY } from "$lib/experiences/insect-world/Objekte/Stadt/city";
 	import { BIENEN } from "$lib/experiences/insect-world/Objekte/Bienen/bienen";
 	import { SCHMETTERLINGE } from "$lib/experiences/insect-world/Objekte/Schmetterlinge/schmetterlinge";
-	import { CompoundEyeEffect, VARIANTS } from "$lib/three/postfx/compound-eye";
+	import { CompoundEyeEffect, VARIANTS } from "$lib/experiences/insect-world/Objekte/Facettenauge/facettenauge";
 
 	let canvas: HTMLCanvasElement;
 	let renderer: THREE.WebGLRenderer;
