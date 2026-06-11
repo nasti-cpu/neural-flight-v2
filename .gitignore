@@ -33,3 +33,7 @@ assets/
 
 # Hotspot config (contains password)
 scripts/hotspot/hotspot.conf
+
+# Duplicate GLB files in source tree (originals live in static/models/)
+src/lib/experiences/insect-world/Objekte/Stadt/*.glb
+src/lib/experiences/insect-world/Objekte/Bienen/*.glb
