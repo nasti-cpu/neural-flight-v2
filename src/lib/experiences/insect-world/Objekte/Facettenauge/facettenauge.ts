@@ -31,11 +31,9 @@ const fragmentShader = `
 	uniform float uCellSize;
 	uniform float uLineWidth;
 	uniform float uOpacity;
-	uniform float uTime;
 
 	varying vec2 vUv;
 
-	const float PI = 3.14159265359;
 	const float SQRT3 = 1.73205080757;
 
 	float sdHex(vec2 p) {
@@ -44,25 +42,22 @@ const fragmentShader = `
 	}
 
 	float hexGridSDF(vec2 p) {
-		float w = 2.0;
-		float h = SQRT3;
-		vec2 grid = vec2(w, h);
-
+		vec2 grid = vec2(2.0, SQRT3);
 		vec2 id = floor(p / grid);
-		float off = mod(id.y, 2.0) * 0.5;
-		vec2 bc = (id + vec2(off, 0.5)) * grid;
-		float bd = distance(p, bc);
+		vec2 bestId = id;
+		float bestDsq = 1e10;
 
-		for (int dy = -1; dy <= 1; dy++) {
-			for (int dx = -1; dx <= 1; dx++) {
-				vec2 n = id + vec2(float(dx), float(dy));
-				float no = mod(n.y, 2.0) * 0.5;
-				vec2 nc = (n + vec2(no, 0.5)) * grid;
-				float d = distance(p, nc);
-				if (d < bd) { bd = d; bc = nc; }
-			}
+		for (int i = 0; i < 4; i++) {
+			vec2 nid = id + vec2(float(i & 1), float(i >> 1));
+			float no = mod(nid.y, 2.0) * 0.5;
+			vec2 nc = (nid + vec2(no + 0.5, 0.5)) * grid;
+			vec2 d = p - nc;
+			float dsq = d.x * d.x + d.y * d.y;
+			if (dsq < bestDsq) { bestDsq = dsq; bestId = nid; }
 		}
-		return sdHex(p - bc);
+		float no = mod(bestId.y, 2.0) * 0.5;
+		vec2 center = (bestId + vec2(no + 0.5, 0.5)) * grid;
+		return sdHex(p - center);
 	}
 
 	void main() {
@@ -77,8 +72,8 @@ const fragmentShader = `
 
 export class CompoundEyeEffect {
 	private renderer: THREE.WebGLRenderer;
-	private material: THREE.ShaderMaterial;
-	private quad: THREE.Mesh;
+	readonly material: THREE.ShaderMaterial;
+	readonly quad: THREE.Mesh;
 	private camera: THREE.OrthographicCamera;
 
 	constructor(renderer: THREE.WebGLRenderer, width: number, height: number) {

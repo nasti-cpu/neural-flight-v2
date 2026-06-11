@@ -76,7 +76,20 @@ Before writing code:
 
 ---
 
-## Example Prompts
+### Latest Session
+
+Rewrote `src/lib/experiences/insect-world/scene.ts` (2025-06-11):
+- Mirrors `/test/erlebnis` — loads GLB flowers (3 types × 25), city, bees (15), butterflies (10)
+- Pheromone trails (variant 3 — Staubspur) on every 5th flower
+- Procedural grass (800 cones with wind sway), clouds, sky dome, water
+- City clearance removes flowers from the city rectangle
+- Spiders Lily uses `updateWorldMatrix` + `applyMatrix4` before InstancedMesh; others don't
+- Camera controlled by `FlightPlayer` (pitch/roll via WebSocket → `updatePlayer` in `player.ts`)
+- Compound eye effect skipped for VR (screen-space quad doesn't work in WebXR per-eye rendering)
+- `svelte-check` passes (0 errors, 0 warnings)
+- VR flow: select "Insect World" on main page → `/vr` → loads full scene via manifest
+
+# Example Prompts
 
 ### Add a New Object
 

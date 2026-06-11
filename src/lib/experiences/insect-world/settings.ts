@@ -82,14 +82,14 @@ export function applySettings(
 				const count = (s.clouds.userData.count as number) ?? 20;
 				disposeClouds(s.clouds);
 				scene.remove(s.clouds);
-			s.clouds = createClouds({
-				count,
-				spread: 300,
-				heightMin: 80,
-				heightMax: 150,
-				blobCount: [4, 8],
-				blobRadius: [8, 18],
-			});
+				s.clouds = createClouds({
+					count,
+					spread: 300,
+					heightMin: 80,
+					heightMax: 150,
+					blobCount: [4, 8],
+					blobRadius: [8, 18],
+				});
 				scene.add(s.clouds);
 				s.cloudRebuildTimer = null;
 			}, 500);
@@ -98,17 +98,6 @@ export function applySettings(
 
 		case "windSpeed":
 			s.windSpeed = value as number;
-			break;
-
-		case "grassHeight":
-			s.grassGroup.scale.y = (value as number) / 2;
-			break;
-
-		case "flowerDensity":
-			break;
-
-		case "flowerColor":
-			s.flowerMaterial.color.set(value as string);
 			break;
 
 		default:

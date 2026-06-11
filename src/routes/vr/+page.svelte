@@ -30,6 +30,7 @@ const clock = new THREE.Clock();
 let lastOrientation = { pitch: 0, roll: 0 };
 let lastSpeed = { accelerate: false, brake: false };
 let removeResizeListener: (() => void) | null = null;
+const keys = { w: false, a: false, s: false, d: false, shift: false, ctrl: false };
 
 onMount(() => {
 	scene = new THREE.Scene();
@@ -44,6 +45,19 @@ onMount(() => {
 
 	vrButton = VRButton.createButton(renderer);
 	document.body.appendChild(vrButton);
+
+	function onKey(e: KeyboardEvent, pressed: boolean) {
+		switch (e.code) {
+			case "KeyW": keys.w = pressed; break;
+			case "KeyA": keys.a = pressed; break;
+			case "KeyS": keys.s = pressed; break;
+			case "KeyD": keys.d = pressed; break;
+			case "ShiftLeft": case "ShiftRight": keys.shift = pressed; break;
+			case "ControlLeft": case "ControlRight": keys.ctrl = pressed; break;
+		}
+	}
+	addEventListener("keydown", (e) => onKey(e, true));
+	addEventListener("keyup", (e) => onKey(e, false));
 
 	// Load whichever experience is selected (persisted in localStorage)
 	const experienceId = getActiveExperienceId();
@@ -91,7 +105,20 @@ onMount(() => {
 					}
 				}
 
-				exp.manifest.updatePlayer(lastOrientation, lastSpeed, exp.state, delta);
+				const kPitch = (keys.w ? -30 : 0) + (keys.s ? 30 : 0);
+			const kRoll = (keys.a ? -30 : 0) + (keys.d ? 30 : 0);
+			if (kPitch !== 0 || kRoll !== 0) {
+				lastOrientation = { pitch: kPitch, roll: kRoll };
+			}
+			if (keys.shift) {
+				lastSpeed = { accelerate: true, brake: false };
+			} else if (keys.ctrl) {
+				lastSpeed = { accelerate: false, brake: true };
+			} else if (kPitch === 0 && kRoll === 0) {
+				lastSpeed = { accelerate: false, brake: false };
+			}
+
+			exp.manifest.updatePlayer(lastOrientation, lastSpeed, exp.state, delta);
 				const result = exp.manifest.tick(exp.state, {
 					delta,
 					elapsed: clock.elapsedTime,
@@ -107,7 +134,10 @@ onMount(() => {
 				renderer.render(scene, renderCamera);
 			});
 		},
-	);
+	).catch((err: unknown) => {
+		console.error("Failed to load experience:", err);
+		experienceName = "Error: " + (err instanceof Error ? err.message : String(err));
+	});
 
 	return () => {
 		removeResizeListener?.();

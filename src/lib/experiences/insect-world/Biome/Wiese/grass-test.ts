@@ -1,72 +1,109 @@
 import * as THREE from "three";
 
-const GRASS_COUNT = 5000;
-const FIELD_SIZE = 45;
-const CURVATURE = 0.0025;
-const GROUND_RADIUS = (FIELD_SIZE + 20) / 2;
-
-function groundHeight(x: number, z: number): number {
-	const dist = Math.sqrt(x * x + z * z);
-	return -CURVATURE * dist * dist;
+export interface GrassMeadowConfig {
+	fieldSize?: number;
+	grassCount?: number;
+	curvature?: number;
 }
 
-interface SwayData {
-	baseX: number;
-	baseZ: number;
-	baseY: number;
-	baseRotY: number;
-	phase: number;
-	speed: number;
-	height: number;
-	scaleX: number;
-	scaleZ: number;
-}
+const DEFAULTS: Required<GrassMeadowConfig> = {
+	fieldSize: 45,
+	grassCount: 5000,
+	curvature: 0.0025,
+};
+
+const vertexShader = `
+	attribute float aPhase;
+	attribute float aSpeed;
+	attribute float aBaseX;
+	attribute float aBaseZ;
+	attribute float aHeight;
+
+	uniform float uTime;
+
+	varying vec3 vNormal;
+
+	void main() {
+		float swayX = sin(uTime * aSpeed + aPhase + aBaseX * 0.5) * 0.06 * position.y;
+		float swayZ = sin(uTime * aSpeed * 0.7 + aPhase + aBaseZ * 0.5) * 0.04 * position.y;
+		vec3 pos = position + vec3(swayX, 0.0, swayZ);
+		vec3 objectNormal = normalize(instanceMatrix * vec4(normal, 0.0)).xyz;
+
+		vec4 worldPos = instanceMatrix * vec4(pos, 1.0);
+		vNormal = normalize((modelMatrix * vec4(objectNormal, 0.0)).xyz);
+
+		gl_Position = projectionMatrix * viewMatrix * worldPos;
+	}
+`;
+
+const fragmentShader = `
+	uniform vec3 uColor;
+	varying vec3 vNormal;
+
+	void main() {
+		vec3 lightDir = normalize(vec3(0.5, 0.8, 0.3));
+		float diff = max(dot(vNormal, lightDir), 0.0);
+		float ambient = 0.4;
+		float light = ambient + diff * 0.6;
+		gl_FragColor = vec4(uColor * light, 1.0);
+	}
+`;
 
 export class GrassMeadow {
 	private scene: THREE.Scene;
+	private config: Required<GrassMeadowConfig>;
 	private grassMesh: THREE.InstancedMesh | null = null;
-	private grassMat: THREE.MeshStandardMaterial | null = null;
+	private grassMat: THREE.ShaderMaterial | null = null;
 	private grassGeo: THREE.BufferGeometry | null = null;
-	private swayData: SwayData[] = [];
 	private dummy = new THREE.Object3D();
+	private skipFrame = 0;
 
-	constructor(scene: THREE.Scene) {
+	constructor(scene: THREE.Scene, config?: GrassMeadowConfig) {
 		this.scene = scene;
+		this.config = { ...DEFAULTS, ...config };
 	}
 
 	build(): void {
+		const c = this.config;
 		const grassColor = "#6aaf4c";
+		const groundRadius = (c.fieldSize + 20) / 2;
 
-		const groundSegs = 40;
-		const groundGeo = new THREE.PlaneGeometry(GROUND_RADIUS * 2, GROUND_RADIUS * 2, groundSegs, groundSegs);
+		function groundHeight(x: number, z: number): number {
+			const dist = Math.sqrt(x * x + z * z);
+			return -c.curvature * dist * dist;
+		}
+
+		const groundSegs = Math.max(20, Math.round(c.fieldSize / 2));
+		const groundGeo = new THREE.PlaneGeometry(groundRadius * 2, groundRadius * 2, groundSegs, groundSegs);
 		groundGeo.rotateX(-Math.PI / 2);
 		const gPos = groundGeo.attributes.position as THREE.Float32BufferAttribute;
 		for (let i = 0; i < gPos.count; i++) {
 			const x = gPos.getX(i);
 			const z = gPos.getZ(i);
 			const dist = Math.sqrt(x * x + z * z);
-			if (dist > GROUND_RADIUS) {
-				const edge = GROUND_RADIUS;
-				const fade = 1 - (dist - edge) / (GROUND_RADIUS * 0.3);
-				gPos.setY(i, groundHeight(x, z) * Math.max(0, fade));
+			const gh = groundHeight(x, z);
+			if (dist > groundRadius) {
+				const fade = 1 - (dist - groundRadius) / (groundRadius * 0.3);
+				gPos.setY(i, gh * Math.max(0, fade));
 			} else {
-				gPos.setY(i, groundHeight(x, z));
+				gPos.setY(i, gh);
 			}
 		}
 		gPos.needsUpdate = true;
 		groundGeo.computeVertexNormals();
 
-		const groundMat = new THREE.MeshStandardMaterial({ color: grassColor, roughness: 1 });
+		const groundMat = new THREE.MeshBasicMaterial({ color: grassColor });
 		const ground = new THREE.Mesh(groundGeo, groundMat);
-		ground.receiveShadow = true;
+		ground.receiveShadow = false;
 		this.scene.add(ground);
 
 		const bumpGeo = new THREE.PlaneGeometry(3, 2, 6, 4);
-		const bumpMat = new THREE.MeshStandardMaterial({ color: grassColor, roughness: 1 });
-		for (let i = 0; i < 12; i++) {
+		const bumpMat = new THREE.MeshBasicMaterial({ color: grassColor });
+		const bumpCount = Math.max(6, Math.round(c.fieldSize / 4));
+		for (let i = 0; i < bumpCount; i++) {
 			const bump = new THREE.Mesh(bumpGeo, bumpMat);
 			const angle = Math.random() * Math.PI * 2;
-			const dist = 3 + Math.random() * 14;
+			const dist = 3 + Math.random() * (c.fieldSize * 0.35);
 			bump.rotation.x = -Math.PI / 2;
 			const bx = Math.cos(angle) * dist;
 			const bz = Math.sin(angle) * dist;
@@ -76,19 +113,28 @@ export class GrassMeadow {
 		}
 
 		this.grassGeo = new THREE.ConeGeometry(0.06, 1, 4);
-		this.grassMat = new THREE.MeshStandardMaterial({
-			color: grassColor,
-			roughness: 0.9,
-			flatShading: true,
+		this.grassMat = new THREE.ShaderMaterial({
+			vertexShader,
+			fragmentShader,
+			uniforms: {
+				uTime: { value: 0 },
+				uColor: { value: new THREE.Color(grassColor) },
+			},
 		});
 
-		this.grassMesh = new THREE.InstancedMesh(this.grassGeo, this.grassMat, GRASS_COUNT);
-		this.grassMesh.castShadow = true;
-		this.grassMesh.receiveShadow = true;
+		this.grassMesh = new THREE.InstancedMesh(this.grassGeo, this.grassMat, c.grassCount);
+		this.grassMesh.castShadow = false;
+		this.grassMesh.receiveShadow = false;
 
-		for (let i = 0; i < GRASS_COUNT; i++) {
-			const x = (Math.random() - 0.5) * FIELD_SIZE;
-			const z = (Math.random() - 0.5) * FIELD_SIZE;
+		const phaseArr = new Float32Array(c.grassCount);
+		const speedArr = new Float32Array(c.grassCount);
+		const baseXArr = new Float32Array(c.grassCount);
+		const baseZArr = new Float32Array(c.grassCount);
+		const heightArr = new Float32Array(c.grassCount);
+
+		for (let i = 0; i < c.grassCount; i++) {
+			const x = (Math.random() - 0.5) * c.fieldSize;
+			const z = (Math.random() - 0.5) * c.fieldSize;
 			const height = 0.8 + Math.random() * 2.0;
 			const baseRotY = Math.random() * Math.PI * 2;
 			const sx = 0.5 + Math.random() * 0.8;
@@ -101,52 +147,42 @@ export class GrassMeadow {
 			this.dummy.updateMatrix();
 			this.grassMesh.setMatrixAt(i, this.dummy.matrix);
 
-			this.swayData.push({
-				baseX: x,
-				baseZ: z,
-				baseY,
-				baseRotY,
-				phase: Math.random() * Math.PI * 2,
-				speed: 0.5 + Math.random() * 1.5,
-				height,
-				scaleX: sx,
-				scaleZ: sz,
-			});
+			phaseArr[i] = Math.random() * Math.PI * 2;
+			speedArr[i] = 0.5 + Math.random() * 1.5;
+			baseXArr[i] = x;
+			baseZArr[i] = z;
+			heightArr[i] = height;
 		}
 		this.grassMesh.instanceMatrix.needsUpdate = true;
+		this.grassMesh.geometry.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phaseArr, 1));
+		this.grassMesh.geometry.setAttribute("aSpeed", new THREE.InstancedBufferAttribute(speedArr, 1));
+		this.grassMesh.geometry.setAttribute("aBaseX", new THREE.InstancedBufferAttribute(baseXArr, 1));
+		this.grassMesh.geometry.setAttribute("aBaseZ", new THREE.InstancedBufferAttribute(baseZArr, 1));
+		this.grassMesh.geometry.setAttribute("aHeight", new THREE.InstancedBufferAttribute(heightArr, 1));
 		this.scene.add(this.grassMesh);
 	}
 
 	tick(elapsed: number): void {
-		const windDir = Math.sin(elapsed * 0.04) * 0.3;
-
-		if (!this.grassMesh) return;
-
-		for (let i = 0; i < GRASS_COUNT; i++) {
-			const d = this.swayData[i];
-			if (!d) continue;
-
-			const swayX = Math.sin(elapsed * d.speed + d.phase + d.baseX * 0.5) * 0.06;
-			const swayZ = Math.sin(elapsed * d.speed * 0.7 + d.phase + d.baseZ * 0.5) * 0.04;
-
-			this.dummy.position.set(d.baseX, d.baseY + d.height / 2, d.baseZ);
-			this.dummy.scale.set(d.scaleX, d.height, d.scaleZ);
-			this.dummy.rotation.set(swayZ * 0.5, d.baseRotY, swayX + windDir * 0.08);
-			this.dummy.updateMatrix();
-			this.grassMesh.setMatrixAt(i, this.dummy.matrix);
+		this.skipFrame++;
+		if (this.skipFrame % 2 !== 0) return;
+		if (this.grassMat) {
+			this.grassMat.uniforms.uTime.value = elapsed;
 		}
-		this.grassMesh.instanceMatrix.needsUpdate = true;
 	}
 
 	clearArea(cx: number, cz: number, radius: number): void {
 		if (!this.grassMesh) return;
 		const dummy = new THREE.Object3D();
-		for (let i = 0; i < this.swayData.length; i++) {
-			const d = this.swayData[i];
-			const dx = d.baseX - cx;
-			const dz = d.baseZ - cz;
+		const pos = this.grassMesh.geometry.attributes.aBaseX;
+		const posZ = this.grassMesh.geometry.attributes.aBaseZ;
+		if (!pos || !posZ) return;
+		const bx = pos.array as Float32Array;
+		const bz = posZ.array as Float32Array;
+		for (let i = 0; i < bx.length; i++) {
+			const dx = bx[i] - cx;
+			const dz = bz[i] - cz;
 			if (dx * dx + dz * dz < radius * radius) {
-				dummy.position.set(d.baseX, -100, d.baseZ);
+				dummy.position.set(bx[i], -100, bz[i]);
 				dummy.scale.setScalar(1);
 				dummy.rotation.set(0, 0, 0);
 				dummy.updateMatrix();
@@ -163,14 +199,18 @@ export class GrassMeadow {
 		const bw = hw + border;
 		const bd = hd + border;
 		const dummy = new THREE.Object3D();
-		for (let i = 0; i < this.swayData.length; i++) {
-			const d = this.swayData[i];
-			const dx = d.baseX - cx;
-			const dz = d.baseZ - cz;
+		const pos = this.grassMesh.geometry.attributes.aBaseX;
+		const posZ = this.grassMesh.geometry.attributes.aBaseZ;
+		if (!pos || !posZ) return;
+		const bx = pos.array as Float32Array;
+		const bz = posZ.array as Float32Array;
+		for (let i = 0; i < bx.length; i++) {
+			const dx = bx[i] - cx;
+			const dz = bz[i] - cz;
 			const localX = dx * cos - dz * sin;
 			const localZ = dx * sin + dz * cos;
 			if (Math.abs(localX) < bw && Math.abs(localZ) < bd) {
-				dummy.position.set(d.baseX, -100, d.baseZ);
+				dummy.position.set(bx[i], -100, bz[i]);
 				dummy.scale.setScalar(1);
 				dummy.rotation.set(0, 0, 0);
 				dummy.updateMatrix();
@@ -189,6 +229,5 @@ export class GrassMeadow {
 			this.grassGeo = null;
 			this.grassMat = null;
 		}
-		this.swayData = [];
 	}
 }
