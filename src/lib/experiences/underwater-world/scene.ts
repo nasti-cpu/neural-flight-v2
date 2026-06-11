@@ -64,8 +64,8 @@ const ROCK_COUNT = 120;
 
 // ── Echo-Ringe ──
 const ECHO_RING_POOL_SIZE = 60;
-const ECHO_RING_LIFETIME = 5;
-const ECHO_RING_EXPAND_SPEED = 8;
+const ECHO_RING_LIFETIME = 12;
+const ECHO_RING_EXPAND_SPEED = 14;
 const ECHO_EMIT_INTERVAL = 10;
 const ECHO_BURST_DELAY = 0.4;
 const ECHO_DOLPHIN_RANGE = 6;
@@ -1729,8 +1729,11 @@ export function tick(
 		if (s.echoEmitTimer >= ECHO_EMIT_INTERVAL) {
 			s.echoEmitTimer -= ECHO_EMIT_INTERVAL;
 
-			const fi3 = Math.floor(Math.random() * FISH_COUNT) * 3;
-			emitEchoRing(s.echoRingPool, s.fish.positions[fi3], s.fish.positions[fi3 + 1], s.fish.positions[fi3 + 2]);
+			// Alle Fische aufleuchten lassen
+			for (let fi = 0; fi < FISH_COUNT; fi++) {
+				const fi3 = fi * 3;
+				emitEchoRing(s.echoRingPool, s.fish.positions[fi3], s.fish.positions[fi3 + 1], s.fish.positions[fi3 + 2]);
+			}
 
 			for (const shark of s.sharks) {
 				emitEchoRing(s.echoRingPool, shark.mesh.position.x, shark.mesh.position.y, shark.mesh.position.z);

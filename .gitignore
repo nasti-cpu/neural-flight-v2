@@ -33,3 +33,6 @@ assets/
 
 # Hotspot config (contains password)
 scripts/hotspot/hotspot.conf
+
+# Temp debug files
+tmp_dev_*.txt
