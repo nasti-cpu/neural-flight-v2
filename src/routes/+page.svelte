@@ -1,6 +1,7 @@
 <script lang="ts">
 import { Select } from "bits-ui";
 import {
+	Bug,
 	ChevronDown,
 	Eye,
 	Fish,
@@ -158,6 +159,13 @@ const routes = [
 		icon: Palette,
 		title: "Shader Playground",
 		description: "Modular shader rack with live preview",
+		planned: false,
+	},
+	{
+		path: "/test/erlebnis",
+		icon: Bug,
+		title: "Insect World",
+		description: "Wiese · Blumen · Bienen · Schmetterlinge · Stadt · Pheromone · Facettenauge",
 		planned: false,
 	},
 	{
