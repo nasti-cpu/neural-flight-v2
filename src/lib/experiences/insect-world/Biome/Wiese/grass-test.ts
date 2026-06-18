@@ -63,6 +63,11 @@ export class GrassMeadow {
 		this.config = { ...DEFAULTS, ...config };
 	}
 
+	getHeightAt(x: number, z: number): number {
+		const dist = Math.sqrt(x * x + z * z);
+		return -this.config.curvature * dist * dist;
+	}
+
 	build(): void {
 		const c = this.config;
 		const grassColor = "#6aaf4c";

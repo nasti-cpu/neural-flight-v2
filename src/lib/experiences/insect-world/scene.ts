@@ -140,7 +140,10 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldState> {
 				const a = Math.random() * Math.PI * 2;
 				const dist = minDist + Math.random() * (maxDist - minDist);
 				const s = scaleRange[0] + Math.random() * (scaleRange[1] - scaleRange[0]);
-				dummy.position.set(Math.cos(a) * dist, 0.05, Math.sin(a) * dist);
+				const x = Math.cos(a) * dist;
+				const z = Math.sin(a) * dist;
+				const groundY = meadow.getHeightAt(x, z);
+				dummy.position.set(x, groundY + 0.05, z);
 				dummy.scale.setScalar(baseScale * s);
 				dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
 				dummy.updateMatrix();
