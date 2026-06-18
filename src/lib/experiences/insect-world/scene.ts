@@ -91,8 +91,8 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldState> {
 		loadGLB(BLUMEN[1].model),
 		loadGLB(BLUMEN[2].model),
 		loadGLB(CITY.MODEL),
-		loadGLB(BIENEN.MODEL),
-		loadGLB(SCHMETTERLINGE.MODEL),
+		loadGLB("/models/bienen/Meshy_AI_Honeybee_low10.glb"),
+		loadGLB("/models/schmetterlinge/Meshy_AI_Blue_Ulysses_Butterfl_low10.glb"),
 	]);
 
 	const armeriaScene = results[0].status === "fulfilled" ? results[0].value : null;
