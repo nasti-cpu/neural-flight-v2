@@ -12,6 +12,12 @@ const experiments: { name: string; path: string; description: string }[] = [
 		description:
 			"Organic neon blobs over dark reflective water with bloom glow",
 	},
+	{
+		name: "Sky Tester",
+		path: "sky-tester",
+		description:
+			"6 Varianten blauer Himmel mit TSL-Gradient (insect-world-v2 Biome)",
+	},
 ];
 </script>
 
