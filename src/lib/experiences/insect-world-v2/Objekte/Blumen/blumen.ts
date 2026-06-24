@@ -1,7 +1,9 @@
 /**
  * insect-world-v2 — Blumen.
  * Lädt die 3 Lowpoly-GLB-Blumen und verteilt sie in der Wiese.
- * Nutzt InstancedMesh für Performance.
+ * Jede GLB kann mehrere Sub-Meshes mit eigenen Materialien haben
+ * (z.B. grüner Stiel + bunte Blüte). Pro Material wird ein
+ * separater InstancedMesh erzeugt.
  */
 
 import * as THREE from "three";
@@ -36,45 +38,61 @@ export interface MeadowFlowers {
 function loadGLTF(url: string): Promise<THREE.Group> {
 	return new Promise((resolve, reject) => {
 		const loader = new GLTFLoader();
-		loader.load(url, (gltf) => {
-			resolve(gltf.scene);
-		}, undefined, (err) => {
+		loader.load(url, (gltf) => resolve(gltf.scene), undefined, (err) => {
 			console.error("Blumen GLB-Fehler:", url, err);
 			reject(err);
 		});
 	});
 }
 
-function mergeSceneMeshes(group: THREE.Group): { geometry: THREE.BufferGeometry; material: THREE.Material } | null {
-	const geos: THREE.BufferGeometry[] = [];
-	let material: THREE.Material | null = null;
+/**
+ * Sammelt alle Meshes aus einer GLB-Szene, gruppiert sie nach
+ * Material-Identität merged die Geometrien einer Gruppe.
+ * Gibt ein Array pro einzigartigem Material zurück.
+ */
+function groupMeshesByMaterial(
+	group: THREE.Group,
+): { geometry: THREE.BufferGeometry; material: THREE.Material }[] {
+	const materialGroups = new Map<THREE.Material, THREE.BufferGeometry[]>();
 
 	group.traverse((child) => {
 		if (!(child instanceof THREE.Mesh)) return;
 		child.updateWorldMatrix(true, false);
 		const geo = child.geometry.clone();
 		geo.applyMatrix4(child.matrixWorld);
-		geos.push(geo);
 
 		const mat = Array.isArray(child.material) ? child.material[0] : child.material;
-		if (!material) material = mat.clone();
+		const list = materialGroups.get(mat);
+		if (list) {
+			list.push(geo);
+		} else {
+			materialGroups.set(mat, [geo]);
+		}
 	});
 
-	if (geos.length === 0) return null;
-
-	const merged = mergeGeometries(geos)!;
-	if (!material) {
-		material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+	const results: { geometry: THREE.BufferGeometry; material: THREE.Material }[] = [];
+	for (const [material, geos] of materialGroups) {
+		const merged = mergeGeometries(geos);
+		if (merged) {
+			const mat = material.clone();
+			mat.side = THREE.DoubleSide;
+			mat.depthWrite = true;
+			results.push({ geometry: merged, material: mat });
+		}
 	}
 
-	return { geometry: merged, material };
+	return results;
 }
 
 /**
  * Lädt alle 3 Blumenmodelle und platziert sie als InstancedMesh
  * in einem Feld um (cx, cz).
  *
- * @param getHeightAt  Optionale Funktion für Bodenanpassung
+ * Pro GLB können mehrere Sub-Meshes (z.B. Stiel + Blüte) mit
+ * eigenen Materialien entstehen – jedes bekommt einen eigenen
+ * InstancedMesh.
+ *
+ * @param getHeightAt Optionale Funktion für Bodenanpassung
  */
 export async function createFlowers(
 	cx: number,
@@ -89,51 +107,40 @@ export async function createFlowers(
 		FLOWER_FILES.map((f) => loadGLTF(f.url)),
 	);
 
-	const results: { geometry: THREE.BufferGeometry; material: THREE.Material }[] = [];
-	for (let i = 0; i < scenes.length; i++) {
-		const r = mergeSceneMeshes(scenes[i]);
-		if (r) {
-			results.push(r);
-			const name = FLOWER_FILES[i].url.split("/").pop();
-			console.log(`Blume ${name}: ${r.geometry.attributes.position.count} Vertices`);
-		}
-	}
+	const perType = Math.max(1, Math.floor(config.count / scenes.length));
 
-	if (results.length === 0) {
-		console.warn("Blumen: Keine Meshes in den GLB-Dateien gefunden");
-		return { group, dispose: () => {} };
-	}
-
-	const perType = Math.max(1, Math.floor(config.count / results.length));
-
-	for (let typeIdx = 0; typeIdx < results.length; typeIdx++) {
-		const { geometry, material } = results[typeIdx];
+	for (let typeIdx = 0; typeIdx < scenes.length; typeIdx++) {
+		const materialGroups = groupMeshesByMaterial(scenes[typeIdx]);
 		const scale = FLOWER_FILES[typeIdx].scale;
 
-		const geo = geometry;
-		const mat = material;
-		mat.side = THREE.DoubleSide;
-		mat.depthWrite = true;
-		const mesh = new THREE.InstancedMesh(geo, mat, perType);
+		const name = FLOWER_FILES[typeIdx].url.split("/").pop();
+		console.log(`Blume ${name}: ${materialGroups.length} Materialgruppe(n)`);
+		materialGroups.forEach((g, i) => {
+			console.log(`  Teil ${i + 1}: ${g.geometry.attributes.position.count} Vertices`);
+		});
 
-		for (let i = 0; i < perType; i++) {
-			const x = cx + (Math.random() - 0.5) * config.fieldSize;
-			const z = cz + (Math.random() - 0.5) * config.fieldSize;
-			const y = (getHeightAt ? getHeightAt(x, z) : 0) + Math.random() * 0.05;
-			const rotY = Math.random() * Math.PI * 2;
-			const s = scale * (0.8 + Math.random() * 0.7);
+		for (const { geometry, material } of materialGroups) {
+			const mesh = new THREE.InstancedMesh(geometry, material, perType);
 
-			dummy.position.set(x, y, z);
-			dummy.scale.setScalar(s);
-			dummy.rotation.set(0, rotY, 0);
-			dummy.updateMatrix();
-			mesh.setMatrixAt(i, dummy.matrix);
+			for (let i = 0; i < perType; i++) {
+				const x = cx + (Math.random() - 0.5) * config.fieldSize;
+				const z = cz + (Math.random() - 0.5) * config.fieldSize;
+				const y = (getHeightAt ? getHeightAt(x, z) : 0) + Math.random() * 0.05;
+				const rotY = Math.random() * Math.PI * 2;
+				const s = scale * (0.8 + Math.random() * 0.7);
+
+				dummy.position.set(x, y, z);
+				dummy.scale.setScalar(s);
+				dummy.rotation.set(0, rotY, 0);
+				dummy.updateMatrix();
+				mesh.setMatrixAt(i, dummy.matrix);
+			}
+
+			mesh.instanceMatrix.needsUpdate = true;
+			mesh.castShadow = false;
+			mesh.receiveShadow = false;
+			group.add(mesh);
 		}
-
-		mesh.instanceMatrix.needsUpdate = true;
-		mesh.castShadow = false;
-		mesh.receiveShadow = false;
-		group.add(mesh);
 	}
 
 	function dispose() {
