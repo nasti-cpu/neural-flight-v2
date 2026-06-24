@@ -30,7 +30,7 @@ export interface MeadowConfig {
 export const MEADOW_PRESETS: Record<string, MeadowConfig> = {
 	"Frühlingswiese": {
 		fieldSize: 60, grassCount: 40000, curvature: 0.0001,
-		color: "#6aaf4c", groundColor: "#5a9e3c",
+		color: "#6aaf4c", groundColor: "#6aaf4c",
 		minHeight: 0.6, maxHeight: 1.8, windStrength: 0.06, windSpeedMultiplier: 1.0,
 	},
 	"Sommerwiese": {
@@ -132,6 +132,18 @@ const fragmentShader = `
 	}
 `;
 
+const groundVertexShader = `
+	varying vec3 vNormal;
+	varying float vHeight;
+
+	void main() {
+		vec4 worldPos = modelMatrix * vec4(position, 1.0);
+		vNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+		vHeight = position.y;
+		gl_Position = projectionMatrix * viewMatrix * worldPos;
+	}
+`;
+
 // ─── Hilfsfunktion: Label-Sprite ──────────────────────────────────────
 
 function makeLabel(text: string): THREE.Sprite {
@@ -206,7 +218,19 @@ export function createMeadow(
 	gPos.needsUpdate = true;
 	groundGeo.computeVertexNormals();
 
-	const groundMat = new THREE.MeshBasicMaterial({ color: config.groundColor });
+	const groundMat = new THREE.ShaderMaterial({
+		vertexShader: groundVertexShader,
+		fragmentShader: fragmentShader,
+		uniforms: {
+			uTime: { value: 0 },
+			uWindStrength: { value: config.windStrength },
+			uWindSpeed: { value: config.windSpeedMultiplier },
+			uColor: { value: new THREE.Color(config.color) },
+			uGroundColor: { value: new THREE.Color(config.groundColor) },
+			uMinHeight: { value: config.minHeight },
+			uMaxHeight: { value: config.maxHeight },
+		},
+	});
 	const ground = new THREE.Mesh(groundGeo, groundMat);
 	ground.position.set(cx, 0, cz);
 	group.add(ground);
@@ -282,6 +306,7 @@ export function createMeadow(
 		skipFrame++;
 		if (skipFrame % 2 !== 0) return;
 		bladeMat.uniforms.uTime.value = elapsed;
+		groundMat.uniforms.uTime.value = elapsed;
 	}
 
 	function dispose(): void {
