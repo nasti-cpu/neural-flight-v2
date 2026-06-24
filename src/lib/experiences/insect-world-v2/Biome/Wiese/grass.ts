@@ -179,6 +179,7 @@ export interface MeadowPatch {
 	config: MeadowConfig;
 	tick: (elapsed: number) => void;
 	dispose: () => void;
+	getHeightAt: (x: number, z: number) => number;
 }
 
 export function createMeadow(
@@ -323,7 +324,7 @@ export function createMeadow(
 		(label.material as THREE.SpriteMaterial).dispose();
 	}
 
-	return { group, config, tick, dispose };
+	return { group, config, tick, dispose, getHeightAt: groundHeight };
 }
 
 /**

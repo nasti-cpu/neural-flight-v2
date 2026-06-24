@@ -108,7 +108,8 @@ onMount(() => {
 });
 
 async function loadFlowers() {
-	flowers = await createFlowers(0, 0, { count: 120, fieldSize: 50 });
+	const getHeightAt = meadow?.getHeightAt ?? undefined;
+	flowers = await createFlowers(0, 0, { count: 120, fieldSize: 50 }, getHeightAt);
 	loading = false;
 	if (showFlowers) {
 		scene.add(flowers.group);

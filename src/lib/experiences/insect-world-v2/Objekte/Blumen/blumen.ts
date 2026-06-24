@@ -12,9 +12,9 @@ import whiteUrl from "./Flower white.glb?url";
 import yellowUrl from "./Flower yellow.glb?url";
 
 const FLOWER_FILES = [
-	{ url: pinkUrl, scale: 0.3 },
-	{ url: whiteUrl, scale: 0.3 },
-	{ url: yellowUrl, scale: 0.3 },
+	{ url: pinkUrl, scale: 1.0 },
+	{ url: whiteUrl, scale: 1.0 },
+	{ url: yellowUrl, scale: 1.0 },
 ];
 
 export interface FlowerConfig {
@@ -91,9 +91,9 @@ export async function createFlowers(
 		for (let i = 0; i < perType; i++) {
 			const x = cx + (Math.random() - 0.5) * config.fieldSize;
 			const z = cz + (Math.random() - 0.5) * config.fieldSize;
-			const y = getHeightAt ? getHeightAt(x, z) : 0;
+			const y = (getHeightAt ? getHeightAt(x, z) : 0) + Math.random() * 0.05;
 			const rotY = Math.random() * Math.PI * 2;
-			const s = scale * (0.7 + Math.random() * 0.6);
+			const s = scale * (0.8 + Math.random() * 0.7);
 
 			dummy.position.set(x, y, z);
 			dummy.scale.setScalar(s);
