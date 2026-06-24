@@ -115,23 +115,26 @@ export async function createFlowers(
 
 		const name = FLOWER_FILES[typeIdx].url.split("/").pop();
 		console.log(`Blume ${name}: ${materialGroups.length} Materialgruppe(n)`);
-		materialGroups.forEach((g, i) => {
-			console.log(`  Teil ${i + 1}: ${g.geometry.attributes.position.count} Vertices`);
-		});
+
+		// Positionen für alle Instanzen dieser Blumen-Art vorbereiten
+		const positions: { x: number; y: number; z: number; rotY: number; s: number }[] = [];
+		for (let i = 0; i < perType; i++) {
+			const x = cx + (Math.random() - 0.5) * config.fieldSize;
+			const z = cz + (Math.random() - 0.5) * config.fieldSize;
+			const y = (getHeightAt ? getHeightAt(x, z) : 0) + Math.random() * 0.05;
+			const rotY = Math.random() * Math.PI * 2;
+			const s = scale * (0.8 + Math.random() * 0.7);
+			positions.push({ x, y, z, rotY, s });
+		}
 
 		for (const { geometry, material } of materialGroups) {
 			const mesh = new THREE.InstancedMesh(geometry, material, perType);
 
 			for (let i = 0; i < perType; i++) {
-				const x = cx + (Math.random() - 0.5) * config.fieldSize;
-				const z = cz + (Math.random() - 0.5) * config.fieldSize;
-				const y = (getHeightAt ? getHeightAt(x, z) : 0) + Math.random() * 0.05;
-				const rotY = Math.random() * Math.PI * 2;
-				const s = scale * (0.8 + Math.random() * 0.7);
-
-				dummy.position.set(x, y, z);
-				dummy.scale.setScalar(s);
-				dummy.rotation.set(0, rotY, 0);
+				const p = positions[i];
+				dummy.position.set(p.x, p.y, p.z);
+				dummy.scale.setScalar(p.s);
+				dummy.rotation.set(0, p.rotY, 0);
 				dummy.updateMatrix();
 				mesh.setMatrixAt(i, dummy.matrix);
 			}
