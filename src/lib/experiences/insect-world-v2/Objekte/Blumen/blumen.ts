@@ -5,6 +5,7 @@
  */
 
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 import pinkUrl from "./Flower pink.glb?url";
@@ -44,14 +45,29 @@ function loadGLTF(url: string): Promise<THREE.Group> {
 	});
 }
 
-function extractMesh(group: THREE.Group): THREE.Mesh | null {
-	let result: THREE.Mesh | null = null;
+function mergeSceneMeshes(group: THREE.Group): { geometry: THREE.BufferGeometry; material: THREE.Material } | null {
+	const geos: THREE.BufferGeometry[] = [];
+	let material: THREE.Material | null = null;
+
 	group.traverse((child) => {
-		if (child instanceof THREE.Mesh && !result) {
-			result = child;
-		}
+		if (!(child instanceof THREE.Mesh)) return;
+		child.updateWorldMatrix(true, false);
+		const geo = child.geometry.clone();
+		geo.applyMatrix4(child.matrixWorld);
+		geos.push(geo);
+
+		const mat = Array.isArray(child.material) ? child.material[0] : child.material;
+		if (!material) material = mat.clone();
 	});
-	return result;
+
+	if (geos.length === 0) return null;
+
+	const merged = mergeGeometries(geos)!;
+	if (!material) {
+		material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+	}
+
+	return { geometry: merged, material };
 }
 
 /**
@@ -73,31 +89,29 @@ export async function createFlowers(
 		FLOWER_FILES.map((f) => loadGLTF(f.url)),
 	);
 
-	const meshes: THREE.Mesh[] = [];
-	for (const scene of scenes) {
-		const m = extractMesh(scene);
-		if (m) meshes.push(m);
+	const results: { geometry: THREE.BufferGeometry; material: THREE.Material }[] = [];
+	for (let i = 0; i < scenes.length; i++) {
+		const r = mergeSceneMeshes(scenes[i]);
+		if (r) {
+			results.push(r);
+			const name = FLOWER_FILES[i].url.split("/").pop();
+			console.log(`Blume ${name}: ${r.geometry.attributes.position.count} Vertices`);
+		}
 	}
 
-	if (meshes.length === 0) {
+	if (results.length === 0) {
 		console.warn("Blumen: Keine Meshes in den GLB-Dateien gefunden");
 		return { group, dispose: () => {} };
 	}
 
-	for (let i = 0; i < meshes.length; i++) {
-		const m = meshes[i];
-		const name = FLOWER_FILES[i].url.split("/").pop();
-		console.log(`Blume ${name}: ${m.geometry.attributes.position.count} Vertices`);
-	}
+	const perType = Math.max(1, Math.floor(config.count / results.length));
 
-	const perType = Math.max(1, Math.floor(config.count / meshes.length));
-
-	for (let typeIdx = 0; typeIdx < meshes.length; typeIdx++) {
-		const src = meshes[typeIdx];
+	for (let typeIdx = 0; typeIdx < results.length; typeIdx++) {
+		const { geometry, material } = results[typeIdx];
 		const scale = FLOWER_FILES[typeIdx].scale;
 
-		const geo = src.geometry.clone();
-		const mat = Array.isArray(src.material) ? src.material[0].clone() : src.material.clone();
+		const geo = geometry;
+		const mat = material;
 		mat.side = THREE.DoubleSide;
 		mat.depthWrite = true;
 		const mesh = new THREE.InstancedMesh(geo, mat, perType);
