@@ -24,6 +24,12 @@ const experiments: { name: string; path: string; description: string }[] = [
 		description:
 			"6 Wiesen-Varianten mit InstancedMesh + Shader (insect-world-v2 Biome)",
 	},
+	{
+		name: "Wiese & Himmel",
+		path: "wiese-himmel",
+		description:
+			"Frühlingswiese + 6 Himmelsvarianten (insect-world-v2 Biome)",
+	},
 ];
 </script>
 
