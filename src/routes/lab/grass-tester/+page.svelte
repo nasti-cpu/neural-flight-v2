@@ -2,9 +2,8 @@
 /**
  * LAB EXPERIMENT — Grass Tester (Wiesen-Varianten)
  *
- * Zeigt 6 Wiesen-Presets nebeneinander im Kreis.
- * OrbitControls zum Drehen/Zoomen, jedes Patch hat
- * einen Label-Sprite mit dem Namen.
+ * Zeigt 6 Gras-Dichte-Varianten der Frühlingswiese im Kreis.
+ * Per Knopfdruck umschaltbar auf die 6 Grund-Presets.
  *
  * Nutzt InstancedMesh + ShaderMaterial (WebGL).
  * Für VR-Produktion auf TSL/WebGPU portieren.
@@ -15,7 +14,9 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
 	createAllMeadowPatches,
+	createSpacingPatches,
 	MEADOW_PRESETS,
+	FRUEHLING_SPACING,
 	type MeadowPatch,
 } from "$lib/experiences/insect-world-v2/Biome/Wiese/grass";
 
@@ -27,7 +28,10 @@ let controls: OrbitControls;
 let patches: MeadowPatch[] = [];
 let animationId: number;
 
-const presetNames = Object.keys(MEADOW_PRESETS);
+let spacingMode = $state(true);
+
+type LegendEntry = { name: string; color: string; count: string };
+let legend: LegendEntry[] = $state([]);
 
 onMount(() => {
 	renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -49,11 +53,7 @@ onMount(() => {
 	controls.maxDistance = 40;
 	controls.update();
 
-	// 6 Wiesen im Kreis (Radius 8)
-	patches = createAllMeadowPatches(8, -Math.PI / 2);
-	for (const p of patches) {
-		scene.add(p.group);
-	}
+	buildPatches();
 
 	const clock = new THREE.Clock();
 	function animate() {
@@ -75,6 +75,36 @@ onMount(() => {
 	window.addEventListener("resize", onResize);
 });
 
+function buildPatches() {
+	for (const p of patches) p.dispose();
+	patches = [];
+
+	if (spacingMode) {
+		patches = createSpacingPatches(8, -Math.PI / 2);
+		legend = FRUEHLING_SPACING.map(v => ({
+			name: v.name,
+			color: v.config.color,
+			count: String(v.config.grassCount),
+		}));
+	} else {
+		patches = createAllMeadowPatches(8, -Math.PI / 2);
+		legend = Object.entries(MEADOW_PRESETS).map(([name, cfg]) => ({
+			name,
+			color: cfg.color,
+			count: String(cfg.grassCount),
+		}));
+	}
+
+	for (const p of patches) {
+		scene.add(p.group);
+	}
+}
+
+function toggleMode() {
+	spacingMode = !spacingMode;
+	buildPatches();
+}
+
 onDestroy(() => {
 	if (!browser) return;
 	cancelAnimationFrame(animationId);
@@ -88,15 +118,20 @@ onDestroy(() => {
 
 <div class="overlay">
 	<div class="legend">
-		{#each presetNames as name, i}
+		{#each legend as entry, i}
 			<div class="entry">
-				<span class="dot" style="background: {MEADOW_PRESETS[name].color}"></span>
+				<span class="dot" style="background: {entry.color}"></span>
 				<span class="num">{i + 1}.</span>
-				<span>{name}</span>
+				<span>{entry.name}</span>
 			</div>
 		{/each}
 	</div>
-	<p class="hint">Ziehen zum Drehen · Scrollen zum Zoomen</p>
+	<div class="controls">
+		<button class="toggle-btn" onclick={toggleMode}>
+			{spacingMode ? "🌿 Alle Wiesen" : "🌱 Frühlings-Dichte"}
+		</button>
+		<p class="hint">Ziehen zum Drehen · Scrollen zum Zoomen</p>
+	</div>
 </div>
 
 <style>
@@ -112,7 +147,6 @@ onDestroy(() => {
 		flex-direction: column;
 		align-items: center;
 		gap: 0.5rem;
-		pointer-events: none;
 		z-index: 10;
 	}
 
@@ -151,11 +185,30 @@ onDestroy(() => {
 		font-size: 0.7rem;
 	}
 
+	.controls {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+	}
+
+	.toggle-btn {
+		background: rgba(255,255,255,0.12);
+		border: 1px solid rgba(255,255,255,0.2);
+		color: #fff;
+		font-family: system-ui, sans-serif;
+		font-size: 0.8rem;
+		padding: 0.4rem 1rem;
+		border-radius: 8px;
+		cursor: pointer;
+		pointer-events: all;
+		transition: background 0.2s;
+	}
+	.toggle-btn:hover { background: rgba(255,255,255,0.25); }
+
 	.hint {
 		color: rgba(255,255,255,0.5);
 		font-family: system-ui, sans-serif;
 		font-size: 0.7rem;
 		margin: 0;
-		pointer-events: none;
 	}
 </style>

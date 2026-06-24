@@ -62,6 +62,24 @@ export const MEADOW_PRESETS: Record<string, MeadowConfig> = {
 
 export type MeadowPresetName = keyof typeof MEADOW_PRESETS;
 
+// ─── Dichte-Varianten (basierend auf Frühlingswiese) ─────────────────
+
+export interface SpacingVariant {
+	name: string;
+	config: MeadowConfig;
+}
+
+const fruehlingBase = MEADOW_PRESETS["Frühlingswiese"];
+
+export const FRUEHLING_SPACING: SpacingVariant[] = [
+	{ name: "Extrem locker (300)", config: { ...fruehlingBase, grassCount: 300 } },
+	{ name: "Sehr locker (800)", config: { ...fruehlingBase, grassCount: 800 } },
+	{ name: "Locker (1.500)", config: { ...fruehlingBase, grassCount: 1500 } },
+	{ name: "Normal (2.500)", config: { ...fruehlingBase, grassCount: 2500 } },
+	{ name: "Dicht (4.000)", config: { ...fruehlingBase, grassCount: 4000 } },
+	{ name: "Sehr dicht (6.000)", config: { ...fruehlingBase, grassCount: 6000 } },
+];
+
 // ─── Shader (GLSL, Strings) ──────────────────────────────────────────
 
 const vertexShader = `
@@ -155,6 +173,7 @@ export function createMeadow(
 	config: MeadowConfig,
 	cx: number,
 	cz: number,
+	customLabel?: string,
 ): MeadowPatch {
 	const group = new THREE.Group();
 	const dummy = new THREE.Object3D();
@@ -249,9 +268,10 @@ export function createMeadow(
 	group.add(mesh);
 
 	// --- Label ---
-	const label = makeLabel(
-		Object.entries(MEADOW_PRESETS).find(([, v]) => v === config)?.[0] ?? "Wiese",
-	);
+	const labelText = customLabel
+		?? Object.entries(MEADOW_PRESETS).find(([, v]) => v === config)?.[0]
+		?? "Wiese";
+	const label = makeLabel(labelText);
 	label.position.set(cx, config.maxHeight + 2, cz);
 	group.add(label);
 
@@ -295,5 +315,21 @@ export function createAllMeadowPatches(
 		const cx = Math.cos(angle) * radius;
 		const cz = Math.sin(angle) * radius;
 		return createMeadow(MEADOW_PRESETS[name], cx, cz);
+	});
+}
+
+/**
+ * Erzeugt alle 6 Frühlings-Dichte-Varianten im Kreis.
+ * Gibt ein Array von MeadowPatch zurück.
+ */
+export function createSpacingPatches(
+	radius: number,
+	startAngle: number = 0,
+): MeadowPatch[] {
+	return FRUEHLING_SPACING.map((v, i) => {
+		const angle = startAngle + (i / FRUEHLING_SPACING.length) * Math.PI * 2;
+		const cx = Math.cos(angle) * radius;
+		const cz = Math.sin(angle) * radius;
+		return createMeadow(v.config, cx, cz, v.name);
 	});
 }
