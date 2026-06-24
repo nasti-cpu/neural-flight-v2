@@ -13,7 +13,7 @@ import { browser } from "$app/environment";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
-	createAllMeadowPatches,
+	createMeadow,
 	createSpacingPatches,
 	MEADOW_PRESETS,
 	FRUEHLING_SPACING,
@@ -87,7 +87,14 @@ function buildPatches() {
 			count: String(v.config.grassCount),
 		}));
 	} else {
-		patches = createAllMeadowPatches(8, -Math.PI / 2);
+		const presetNames = Object.keys(MEADOW_PRESETS);
+		patches = presetNames.map((name, i) => {
+			const angle = -Math.PI / 2 + (i / presetNames.length) * Math.PI * 2;
+			const cx = Math.cos(angle) * 8;
+			const cz = Math.sin(angle) * 8;
+			const testCfg = { ...MEADOW_PRESETS[name], fieldSize: 6 };
+			return createMeadow(testCfg, cx, cz, name);
+		});
 		legend = Object.entries(MEADOW_PRESETS).map(([name, cfg]) => ({
 			name,
 			color: cfg.color,

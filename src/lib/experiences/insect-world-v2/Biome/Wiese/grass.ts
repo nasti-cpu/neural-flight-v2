@@ -29,7 +29,7 @@ export interface MeadowConfig {
 
 export const MEADOW_PRESETS: Record<string, MeadowConfig> = {
 	"Frühlingswiese": {
-		fieldSize: 6, grassCount: 2500, curvature: 0.001,
+		fieldSize: 60, grassCount: 40000, curvature: 0.0001,
 		color: "#6aaf4c", groundColor: "#5a9e3c",
 		minHeight: 0.6, maxHeight: 1.8, windStrength: 0.06, windSpeedMultiplier: 1.0,
 	},
@@ -72,12 +72,12 @@ export interface SpacingVariant {
 const fruehlingBase = MEADOW_PRESETS["Frühlingswiese"];
 
 export const FRUEHLING_SPACING: SpacingVariant[] = [
-	{ name: "Extrem locker (300)", config: { ...fruehlingBase, grassCount: 300 } },
-	{ name: "Sehr locker (800)", config: { ...fruehlingBase, grassCount: 800 } },
-	{ name: "Locker (1.500)", config: { ...fruehlingBase, grassCount: 1500 } },
-	{ name: "Normal (2.500)", config: { ...fruehlingBase, grassCount: 2500 } },
-	{ name: "Dicht (4.000)", config: { ...fruehlingBase, grassCount: 4000 } },
-	{ name: "Sehr dicht (6.000)", config: { ...fruehlingBase, grassCount: 6000 } },
+	{ name: "Extrem locker (300)", config: { ...fruehlingBase, fieldSize: 6, grassCount: 300 } },
+	{ name: "Sehr locker (800)", config: { ...fruehlingBase, fieldSize: 6, grassCount: 800 } },
+	{ name: "Locker (1.500)", config: { ...fruehlingBase, fieldSize: 6, grassCount: 1500 } },
+	{ name: "Normal (2.500)", config: { ...fruehlingBase, fieldSize: 6, grassCount: 2500 } },
+	{ name: "Dicht (4.000)", config: { ...fruehlingBase, fieldSize: 6, grassCount: 4000 } },
+	{ name: "Sehr dicht (6.000)", config: { ...fruehlingBase, fieldSize: 6, grassCount: 6000 } },
 ];
 
 // ─── Shader (GLSL, Strings) ──────────────────────────────────────────
