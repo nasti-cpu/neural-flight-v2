@@ -43,6 +43,13 @@ onMount(() => {
 	controls.maxDistance = 40;
 	controls.update();
 
+	const ambient = new THREE.AmbientLight(0x8899bb, 0.5);
+	scene.add(ambient);
+
+	const sun = new THREE.DirectionalLight(0xfff4e0, 2.5);
+	sun.position.set(0.5, 0.8, 0.3).normalize();
+	scene.add(sun);
+
 	const cfg = MEADOW_PRESETS["Frühlingswiese"];
 	meadow = createMeadow(cfg, 0, 0);
 	scene.add(meadow.group);
