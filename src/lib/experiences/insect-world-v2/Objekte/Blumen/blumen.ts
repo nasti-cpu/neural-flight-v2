@@ -35,7 +35,12 @@ export interface MeadowFlowers {
 function loadGLTF(url: string): Promise<THREE.Group> {
 	return new Promise((resolve, reject) => {
 		const loader = new GLTFLoader();
-		loader.load(url, (gltf) => resolve(gltf.scene), undefined, reject);
+		loader.load(url, (gltf) => {
+			resolve(gltf.scene);
+		}, undefined, (err) => {
+			console.error("Blumen GLB-Fehler:", url, err);
+			reject(err);
+		});
 	});
 }
 
@@ -75,7 +80,14 @@ export async function createFlowers(
 	}
 
 	if (meshes.length === 0) {
+		console.warn("Blumen: Keine Meshes in den GLB-Dateien gefunden");
 		return { group, dispose: () => {} };
+	}
+
+	for (let i = 0; i < meshes.length; i++) {
+		const m = meshes[i];
+		const name = FLOWER_FILES[i].url.split("/").pop();
+		console.log(`Blume ${name}: ${m.geometry.attributes.position.count} Vertices`);
 	}
 
 	const perType = Math.max(1, Math.floor(config.count / meshes.length));
@@ -86,6 +98,8 @@ export async function createFlowers(
 
 		const geo = src.geometry.clone();
 		const mat = Array.isArray(src.material) ? src.material[0].clone() : src.material.clone();
+		mat.side = THREE.DoubleSide;
+		mat.depthWrite = true;
 		const mesh = new THREE.InstancedMesh(geo, mat, perType);
 
 		for (let i = 0; i < perType; i++) {
