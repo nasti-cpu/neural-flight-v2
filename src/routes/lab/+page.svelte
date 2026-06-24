@@ -30,6 +30,12 @@ const experiments: { name: string; path: string; description: string }[] = [
 		description:
 			"Frühlingswiese + 6 Himmelsvarianten (insect-world-v2 Biome)",
 	},
+	{
+		name: "Blumen Tester",
+		path: "blumen-tester",
+		description:
+			"3 Lowpoly-Blumen in der Frühlingswiese (insect-world-v2)",
+	},
 ];
 </script>
 
