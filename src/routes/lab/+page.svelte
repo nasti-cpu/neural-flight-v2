@@ -18,6 +18,12 @@ const experiments: { name: string; path: string; description: string }[] = [
 		description:
 			"6 Varianten blauer Himmel mit TSL-Gradient (insect-world-v2 Biome)",
 	},
+	{
+		name: "Grass Tester",
+		path: "grass-tester",
+		description:
+			"6 Wiesen-Varianten mit InstancedMesh + Shader (insect-world-v2 Biome)",
+	},
 ];
 </script>
 
