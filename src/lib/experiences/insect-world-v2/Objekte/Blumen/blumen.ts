@@ -15,9 +15,9 @@ import whiteUrl from "./Flower white.glb?url";
 import yellowUrl from "./Flower yellow.glb?url";
 
 const FLOWER_FILES = [
-	{ url: pinkUrl, scale: 1.0 },
-	{ url: whiteUrl, scale: 1.0 },
-	{ url: yellowUrl, scale: 1.0 },
+	{ url: pinkUrl, scale: 0.8 },
+	{ url: whiteUrl, scale: 0.8 },
+	{ url: yellowUrl, scale: 0.8 },
 ];
 
 export interface FlowerConfig {
