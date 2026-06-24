@@ -3,12 +3,13 @@
  * LAB EXPERIMENT — Blumen-Tester
  *
  * Frühlingswiese mit den 3 Lowpoly-Blumen (pink, white, yellow).
+ * WASD + Maus zum Laufen, Click zum Fokussieren.
  * Toggle zum Ein-/Ausblenden der Blumen.
  */
 import { onDestroy, onMount } from "svelte";
 import { browser } from "$app/environment";
 import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
 import { createMeadow, MEADOW_PRESETS } from "$lib/experiences/insect-world-v2/Biome/Wiese/grass";
 import { createSky, SKY_PRESETS } from "$lib/experiences/insect-world-v2/Biome/blauerHimmel/sky";
 import { createFlowers } from "$lib/experiences/insect-world-v2/Objekte/Blumen/blumen";
@@ -17,13 +18,17 @@ let canvas: HTMLCanvasElement;
 let renderer: THREE.WebGLRenderer;
 let scene: THREE.Scene;
 let camera: THREE.PerspectiveCamera;
-let controls: OrbitControls;
+let controls: PointerLockControls;
 let meadow: ReturnType<typeof createMeadow> | null = null;
 let skyMesh: THREE.Mesh | null = null;
 let flowers: Awaited<ReturnType<typeof createFlowers>> | null = null;
 let animationId: number;
 let showFlowers = $state(true);
 let loading = $state(true);
+let locked = $state(false);
+
+const keys = { w: false, a: false, s: false, d: false };
+const vel = new THREE.Vector3();
 
 onMount(() => {
 	renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -34,14 +39,10 @@ onMount(() => {
 
 	camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 120);
 	camera.position.set(0, 1.5, 8);
-	camera.lookAt(0, 1, -10);
 
-	controls = new OrbitControls(camera, renderer.domElement);
-	controls.target.set(0, 1, 0);
-	controls.maxPolarAngle = Math.PI / 2.05;
-	controls.minDistance = 0.5;
-	controls.maxDistance = 40;
-	controls.update();
+	controls = new PointerLockControls(camera, renderer.domElement);
+	controls.addEventListener("lock", () => { locked = true; });
+	controls.addEventListener("unlock", () => { locked = false; });
 
 	const ambient = new THREE.AmbientLight(0x8899bb, 0.5);
 	scene.add(ambient);
@@ -63,11 +64,36 @@ onMount(() => {
 
 	loadFlowers();
 
+	const onKeyDown = (e: KeyboardEvent) => {
+		const k = e.key.toLowerCase();
+		if (k in keys) keys[k as keyof typeof keys] = true;
+	};
+	const onKeyUp = (e: KeyboardEvent) => {
+		const k = e.key.toLowerCase();
+		if (k in keys) keys[k as keyof typeof keys] = false;
+	};
+	document.addEventListener("keydown", onKeyDown);
+	document.addEventListener("keyup", onKeyUp);
+
 	const clock = new THREE.Clock();
+	let elapsed = 0;
 	function animate() {
-		const elapsed = clock.getElapsedTime();
+		const delta = clock.getDelta();
+		elapsed += delta;
+
+		if (locked) {
+			const speed = 4;
+			vel.set(0, 0, 0);
+			if (keys.w) vel.z -= speed * delta;
+			if (keys.s) vel.z += speed * delta;
+			if (keys.a) vel.x -= speed * delta;
+			if (keys.d) vel.x += speed * delta;
+			camera.position.add(vel.applyQuaternion(camera.quaternion));
+
+			camera.position.y = 1.5;
+		}
+
 		if (meadow) meadow.tick(elapsed);
-		controls.update();
 		renderer.render(scene, camera);
 		animationId = requestAnimationFrame(animate);
 	}
@@ -100,8 +126,14 @@ function toggleFlowers() {
 	}
 }
 
+function clickToLock() {
+	if (!locked) controls.lock();
+}
+
 onDestroy(() => {
 	if (!browser) return;
+	controls?.unlock();
+	controls?.dispose();
 	cancelAnimationFrame(animationId);
 	meadow?.dispose();
 	if (skyMesh) {
@@ -109,12 +141,11 @@ onDestroy(() => {
 		(skyMesh.material as THREE.Material).dispose();
 	}
 	flowers?.dispose();
-	controls?.dispose();
 	renderer?.dispose();
 });
 </script>
 
-<canvas bind:this={canvas}></canvas>
+<canvas bind:this={canvas} onclick={clickToLock}></canvas>
 
 <div class="overlay">
 	<h1>🌾 Frühlingswiese mit Blumen</h1>
@@ -123,11 +154,11 @@ onDestroy(() => {
 			{loading ? "🔄 Lade Blumen..." : showFlowers ? "🌸 Blumen aus" : "🌱 Blumen ein"}
 		</button>
 	</div>
-	<p class="hint">Ziehen zum Drehen · Scrollen zum Zoomen</p>
+	<p class="hint">{locked ? "WASD · ESC zum Lösen" : "Klick ins Bild zum Laufen"}</p>
 </div>
 
 <style>
-	canvas { display: block; width: 100vw; height: 100vh; }
+	canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
 	:global(body) { margin: 0; overflow: hidden; background: #000; }
 
 	.overlay {
@@ -141,6 +172,7 @@ onDestroy(() => {
 		gap: 0.75rem;
 		z-index: 10;
 		font-family: system-ui, sans-serif;
+		pointer-events: none;
 	}
 
 	h1 {
@@ -149,7 +181,6 @@ onDestroy(() => {
 		font-weight: 600;
 		margin: 0;
 		text-shadow: 0 2px 8px rgba(0,0,0,0.5);
-		pointer-events: none;
 	}
 
 	.controls { pointer-events: auto; }
@@ -174,6 +205,5 @@ onDestroy(() => {
 		font-size: 0.7rem;
 		margin: 0;
 		text-shadow: 0 1px 4px rgba(0,0,0,0.3);
-		pointer-events: none;
 	}
 </style>
