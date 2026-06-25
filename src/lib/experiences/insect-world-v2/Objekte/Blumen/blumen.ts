@@ -15,9 +15,9 @@ import whiteUrl from "./Flower white.glb?url";
 import yellowUrl from "./Flower yellow.glb?url";
 
 const FLOWER_FILES = [
-	{ url: pinkUrl, scale: 0.8 },
-	{ url: whiteUrl, scale: 0.8 },
-	{ url: yellowUrl, scale: 0.8 },
+	{ url: pinkUrl, scale: 0.35, label: "pink" },
+	{ url: whiteUrl, scale: 0.385, label: "weiß" },
+	{ url: yellowUrl, scale: 0.35, label: "gelb" },
 ];
 
 export interface FlowerConfig {
@@ -107,14 +107,22 @@ export async function createFlowers(
 		FLOWER_FILES.map((f) => loadGLTF(f.url)),
 	);
 
+	// Höhe jeder Blumen-Art messen und Ziel-Höhe bestimmen (größte = pink)
+	const heights = scenes.map((scene) => {
+		const box = new THREE.Box3().setFromObject(scene);
+		return box.max.y - box.min.y;
+	});
+	const targetHeight = Math.max(...heights);
+	console.log("Blumen-Höhen:", heights, "Ziel:", targetHeight);
+
 	const perType = Math.max(1, Math.floor(config.count / scenes.length));
 
 	for (let typeIdx = 0; typeIdx < scenes.length; typeIdx++) {
 		const materialGroups = groupMeshesByMaterial(scenes[typeIdx]);
-		const scale = FLOWER_FILES[typeIdx].scale;
+		const scale = FLOWER_FILES[typeIdx].scale * (targetHeight / heights[typeIdx]);
 
-		const name = FLOWER_FILES[typeIdx].url.split("/").pop();
-		console.log(`Blume ${name}: ${materialGroups.length} Materialgruppe(n)`);
+		const name = FLOWER_FILES[typeIdx].label;
+		console.log(`Blume ${name}: Höhe=${heights[typeIdx].toFixed(3)}, Skalierung=${scale.toFixed(3)}`);
 
 		// Positionen für alle Instanzen dieser Blumen-Art vorbereiten
 		const positions: { x: number; y: number; z: number; rotY: number; s: number }[] = [];
