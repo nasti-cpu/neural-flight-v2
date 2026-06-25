@@ -23,18 +23,18 @@ export const manifest: ExperienceManifest = {
 	outputs: [],
 	interfaces: { orientation: true, speed: false },
 
-	camera: { fov: 70, near: 0.1, far: 500 },
+	camera: { fov: 70, near: 0.1, far: 800 },
 	scene: {
-		background: "#1a1a2e",
+		background: "#4a90d9",
 		fogNear: 20,
-		fogFar: 150,
-		fogColor: "#1a1a2e",
+		fogFar: 200,
+		fogColor: "#4a90d9",
 		ambientIntensity: 0.4,
 		sunIntensity: 1.5,
 		sunColor: "#ffffff",
 		sunPosition: { x: 50, y: 80, z: 30 },
 	},
-	spawn: { position: { x: 0, y: 2, z: 0 } },
+	spawn: { position: { x: 0, y: 6, z: 0 } },
 
 	setup,
 	tick,
