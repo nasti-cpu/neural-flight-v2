@@ -218,7 +218,8 @@ export async function createBees(
 				bee.center.copy(newPos);
 
 				if (Math.abs(dx) > 0.001 || Math.abs(dz) > 0.001) {
-					bee.group.rotation.y = Math.atan2(dx, dz);
+					// +PI weil Bee.glb nach +Z statt -Z zeigt
+					bee.group.rotation.y = Math.atan2(dx, dz) + Math.PI;
 				}
 
 				// Natürliches Kippen
@@ -254,7 +255,8 @@ export async function createBees(
 				bee.group.position.set(x, y, z);
 
 				if (Math.abs(dx) > 0.001 || Math.abs(dz) > 0.001) {
-					bee.group.rotation.y = Math.atan2(dx, dz);
+					// +PI weil Bee.glb nach +Z statt -Z zeigt
+					bee.group.rotation.y = Math.atan2(dx, dz) + Math.PI;
 				}
 
 				bee.group.rotation.z =
