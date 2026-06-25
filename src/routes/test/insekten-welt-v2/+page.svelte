@@ -17,7 +17,7 @@
 	import { createFlowers } from "$lib/experiences/insect-world-v2/Objekte/Blumen/blumen";
 	import { createBees } from "$lib/experiences/insect-world-v2/Objekte/Bienen/bienen";
 
-	const beeGlbUrl = "/models/bienen/Meshy_AI_Honeybee_low.glb";
+	import beeGlbUrl from "$lib/experiences/insect-world-v2/Objekte/Bienen/Bee.glb?url";
 
 	let canvas: HTMLCanvasElement;
 	let renderer: THREE.WebGPURenderer;

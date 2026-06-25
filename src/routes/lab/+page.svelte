@@ -36,6 +36,12 @@ const experiments: { name: string; path: string; description: string }[] = [
 		description:
 			"3 Lowpoly-Blumen in der Frühlingswiese (insect-world-v2)",
 	},
+	{
+		name: "Bienen Tester",
+		path: "bienen-tester",
+		description:
+			"Komplette Szene: Wiese + Himmel + Blumen + fliegende Bienen (insect-world-v2)",
+	},
 ];
 </script>
 
