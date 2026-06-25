@@ -14,6 +14,7 @@ import { createFlowers, type MeadowFlowers } from "./Objekte/Blumen/blumen";
 import { createBees, type BeeSwarm } from "./Objekte/Bienen/bienen";
 import { createButterflies, type ButterflySwarm } from "./Objekte/Schmetterlinge/schmetterlinge";
 import { CITY } from "./Objekte/Stadt/city";
+import { PheromoneSystem, type FlowerTarget } from "./Sinne/Pheromonspuren/pheromonspuren";
 import beeGlbUrl from "./Objekte/Bienen/Bee.glb?url";
 import butterflyGlbUrl from "./Objekte/Schmetterlinge/Beautiful Butterfly.glb?url";
 
@@ -23,6 +24,7 @@ interface InsectWorldV2State extends ExperienceState {
 	flowers: MeadowFlowers;
 	bees: BeeSwarm;
 	butterflies: ButterflySwarm;
+	pheromones: PheromoneSystem;
 	sky: THREE.Mesh;
 	city: THREE.Group | null;
 }
@@ -107,21 +109,23 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 		console.warn("[V2] Stadt konnte nicht geladen werden:", e);
 	}
 
-	// Blüten-Positionen aus den InstancedMeshes extrahieren
+	// Blüten-Positionen aus flowers.targets (ohne Stadt-Bereich)
+	const sin = Math.sin(CITY.CLEAR.RECT.angle);
+	const cos = Math.cos(CITY.CLEAR.RECT.angle);
+	const bw = CITY.CLEAR.RECT.hw + CITY.CLEAR.RECT.border;
+	const bd = CITY.CLEAR.RECT.hd + CITY.CLEAR.RECT.border;
+	const cx2 = CITY.CLEAR.CENTER.x;
+	const cz2 = CITY.CLEAR.CENTER.z;
 	const flowerPositions: THREE.Vector3[] = [];
-	const dummy = new THREE.Object3D();
-	const pos = new THREE.Vector3();
-	flowers.group.children.forEach((child) => {
-		if (child instanceof THREE.InstancedMesh) {
-			for (let i = 0; i < child.count; i++) {
-				child.getMatrixAt(i, dummy.matrix);
-				pos.setFromMatrixPosition(dummy.matrix);
-				if (pos.y > -50) {
-					flowerPositions.push(pos.clone());
-				}
-			}
+	for (const t of flowers.targets) {
+		const dx = t.position.x - cx2;
+		const dz = t.position.z - cz2;
+		const localX = dx * cos - dz * sin;
+		const localZ = dx * sin + dz * cos;
+		if (Math.abs(localX) >= bw || Math.abs(localZ) >= bd) {
+			flowerPositions.push(t.position.clone());
 		}
-	});
+	}
 
 	// 5. Bienen (fliegen von Blüte zu Blüte)
 	const bees = await createBees(beeGlbUrl, {
@@ -158,7 +162,22 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 	});
 	ctx.scene.add(butterflies.group);
 
-	return { meadow, flowers, bees, butterflies, sky, city };
+	// 7. Pheromon-Spuren (Glühwürmchen-Variante)
+	const flowerTargetsFiltered: FlowerTarget[] = [];
+	for (const t of flowers.targets) {
+		const dx = t.position.x - cx2;
+		const dz = t.position.z - cz2;
+		const localX = dx * cos - dz * sin;
+		const localZ = dx * sin + dz * cos;
+		if (Math.abs(localX) >= bw || Math.abs(localZ) >= bd) {
+			flowerTargetsFiltered.push(t);
+		}
+	}
+	const pheromones = new PheromoneSystem();
+	pheromones.addTrails(flowerTargetsFiltered);
+	ctx.scene.add(pheromones.group);
+
+	return { meadow, flowers, bees, butterflies, pheromones, sky, city };
 }
 
 export function tick(
@@ -171,6 +190,8 @@ export function tick(
 	s.bees.update(ctx.elapsed);
 	// Schmetterlings-Animation
 	s.butterflies.update(ctx.elapsed);
+	// Pheromon-Spuren-Animation
+	s.pheromones.update(ctx.elapsed);
 
 	return { state: s };
 }
@@ -180,6 +201,7 @@ export function dispose(state: ExperienceState, _scene: THREE.Scene): void {
 
 	s.bees.dispose();
 	s.butterflies.dispose();
+	s.pheromones.dispose();
 	s.flowers.dispose();
 	s.meadow.dispose();
 	if (s.city) {

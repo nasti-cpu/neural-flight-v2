@@ -15,9 +15,9 @@ import whiteUrl from "./Flower white.glb?url";
 import yellowUrl from "./Flower yellow.glb?url";
 
 const FLOWER_FILES = [
-	{ url: pinkUrl, scale: 0.35, label: "pink" },
-	{ url: whiteUrl, scale: 0.385, label: "weiß" },
-	{ url: yellowUrl, scale: 0.35, label: "gelb" },
+	{ url: pinkUrl, scale: 0.35, label: "pink", color: 0xe87da0 },
+	{ url: whiteUrl, scale: 0.385, label: "weiß", color: 0xf0ece4 },
+	{ url: yellowUrl, scale: 0.35, label: "gelb", color: 0xf5d742 },
 ];
 
 export interface FlowerConfig {
@@ -30,9 +30,15 @@ const DEFAULT_CONFIG: FlowerConfig = {
 	fieldSize: 60,
 };
 
+export interface FlowerTarget {
+	position: THREE.Vector3;
+	color: THREE.Color;
+}
+
 export interface MeadowFlowers {
 	group: THREE.Group;
 	dispose: () => void;
+	targets: FlowerTarget[];
 }
 
 function loadGLTF(url: string): Promise<THREE.Group> {
@@ -102,6 +108,7 @@ export async function createFlowers(
 ): Promise<MeadowFlowers> {
 	const group = new THREE.Group();
 	const dummy = new THREE.Object3D();
+	const targets: FlowerTarget[] = [];
 
 	const scenes = await Promise.all(
 		FLOWER_FILES.map((f) => loadGLTF(f.url)),
@@ -120,6 +127,7 @@ export async function createFlowers(
 	for (let typeIdx = 0; typeIdx < scenes.length; typeIdx++) {
 		const materialGroups = groupMeshesByMaterial(scenes[typeIdx]);
 		const scale = FLOWER_FILES[typeIdx].scale * (targetHeight / heights[typeIdx]);
+		const flowerColor = new THREE.Color(FLOWER_FILES[typeIdx].color);
 
 		const name = FLOWER_FILES[typeIdx].label;
 		console.log(`Blume ${name}: Höhe=${heights[typeIdx].toFixed(3)}, Skalierung=${scale.toFixed(3)}`);
@@ -152,6 +160,14 @@ export async function createFlowers(
 			mesh.receiveShadow = false;
 			group.add(mesh);
 		}
+
+		// Targets pro Instanz speichern
+		for (const p of positions) {
+			targets.push({
+				position: new THREE.Vector3(p.x, p.y, p.z),
+				color: flowerColor.clone(),
+			});
+		}
 	}
 
 	function dispose() {
@@ -168,5 +184,5 @@ export async function createFlowers(
 		group.clear();
 	}
 
-	return { group, dispose };
+	return { group, dispose, targets };
 }
