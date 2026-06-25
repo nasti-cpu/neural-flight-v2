@@ -129,6 +129,7 @@ export interface MeadowPatch {
 	tick: (elapsed: number) => void;
 	dispose: () => void;
 	getHeightAt: (x: number, z: number) => number;
+	clearRotatedRect: (cx: number, cz: number, hw: number, hd: number, angle: number, border: number) => void;
 }
 
 export function createMeadow(
@@ -288,7 +289,36 @@ export function createMeadow(
 		(label.material as THREE.SpriteMaterial).dispose();
 	}
 
-	return { group, config, tick, dispose, getHeightAt: groundHeight };
+	/** Entfernt Grashalme in einem rotierten Rechteck (y = -100) */
+	function clearRotatedRect(
+		_cx: number, _cz: number,
+		hw: number, hd: number,
+		angle: number,
+		border: number,
+	): void {
+		const sin = Math.sin(angle);
+		const cos = Math.cos(angle);
+		const bw = hw + border;
+		const bd = hd + border;
+		const d = new THREE.Object3D();
+		for (let i = 0; i < instanceData.length; i++) {
+			const inst = instanceData[i];
+			const dx = inst.x - _cx;
+			const dz = inst.z - _cz;
+			const localX = dx * cos - dz * sin;
+			const localZ = dx * sin + dz * cos;
+			if (Math.abs(localX) < bw && Math.abs(localZ) < bd) {
+				d.position.set(inst.x, -100, inst.z);
+				d.scale.setScalar(1);
+				d.rotation.set(0, 0, 0);
+				d.updateMatrix();
+				mesh.setMatrixAt(i, d.matrix);
+			}
+		}
+		mesh.instanceMatrix.needsUpdate = true;
+	}
+
+	return { group, config, tick, dispose, getHeightAt: groundHeight, clearRotatedRect };
 }
 
 /**

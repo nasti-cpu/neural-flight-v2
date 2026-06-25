@@ -1,17 +1,19 @@
 /**
  * insect-world-v2 — Scene Lifecycle.
  * setup, tick, dispose — baut die vollständige Szene auf:
- * Himmel, Wiese, Blumen, Bienen und Schmetterlinge (Blütenflug).
+ * Himmel, Wiese, Blumen, Bienen, Schmetterlinge und Stadt.
  *
  * WebGPU + TSL (siehe AGENTS.md).
  */
 import * as THREE from "three/webgpu";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { ExperienceState, SetupContext, TickContext } from "../types";
 import { createSky } from "./Biome/blauerHimmel/sky";
 import { createMeadow, type MeadowPatch, MEADOW_PRESETS } from "./Biome/Wiese/grass";
 import { createFlowers, type MeadowFlowers } from "./Objekte/Blumen/blumen";
 import { createBees, type BeeSwarm } from "./Objekte/Bienen/bienen";
 import { createButterflies, type ButterflySwarm } from "./Objekte/Schmetterlinge/schmetterlinge";
+import { CITY } from "./Objekte/Stadt/city";
 import beeGlbUrl from "./Objekte/Bienen/Bee.glb?url";
 import butterflyGlbUrl from "./Objekte/Schmetterlinge/Beautiful Butterfly.glb?url";
 
@@ -22,6 +24,47 @@ interface InsectWorldV2State extends ExperienceState {
 	bees: BeeSwarm;
 	butterflies: ButterflySwarm;
 	sky: THREE.Mesh;
+	city: THREE.Group | null;
+}
+
+function loadGLB(url: string): Promise<THREE.Group> {
+	return new Promise((resolve, reject) => {
+		new GLTFLoader().load(url, (gltf) => resolve(gltf.scene), undefined, reject);
+	});
+}
+
+/** Entfernt Blumen-Instanzen in einem rotierten Rechteck (y = -100) */
+function clearFlowerRect(
+	meshes: THREE.InstancedMesh[],
+	cx: number, cz: number,
+	hw: number, hd: number,
+	angle: number,
+	border: number,
+): void {
+	const sin = Math.sin(angle);
+	const cos = Math.cos(angle);
+	const bw = hw + border;
+	const bd = hd + border;
+	const d = new THREE.Object3D();
+	const pos = new THREE.Vector3();
+	for (const mesh of meshes) {
+		for (let i = 0; i < mesh.count; i++) {
+			mesh.getMatrixAt(i, d.matrix);
+			pos.setFromMatrixPosition(d.matrix);
+			const dx = pos.x - cx;
+			const dz = pos.z - cz;
+			const localX = dx * cos - dz * sin;
+			const localZ = dx * sin + dz * cos;
+			if (Math.abs(localX) < bw && Math.abs(localZ) < bd) {
+				d.position.set(pos.x, -100, pos.z);
+				d.scale.setScalar(1);
+				d.rotation.set(0, 0, 0);
+				d.updateMatrix();
+				mesh.setMatrixAt(i, d.matrix);
+			}
+		}
+		mesh.instanceMatrix.needsUpdate = true;
+	}
 }
 
 export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
@@ -37,6 +80,33 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 	const flowers = await createFlowers(0, 0, undefined, meadow.getHeightAt);
 	ctx.scene.add(flowers.group);
 
+	// 4. Stadt laden
+	let city: THREE.Group | null = null;
+	try {
+		const cityScene = await loadGLB(CITY.MODEL);
+		cityScene.scale.setScalar(CITY.SCALE);
+		cityScene.position.set(CITY.POSITION.x, CITY.POSITION.y, CITY.POSITION.z);
+		cityScene.rotation.y = CITY.ROTATION_Y;
+		ctx.scene.add(cityScene);
+		city = cityScene;
+
+		// Gras im Stadt-Bereich entfernen
+		meadow.clearRotatedRect(CITY.CLEAR.CENTER.x, CITY.CLEAR.CENTER.z,
+			CITY.CLEAR.RECT.hw, CITY.CLEAR.RECT.hd, CITY.CLEAR.RECT.angle, CITY.CLEAR.RECT.border);
+
+		// Blumen im Stadt-Bereich entfernen
+		const flowerMeshes: THREE.InstancedMesh[] = [];
+		flowers.group.children.forEach((child) => {
+			if (child instanceof THREE.InstancedMesh) {
+				flowerMeshes.push(child);
+			}
+		});
+		clearFlowerRect(flowerMeshes, CITY.CLEAR.CENTER.x, CITY.CLEAR.CENTER.z,
+			CITY.CLEAR.RECT.hw, CITY.CLEAR.RECT.hd, CITY.CLEAR.RECT.angle, CITY.CLEAR.RECT.border);
+	} catch (e) {
+		console.warn("[V2] Stadt konnte nicht geladen werden:", e);
+	}
+
 	// Blüten-Positionen aus den InstancedMeshes extrahieren
 	const flowerPositions: THREE.Vector3[] = [];
 	const dummy = new THREE.Object3D();
@@ -46,12 +116,14 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 			for (let i = 0; i < child.count; i++) {
 				child.getMatrixAt(i, dummy.matrix);
 				pos.setFromMatrixPosition(dummy.matrix);
-				flowerPositions.push(pos.clone());
+				if (pos.y > -50) {
+					flowerPositions.push(pos.clone());
+				}
 			}
 		}
 	});
 
-	// 4. Bienen (fliegen von Blüte zu Blüte)
+	// 5. Bienen (fliegen von Blüte zu Blüte)
 	const bees = await createBees(beeGlbUrl, {
 		count: 10,
 		scale: 0.04,
@@ -68,7 +140,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 	});
 	ctx.scene.add(bees.group);
 
-	// 5. Schmetterlinge (fliegen von Blüte zu Blüte)
+	// 6. Schmetterlinge (fliegen von Blüte zu Blüte)
 	const butterflies = await createButterflies(butterflyGlbUrl, {
 		count: 6,
 		scale: 0.036,
@@ -86,7 +158,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 	});
 	ctx.scene.add(butterflies.group);
 
-	return { meadow, flowers, bees, butterflies, sky };
+	return { meadow, flowers, bees, butterflies, sky, city };
 }
 
 export function tick(
@@ -110,6 +182,19 @@ export function dispose(state: ExperienceState, _scene: THREE.Scene): void {
 	s.butterflies.dispose();
 	s.flowers.dispose();
 	s.meadow.dispose();
+	if (s.city) {
+		_scene.remove(s.city);
+		s.city.traverse((child) => {
+			if (child instanceof THREE.Mesh) {
+				child.geometry.dispose();
+				if (Array.isArray(child.material)) {
+					child.material.forEach((m) => m.dispose());
+				} else {
+					child.material.dispose();
+				}
+			}
+		});
+	}
 	_scene.remove(s.sky);
 	(s.sky.geometry as THREE.BufferGeometry).dispose();
 	(s.sky.material as THREE.Material).dispose();
