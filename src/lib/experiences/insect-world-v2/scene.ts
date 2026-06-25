@@ -20,6 +20,7 @@ import butterflyGlbUrl from "./Objekte/Schmetterlinge/Beautiful Butterfly.glb?ur
 
 /** Eigenes State-Interface für insect-world-v2 */
 interface InsectWorldV2State extends ExperienceState {
+	camera: THREE.PerspectiveCamera;
 	meadow: MeadowPatch;
 	flowers: MeadowFlowers;
 	bees: BeeSwarm;
@@ -177,7 +178,11 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 	pheromones.addTrails(flowerTargetsFiltered);
 	ctx.scene.add(pheromones.group);
 
-	return { meadow, flowers, bees, butterflies, pheromones, sky, city };
+	// Kamera positionieren
+	const camera = ctx.camera;
+	camera.position.set(0, 2, 0);
+
+	return { camera, meadow, flowers, bees, butterflies, pheromones, sky, city };
 }
 
 export function tick(
@@ -220,4 +225,10 @@ export function dispose(state: ExperienceState, _scene: THREE.Scene): void {
 	_scene.remove(s.sky);
 	(s.sky.geometry as THREE.BufferGeometry).dispose();
 	(s.sky.material as THREE.Material).dispose();
+	// Alle Gruppen aus der Szene entfernen
+	_scene.remove(s.meadow.group);
+	_scene.remove(s.flowers.group);
+	_scene.remove(s.bees.group);
+	_scene.remove(s.butterflies.group);
+	_scene.remove(s.pheromones.group);
 }

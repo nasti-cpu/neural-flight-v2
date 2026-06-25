@@ -1,7 +1,7 @@
 <script lang="ts">
 import { Trophy } from "lucide-svelte";
 import { onDestroy, onMount } from "svelte";
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
 import type { ActiveExperience } from "$lib/experiences/loader";
 import {
@@ -17,7 +17,7 @@ import {
 } from "$lib/ws/protocol";
 
 let canvas: HTMLCanvasElement;
-let renderer: THREE.WebGLRenderer;
+let renderer: THREE.WebGPURenderer;
 let scene: THREE.Scene;
 let vrButton: HTMLElement;
 let score = $state(0);
@@ -36,33 +36,36 @@ onMount(() => {
 	scene = new THREE.Scene();
 	const dummyCamera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
 
-	renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-	renderer.setPixelRatio(window.devicePixelRatio);
-	renderer.setSize(window.innerWidth, window.innerHeight);
-	renderer.xr.enabled = true;
-	renderer.shadowMap.enabled = true;
-	renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+	renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
 
-	vrButton = VRButton.createButton(renderer);
-	document.body.appendChild(vrButton);
+	(async () => {
+		await renderer.init();
+		renderer.setPixelRatio(window.devicePixelRatio);
+		renderer.setSize(window.innerWidth, window.innerHeight);
+		renderer.xr.enabled = true;
+		renderer.shadowMap.enabled = true;
+		renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-	function onKey(e: KeyboardEvent, pressed: boolean) {
-		switch (e.code) {
-			case "KeyW": keys.w = pressed; break;
-			case "KeyA": keys.a = pressed; break;
-			case "KeyS": keys.s = pressed; break;
-			case "KeyD": keys.d = pressed; break;
-			case "ShiftLeft": case "ShiftRight": keys.shift = pressed; break;
-			case "ControlLeft": case "ControlRight": keys.ctrl = pressed; break;
+		vrButton = VRButton.createButton(renderer);
+		document.body.appendChild(vrButton);
+
+		function onKey(e: KeyboardEvent, pressed: boolean) {
+			switch (e.code) {
+				case "KeyW": keys.w = pressed; break;
+				case "KeyA": keys.a = pressed; break;
+				case "KeyS": keys.s = pressed; break;
+				case "KeyD": keys.d = pressed; break;
+				case "ShiftLeft": case "ShiftRight": keys.shift = pressed; break;
+				case "ControlLeft": case "ControlRight": keys.ctrl = pressed; break;
+			}
 		}
-	}
-	addEventListener("keydown", (e) => onKey(e, true));
-	addEventListener("keyup", (e) => onKey(e, false));
+		addEventListener("keydown", (e) => onKey(e, true));
+		addEventListener("keyup", (e) => onKey(e, false));
 
-	// Load whichever experience is selected (persisted in localStorage)
-	const experienceId = getActiveExperienceId();
+		// Load whichever experience is selected (persisted in localStorage)
+		const experienceId = getActiveExperienceId();
 
-	loadExperience(experienceId, { scene, camera: dummyCamera, renderer }).then(
+		loadExperience(experienceId, { scene, camera: dummyCamera, renderer: renderer as any }).then(
 		(exp: ActiveExperience) => {
 			experienceName = exp.manifest.name;
 			hasOutputs = (exp.manifest.outputs?.length ?? 0) > 0;
@@ -138,6 +141,7 @@ onMount(() => {
 		console.error("Failed to load experience:", err);
 		experienceName = "Error: " + (err instanceof Error ? err.message : String(err));
 	});
+})();
 
 	return () => {
 		removeResizeListener?.();
