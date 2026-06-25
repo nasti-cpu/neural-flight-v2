@@ -185,14 +185,14 @@ export async function createBees(
 					continue;
 				}
 
-				const start = bee.center;
 				const end = bee.target!;
-				const dist = start.distanceTo(end);
+				const pos = bee.group.position;
+				const dist = pos.distanceTo(end);
 
-				if (dist < 0.001) {
+				if (dist < 0.5) {
 					// Am Ziel angekommen → neues Ziel
-					bee.hoverTimer = hoverDuration;
-					bee.center.copy(end);
+					bee.hoverTimer = hoverDuration + Math.random() * 0.5;
+					bee.center.copy(pos);
 					const idx = pickNextTarget(bee.targetIndex, flowers.length);
 					bee.target = flowers[idx].clone();
 					bee.targetIndex = idx;
@@ -200,20 +200,19 @@ export async function createBees(
 					continue;
 				}
 
-				// Schrittgeschwindigkeit: dist in ~1s zurücklegen, begrenzt auf speed
-				const step = Math.min(config.speedMax * 0.016 * 60, dist);
-				const dir = new THREE.Vector3().copy(end).sub(start).normalize();
+				// Schrittgeschwindigkeit: ~2-3m/s
+				const step = Math.min(3 * 0.016, dist);
+				const dir = new THREE.Vector3().copy(end).sub(pos).normalize();
 
 				// Neue Position = aktuell + Schritt in Richtung Ziel
-				const newPos = bee.group.position.clone().add(dir.multiplyScalar(step));
+				const newPos = pos.clone().add(dir.multiplyScalar(step));
 				// Höhe: zur Blüten-Höhe + kleiner Offset
 				const targetY = end.y + 0.3 + Math.sin(time * 2 + bee.phase) * 0.1;
 				newPos.y += (targetY - newPos.y) * 0.1;
 
 				// Bewegungsrichtung = Blickrichtung
-				const dx = newPos.x - bee.group.position.x;
-				const dz = newPos.z - bee.group.position.z;
-				const dy = newPos.y - bee.group.position.y;
+				const dx = newPos.x - pos.x;
+				const dz = newPos.z - pos.z;
 
 				bee.group.position.copy(newPos);
 				bee.center.copy(newPos);

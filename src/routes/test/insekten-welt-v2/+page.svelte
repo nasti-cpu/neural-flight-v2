@@ -89,18 +89,18 @@
 
 			// Bienen
 			const bees = await createBees(beeGlbUrl, {
-				count: 10,
-				scale: 0.04,
+				count: 8,
+				scale: 0.06,
 				fieldRadius: 25,
 				flyRadiusMin: 1,
 				flyRadiusMax: 3,
-				speedMin: 2,
-				speedMax: 5,
+				speedMin: 1.5,
+				speedMax: 3.0,
 				heightBaseMin: 0.3,
 				heightBaseMax: 0.8,
 				heightRange: 0.2,
 				flowerTargets: flowerPositions,
-				hoverDuration: 1.0,
+				hoverDuration: 1.5,
 			});
 			scene.add(bees.group);
 			console.log("[V2] Bienen geladen");
