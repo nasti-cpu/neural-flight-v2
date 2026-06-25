@@ -202,13 +202,12 @@ export async function createBees(
 
 				// Schrittgeschwindigkeit: ~2-3m/s
 				const step = Math.min(3 * 0.016, dist);
-				const dir = new THREE.Vector3().copy(end).sub(pos).normalize();
+				// Ziel-Position: Blüte + 0.35m Höhe
+				const targetPos = new THREE.Vector3(end.x, end.y + 0.35, end.z);
+				const dir = new THREE.Vector3().copy(targetPos).sub(pos).normalize();
 
 				// Neue Position = aktuell + Schritt in Richtung Ziel
 				const newPos = pos.clone().add(dir.multiplyScalar(step));
-				// Höhe: zur Blüten-Höhe + kleiner Offset
-				const targetY = end.y + 0.3 + Math.sin(time * 2 + bee.phase) * 0.1;
-				newPos.y += (targetY - newPos.y) * 0.1;
 
 				// Bewegungsrichtung = Blickrichtung
 				const dx = newPos.x - pos.x;
