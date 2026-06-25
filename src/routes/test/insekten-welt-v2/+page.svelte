@@ -8,7 +8,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from "svelte";
 	import { browser } from "$app/environment";
-	import * as THREE from "three";
+	import * as THREE from "three/webgpu";
 	import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 	import { createSky } from "$lib/experiences/insect-world-v2/Biome/blauerHimmel/sky";
@@ -16,16 +16,15 @@
 	import { createFlowers } from "$lib/experiences/insect-world-v2/Objekte/Blumen/blumen";
 	import { createBees } from "$lib/experiences/insect-world-v2/Objekte/Bienen/bienen";
 
+	const beeGlbUrl = "/models/bienen/Bee.glb";
+
 	let canvas: HTMLCanvasElement;
-	let renderer: THREE.WebGLRenderer;
+	let renderer: THREE.WebGPURenderer;
 	let scene: THREE.Scene;
 	let camera: THREE.PerspectiveCamera;
 	let controls: OrbitControls;
 	let animationId: number;
 	let loading = $state(true);
-
-	// Das von dir in Objekte/Bienen/ abgelegte 3D-Modell
-	import beeGlbUrl from "$lib/experiences/insect-world-v2/Objekte/Bienen/Bee.glb?url";
 
 	onMount(async () => {
 		scene = new THREE.Scene();
@@ -36,7 +35,8 @@
 		camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 500);
 		camera.position.set(10, 6, 14);
 
-		renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+		renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
+		await renderer.init();
 		renderer.setSize(w, h);
 		renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 		renderer.toneMapping = THREE.ACESFilmicToneMapping;
