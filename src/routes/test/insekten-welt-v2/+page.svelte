@@ -90,15 +90,15 @@
 			// Bienen
 			const bees = await createBees(beeGlbUrl, {
 				count: 8,
-				scale: 0.06,
+				scale: 0.03,
 				fieldRadius: 25,
 				flyRadiusMin: 1,
 				flyRadiusMax: 3,
 				speedMin: 1.5,
 				speedMax: 3.0,
-				heightBaseMin: 0.3,
-				heightBaseMax: 0.8,
-				heightRange: 0.2,
+				heightBaseMin: 0.2,
+				heightBaseMax: 0.5,
+				heightRange: 0.15,
 				flowerTargets: flowerPositions,
 				hoverDuration: 1.5,
 			});
