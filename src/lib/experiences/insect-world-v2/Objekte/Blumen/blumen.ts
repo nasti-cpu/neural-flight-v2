@@ -6,7 +6,7 @@
  * separater InstancedMesh erzeugt.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 

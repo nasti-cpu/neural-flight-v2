@@ -1,16 +1,16 @@
 <script lang="ts">
 /**
- * LAB EXPERIMENT — Wiese & Himmel
+ * LAB EXPERIMENT — Wiese & Himmel (WebGPU)
  *
  * Kombiniert die Frühlingswiese mit allen 6 Himmels-Varianten.
  * OrbitControls zum Erkunden, Kamera auf Augenhöhe (VR-Blick).
  *
- * Frühlingswiese: InstancedMesh + ShaderMaterial (WebGL)
- * Himmel: Vertex-Color-Icosahedron + MeshBasicMaterial
+ * Wiese: InstancedMesh + MeshBasicNodeMaterial (TSL/WebGPU)
+ * Himmel: Icosahedron + MeshBasicNodeMaterial + TSL-Gradient
  */
 import { onDestroy, onMount } from "svelte";
 import { browser } from "$app/environment";
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { createMeadow, MEADOW_PRESETS } from "$lib/experiences/insect-world-v2/Biome/Wiese/grass";
 import { createSky, SKY_PRESETS, type SkyPresetName } from "$lib/experiences/insect-world-v2/Biome/blauerHimmel/sky";
@@ -29,13 +29,12 @@ const COMBOS: Combo[] = [
 ];
 
 let canvas: HTMLCanvasElement;
-let renderer: THREE.WebGLRenderer;
+let renderer: THREE.WebGPURenderer;
 let scene: THREE.Scene;
 let camera: THREE.PerspectiveCamera;
 let controls: OrbitControls;
 let meadow: ReturnType<typeof createMeadow> | null = null;
 let skyMesh: THREE.Mesh | null = null;
-let animationId: number;
 let currentIndex = $state(0);
 
 function rebuildScene(index: number) {
@@ -64,10 +63,11 @@ function rebuildScene(index: number) {
 	scene.fog = new THREE.Fog(fogColor, 30, 60);
 }
 
-onMount(() => {
-	renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+onMount(async () => {
+	renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
 	renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 	renderer.setSize(window.innerWidth, window.innerHeight);
+	await renderer.init();
 
 	scene = new THREE.Scene();
 
@@ -84,15 +84,12 @@ onMount(() => {
 
 	rebuildScene(0);
 
-	const clock = new THREE.Clock();
-	function animate() {
-		const elapsed = clock.getElapsedTime();
+	renderer.setAnimationLoop(() => {
+		const elapsed = performance.now() / 1000;
 		if (meadow) meadow.tick(elapsed);
 		controls.update();
 		renderer.render(scene, camera);
-		animationId = requestAnimationFrame(animate);
-	}
-	animationId = requestAnimationFrame(animate);
+	});
 
 	const onResize = () => {
 		camera.aspect = window.innerWidth / window.innerHeight;
@@ -109,7 +106,7 @@ function switchVariant(index: number) {
 
 onDestroy(() => {
 	if (!browser) return;
-	cancelAnimationFrame(animationId);
+	renderer?.setAnimationLoop(null);
 	if (meadow) { meadow.dispose(); scene.remove(meadow.group); }
 	if (skyMesh) { skyMesh.geometry.dispose(); (skyMesh.material as THREE.Material).dispose(); scene.remove(skyMesh); }
 	controls?.dispose();

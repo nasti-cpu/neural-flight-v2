@@ -1,10 +1,12 @@
 /**
  * insect-world-v2 — Himmel (Blauer Himmel).
- * Erzeugt eine Himmelskugel mit Vertex-Color-Gradient.
- * Verwendet scale(-1,1,1) + DoubleSide für Inside-Out-Rendering (VR).
- * Farben: Top, Horizon, Bottom.
+ * TSL-Himmelskugel mit 3-Stop-Gradient (Top, Horizon, Bottom).
+ * Nutzt MeshBasicNodeMaterial + nStopGradient für GPU-Gradient.
+ * scale(-1,1,1) + BackSide für Inside-Out-Rendering (VR-kompatibel).
  */
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
+import { vec3, positionWorld } from "three/tsl";
+import { nStopGradient } from "$lib/tsl";
 
 export const SKY_PRESETS = {
 	klassisch: [0x1a3a6e, 0x4a90d9, 0x87ceeb],
@@ -24,37 +26,18 @@ export function createSky(preset: SkyPresetName = "klassisch"): THREE.Mesh {
 	const geo = new THREE.IcosahedronGeometry(radius, 4);
 	geo.scale(-1, 1, 1);
 
-	const pos = geo.attributes.position;
-	const colorArray = new Float32Array(pos.count * 3);
-	const cTop = new THREE.Color(hexColors[0]);
-	const cHorizon = new THREE.Color(hexColors[1]);
-	const cBottom = new THREE.Color(hexColors[2]);
-	const temp = new THREE.Color();
-
-	for (let i = 0; i < pos.count; i++) {
-		const y = pos.getY(i);
-		const t = (y / radius + 1) * 0.5;
-
-		if (t > 0.5) {
-			const u = (t - 0.5) * 2;
-			temp.copy(cHorizon).lerp(cTop, u);
-		} else {
-			const u = t * 2;
-			temp.copy(cBottom).lerp(cHorizon, u);
-		}
-
-		colorArray[i * 3] = temp.r;
-		colorArray[i * 3 + 1] = temp.g;
-		colorArray[i * 3 + 2] = temp.b;
-	}
-
-	geo.setAttribute("color", new THREE.BufferAttribute(colorArray, 3));
-
-	const mat = new THREE.MeshBasicMaterial({
-		vertexColors: true,
-		side: THREE.DoubleSide,
-		fog: false,
+	const colorNodes = hexColors.map((h) => {
+		const c = new THREE.Color(h);
+		return vec3(c.r, c.g, c.b);
 	});
+
+	// Gradient-Faktor: y-Normalte von -1 (unten) → 0 (Horizont) → +1 (oben)
+	const t = positionWorld.normalize().y.mul(0.5).add(0.5);
+
+	const mat = new THREE.MeshBasicNodeMaterial();
+	mat.colorNode = nStopGradient(colorNodes, t);
+	mat.side = THREE.BackSide;
+	mat.fog = false;
 
 	const mesh = new THREE.Mesh(geo, mat);
 	mesh.frustumCulled = false;

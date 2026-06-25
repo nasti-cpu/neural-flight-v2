@@ -1,28 +1,31 @@
 <script lang="ts">
 /**
- * LAB EXPERIMENT — Blumen-Tester
+ * LAB EXPERIMENT — Blumen-Tester (WebGPU)
  *
  * Frühlingswiese mit den 3 Lowpoly-Blumen (pink, white, yellow).
  * WASD + Maus zum Laufen, Click zum Fokussieren.
  * Toggle zum Ein-/Ausblenden der Blumen.
+ *
+ * Wiese: MeshBasicNodeMaterial (TSL/WebGPU)
+ * Himmel: MeshBasicNodeMaterial + TSL-Gradient
+ * Blumen: GLTF + InstancedMesh (WebGPU-kompatibel)
  */
 import { onDestroy, onMount } from "svelte";
 import { browser } from "$app/environment";
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { PointerLockControls } from "three/examples/jsm/controls/PointerLockControls.js";
 import { createMeadow, MEADOW_PRESETS } from "$lib/experiences/insect-world-v2/Biome/Wiese/grass";
 import { createSky, SKY_PRESETS } from "$lib/experiences/insect-world-v2/Biome/blauerHimmel/sky";
 import { createFlowers } from "$lib/experiences/insect-world-v2/Objekte/Blumen/blumen";
 
 let canvas: HTMLCanvasElement;
-let renderer: THREE.WebGLRenderer;
+let renderer: THREE.WebGPURenderer;
 let scene: THREE.Scene;
 let camera: THREE.PerspectiveCamera;
 let controls: PointerLockControls;
 let meadow: ReturnType<typeof createMeadow> | null = null;
 let skyMesh: THREE.Mesh | null = null;
 let flowers: Awaited<ReturnType<typeof createFlowers>> | null = null;
-let animationId: number;
 let showFlowers = $state(true);
 let loading = $state(true);
 let locked = $state(false);
@@ -30,10 +33,11 @@ let locked = $state(false);
 const keys = { w: false, a: false, s: false, d: false };
 const vel = new THREE.Vector3();
 
-onMount(() => {
-	renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+onMount(async () => {
+	renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
 	renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 	renderer.setSize(window.innerWidth, window.innerHeight);
+	await renderer.init();
 
 	scene = new THREE.Scene();
 
@@ -76,10 +80,9 @@ onMount(() => {
 	document.addEventListener("keyup", onKeyUp);
 
 	const clock = new THREE.Clock();
-	let elapsed = 0;
-	function animate() {
+	renderer.setAnimationLoop(() => {
 		const delta = clock.getDelta();
-		elapsed += delta;
+		const elapsed = clock.elapsedTime;
 
 		if (locked) {
 			const speed = 4;
@@ -95,9 +98,7 @@ onMount(() => {
 
 		if (meadow) meadow.tick(elapsed);
 		renderer.render(scene, camera);
-		animationId = requestAnimationFrame(animate);
-	}
-	animationId = requestAnimationFrame(animate);
+	});
 
 	const onResize = () => {
 		camera.aspect = window.innerWidth / window.innerHeight;
@@ -133,9 +134,9 @@ function clickToLock() {
 
 onDestroy(() => {
 	if (!browser) return;
+	renderer?.setAnimationLoop(null);
 	controls?.unlock();
 	controls?.dispose();
-	cancelAnimationFrame(animationId);
 	meadow?.dispose();
 	if (skyMesh) {
 		skyMesh.geometry.dispose();

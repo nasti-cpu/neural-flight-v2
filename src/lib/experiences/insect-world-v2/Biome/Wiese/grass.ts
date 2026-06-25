@@ -1,17 +1,30 @@
 /**
  * Wiese (Meadow) Module für insect-world-v2
  *
- * Erzeugt Gras mit InstancedMesh + ShaderMaterial (WebGL).
+ * Erzeugt Gras mit InstancedMesh + MeshBasicNodeMaterial (TSL/WebGPU).
  * 6 Voreinstellungen (Presets) mit unterschiedlichen Farben,
  * Wuchshöhen, Dichten und Wind.
  *
- * Jeder Aufruf von createMeadow() gibt eine THREE.Group zurück,
- * die ground + Gras + Labelsprite enthält.
- *
- * TODO: Für VR-Produktion auf TSL + WebGPU portieren.
+ * Wind-Animation über TSL positionNode (GPU-beschleunigt).
+ * TSL time auto-updates — kein manuelles tick() nötig.
  */
 
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
+import {
+	attribute,
+	clamp,
+	dot,
+	float,
+	max,
+	mix,
+	normalize,
+	normalWorld,
+	positionLocal,
+	sin,
+	time,
+	uniform,
+	vec3,
+} from "three/tsl";
 
 // ─── Konfiguration ────────────────────────────────────────────────────
 
@@ -79,70 +92,6 @@ export const FRUEHLING_SPACING: SpacingVariant[] = [
 	{ name: "Dicht (4.000)", config: { ...fruehlingBase, fieldSize: 6, grassCount: 4000 } },
 	{ name: "Sehr dicht (6.000)", config: { ...fruehlingBase, fieldSize: 6, grassCount: 6000 } },
 ];
-
-// ─── Shader (GLSL, Strings) ──────────────────────────────────────────
-
-const vertexShader = `
-	attribute float aPhase;
-	attribute float aSpeed;
-	attribute float aBaseX;
-	attribute float aBaseZ;
-
-	uniform float uTime;
-	uniform float uWindStrength;
-	uniform float uWindSpeed;
-
-	varying vec3 vNormal;
-	varying float vHeight;
-
-	void main() {
-		float timeFactor = uTime * uWindSpeed;
-		float swayX = sin(timeFactor * aSpeed + aPhase + aBaseX * 0.5) * uWindStrength * position.y;
-		float swayZ = sin(timeFactor * aSpeed * 0.7 + aPhase + aBaseZ * 0.5) * uWindStrength * 0.7 * position.y;
-
-		vec3 pos = position + vec3(swayX, 0.0, swayZ);
-
-		vec3 objectNormal = normalize(instanceMatrix * vec4(normal, 0.0)).xyz;
-		vNormal = normalize((modelMatrix * vec4(objectNormal, 0.0)).xyz);
-		vHeight = position.y;
-
-		gl_Position = projectionMatrix * viewMatrix * (instanceMatrix * vec4(pos, 1.0));
-	}
-`;
-
-const fragmentShader = `
-	uniform vec3 uColor;
-	uniform vec3 uGroundColor;
-	uniform float uMinHeight;
-	uniform float uMaxHeight;
-
-	varying vec3 vNormal;
-	varying float vHeight;
-
-	void main() {
-		vec3 lightDir = normalize(vec3(0.5, 0.8, 0.3));
-		float diff = max(dot(vNormal, lightDir), 0.0);
-		float ambient = 0.35;
-		float light = ambient + diff * 0.65;
-
-		float t = clamp((vHeight - uMinHeight) / (uMaxHeight - uMinHeight + 0.001), 0.0, 1.0);
-		vec3 col = mix(uGroundColor, uColor, t);
-
-		gl_FragColor = vec4(col * light, 1.0);
-	}
-`;
-
-const groundVertexShader = `
-	varying vec3 vNormal;
-	varying float vHeight;
-
-	void main() {
-		vec4 worldPos = modelMatrix * vec4(position, 1.0);
-		vNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-		vHeight = position.y;
-		gl_Position = projectionMatrix * viewMatrix * worldPos;
-	}
-`;
 
 // ─── Hilfsfunktion: Label-Sprite ──────────────────────────────────────
 
@@ -219,47 +168,26 @@ export function createMeadow(
 	gPos.needsUpdate = true;
 	groundGeo.computeVertexNormals();
 
-	const groundMat = new THREE.ShaderMaterial({
-		vertexShader: groundVertexShader,
-		fragmentShader: fragmentShader,
-		uniforms: {
-			uTime: { value: 0 },
-			uWindStrength: { value: config.windStrength },
-			uWindSpeed: { value: config.windSpeedMultiplier },
-			uColor: { value: new THREE.Color(config.color) },
-			uGroundColor: { value: new THREE.Color(config.groundColor) },
-			uMinHeight: { value: config.minHeight },
-			uMaxHeight: { value: config.maxHeight },
-		},
-	});
+	const gc = new THREE.Color(config.groundColor);
+	const groundMat = new THREE.MeshBasicNodeMaterial();
+	groundMat.colorNode = vec3(gc.r, gc.g, gc.b);
 	const ground = new THREE.Mesh(groundGeo, groundMat);
 	ground.position.set(cx, 0, cz);
 	group.add(ground);
 
 	// --- Instanced Grass ---
 	const bladeGeo = new THREE.ConeGeometry(0.06, 1, 4);
-	const bladeMat = new THREE.ShaderMaterial({
-		vertexShader,
-		fragmentShader,
-		uniforms: {
-			uTime: { value: 0 },
-			uWindStrength: { value: config.windStrength },
-			uWindSpeed: { value: config.windSpeedMultiplier },
-			uColor: { value: new THREE.Color(config.color) },
-			uGroundColor: { value: new THREE.Color(config.groundColor) },
-			uMinHeight: { value: config.minHeight },
-			uMaxHeight: { value: config.maxHeight },
-		},
-	});
 
-	const mesh = new THREE.InstancedMesh(bladeGeo, bladeMat, config.grassCount);
-	mesh.castShadow = false;
-	mesh.receiveShadow = false;
+	const bladeMat = new THREE.MeshBasicNodeMaterial();
 
+	// Alle Instanz-Daten in Arrays sammeln (Position, Wind-Attribute, Matrizen)
 	const phaseArr = new Float32Array(config.grassCount);
 	const speedArr = new Float32Array(config.grassCount);
 	const baseXArr = new Float32Array(config.grassCount);
 	const baseZArr = new Float32Array(config.grassCount);
+
+	type InstanceData = { x: number; z: number; height: number; rotY: number; sx: number; sz: number; baseY: number };
+	const instanceData: InstanceData[] = [];
 
 	const halfField = config.fieldSize / 2;
 
@@ -272,23 +200,64 @@ export function createMeadow(
 		const sz = 0.5 + Math.random() * 0.8;
 		const baseY = groundHeight(x, z);
 
-		dummy.position.set(x, baseY + height / 2, z);
-		dummy.scale.set(sx, height, sz);
-		dummy.rotation.set(0, baseRotY, 0);
-		dummy.updateMatrix();
-		mesh.setMatrixAt(i, dummy.matrix);
-
 		phaseArr[i] = Math.random() * Math.PI * 2;
 		speedArr[i] = 0.5 + Math.random() * 1.5;
 		baseXArr[i] = x;
 		baseZArr[i] = z;
+		instanceData.push({ x, z, height, rotY: baseRotY, sx, sz, baseY });
 	}
-	mesh.instanceMatrix.needsUpdate = true;
 
 	bladeGeo.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phaseArr, 1));
 	bladeGeo.setAttribute("aSpeed", new THREE.InstancedBufferAttribute(speedArr, 1));
 	bladeGeo.setAttribute("aBaseX", new THREE.InstancedBufferAttribute(baseXArr, 1));
 	bladeGeo.setAttribute("aBaseZ", new THREE.InstancedBufferAttribute(baseZArr, 1));
+
+	// TSL Nodes für Wind und Farbe
+	const aPhase = attribute("aPhase", "float");
+	const aSpeed = attribute("aSpeed", "float");
+	const aBaseX = attribute("aBaseX", "float");
+	const aBaseZ = attribute("aBaseZ", "float");
+
+	const uWindStrength = uniform(config.windStrength);
+	const uWindSpeed = uniform(config.windSpeedMultiplier);
+	const uColor = uniform(new THREE.Color(config.color));
+	const uGroundColor = uniform(new THREE.Color(config.groundColor));
+	const uMinHeight = uniform(config.minHeight);
+	const uMaxHeight = uniform(config.maxHeight);
+
+	// ── positionNode: Wind-Wave ──
+	const timeFactor = time.mul(uWindSpeed);
+	const swayX = sin(timeFactor.mul(aSpeed).add(aPhase).add(aBaseX.mul(0.5)))
+		.mul(uWindStrength).mul(positionLocal.y);
+	const swayZ = sin(timeFactor.mul(aSpeed).mul(0.7).add(aPhase).add(aBaseZ.mul(0.5)))
+		.mul(uWindStrength).mul(0.7).mul(positionLocal.y);
+	bladeMat.positionNode = positionLocal.add(vec3(swayX, float(0), swayZ));
+
+	// ── colorNode: Höhen-Mix + einfaches Licht ──
+	const heightT = clamp(
+		positionLocal.y.sub(uMinHeight)
+			.div(uMaxHeight.sub(uMinHeight).add(0.001)),
+		float(0), float(1),
+	);
+	const lightDir = normalize(vec3(0.5, 0.8, 0.3));
+	const diff = max(dot(normalWorld, lightDir), float(0));
+	const lightFactor = float(0.35).add(diff.mul(0.65));
+	bladeMat.colorNode = mix(uGroundColor, uColor, heightT).mul(lightFactor);
+
+	const mesh = new THREE.InstancedMesh(bladeGeo, bladeMat, config.grassCount);
+	mesh.castShadow = false;
+	mesh.receiveShadow = false;
+
+	// Instanz-Matrizen aus den gespeicherten Daten setzen
+	for (let i = 0; i < config.grassCount; i++) {
+		const d = instanceData[i];
+		dummy.position.set(d.x, d.baseY + d.height / 2, d.z);
+		dummy.scale.set(d.sx, d.height, d.sz);
+		dummy.rotation.set(0, d.rotY, 0);
+		dummy.updateMatrix();
+		mesh.setMatrixAt(i, dummy.matrix);
+	}
+	mesh.instanceMatrix.needsUpdate = true;
 
 	group.add(mesh);
 
@@ -301,13 +270,8 @@ export function createMeadow(
 	group.add(label);
 
 	// --- public API ---
-	let skipFrame = 0;
-
-	function tick(elapsed: number): void {
-		skipFrame++;
-		if (skipFrame % 2 !== 0) return;
-		bladeMat.uniforms.uTime.value = elapsed;
-		groundMat.uniforms.uTime.value = elapsed;
+	function tick(_elapsed: number): void {
+		// TSL time auto-updates — kein manuelles Uniform-Setzen nötig
 	}
 
 	function dispose(): void {

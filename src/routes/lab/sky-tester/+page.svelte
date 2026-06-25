@@ -1,13 +1,13 @@
 <script lang="ts">
 /**
- * LAB EXPERIMENT — Sky Tester
+ * LAB EXPERIMENT — Sky Tester (WebGPU)
  *
  * Testet die 6 Himmels-Varianten aus insect-world-v2 Biome/blauerHimmel/sky.ts.
  * Kamera innerhalb der Himmelskugel (VR-Setup).
- * Nutzt Vertex-Color-Ansatz (wie $lib/three/sky.ts).
+ * Nutzt TSL-Material (MeshBasicNodeMaterial + nStopGradient).
  */
 import { onDestroy, onMount } from "svelte";
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { createSky, SKY_PRESETS, type SkyPresetName } from "$lib/experiences/insect-world-v2/Biome/blauerHimmel/sky";
 
 const presets = Object.entries(SKY_PRESETS).map(([name]) => ({
@@ -15,7 +15,7 @@ const presets = Object.entries(SKY_PRESETS).map(([name]) => ({
 }));
 
 let canvas: HTMLCanvasElement;
-let renderer: THREE.WebGLRenderer;
+let renderer: THREE.WebGPURenderer;
 let scene: THREE.Scene;
 let camera: THREE.PerspectiveCamera;
 let currentIndex = $state(0);
@@ -46,10 +46,11 @@ function rebuildSky() {
 	scene.add(skyMesh);
 }
 
-onMount(() => {
-	renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+onMount(async () => {
+	renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
 	renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 	renderer.setSize(window.innerWidth, window.innerHeight);
+	await renderer.init();
 
 	scene = new THREE.Scene();
 	camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 2000);

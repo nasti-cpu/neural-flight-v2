@@ -1,16 +1,16 @@
 <script lang="ts">
 /**
- * LAB EXPERIMENT — Grass Tester (Wiesen-Varianten)
+ * LAB EXPERIMENT — Grass Tester (Wiesen-Varianten, WebGPU)
  *
  * Zeigt 6 Gras-Dichte-Varianten der Frühlingswiese im Kreis.
  * Per Knopfdruck umschaltbar auf die 6 Grund-Presets.
  *
- * Nutzt InstancedMesh + ShaderMaterial (WebGL).
- * Für VR-Produktion auf TSL/WebGPU portieren.
+ * Nutzt InstancedMesh + MeshBasicNodeMaterial (TSL/WebGPU).
+ * Wind-Animation via TSL positionNode — kein manuelles tick nötig.
  */
 import { onDestroy, onMount } from "svelte";
 import { browser } from "$app/environment";
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
 	createMeadow,
@@ -21,7 +21,7 @@ import {
 } from "$lib/experiences/insect-world-v2/Biome/Wiese/grass";
 
 let canvas: HTMLCanvasElement;
-let renderer: THREE.WebGLRenderer;
+let renderer: THREE.WebGPURenderer;
 let scene: THREE.Scene;
 let camera: THREE.PerspectiveCamera;
 let controls: OrbitControls;
@@ -33,10 +33,11 @@ let spacingMode = $state(true);
 type LegendEntry = { name: string; color: string; count: string };
 let legend: LegendEntry[] = $state([]);
 
-onMount(() => {
-	renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+onMount(async () => {
+	renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
 	renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 	renderer.setSize(window.innerWidth, window.innerHeight);
+	await renderer.init();
 
 	scene = new THREE.Scene();
 	scene.background = new THREE.Color("#a5cce0");
@@ -55,17 +56,14 @@ onMount(() => {
 
 	buildPatches();
 
-	const clock = new THREE.Clock();
-	function animate() {
-		const elapsed = clock.getElapsedTime();
+	renderer.setAnimationLoop(() => {
+		const elapsed = (performance.now() / 1000);
 		for (const p of patches) {
 			p.tick(elapsed);
 		}
 		controls.update();
 		renderer.render(scene, camera);
-		animationId = requestAnimationFrame(animate);
-	}
-	animationId = requestAnimationFrame(animate);
+	});
 
 	const onResize = () => {
 		camera.aspect = window.innerWidth / window.innerHeight;
@@ -114,7 +112,7 @@ function toggleMode() {
 
 onDestroy(() => {
 	if (!browser) return;
-	cancelAnimationFrame(animationId);
+	renderer?.setAnimationLoop(null);
 	for (const p of patches) p.dispose();
 	controls?.dispose();
 	renderer?.dispose();
