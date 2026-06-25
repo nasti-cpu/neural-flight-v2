@@ -101,6 +101,7 @@
 				heightRange: 0.15,
 				flowerTargets: flowerPositions,
 				hoverDuration: 1.5,
+				heightAboveFlower: 1.0,
 			});
 			scene.add(bees.group);
 			console.log("[V2] Bienen geladen");

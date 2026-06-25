@@ -29,6 +29,8 @@ export interface BeeConfig {
 	flowerTargets?: THREE.Vector3[];
 	/** Zeit in Sekunden, die an jeder Blüte verweilt wird */
 	hoverDuration?: number;
+	/** Flughöhe über den Blüten (Meter) */
+	heightAboveFlower?: number;
 }
 
 const DEFAULT_CONFIG: BeeConfig = {
@@ -43,6 +45,7 @@ const DEFAULT_CONFIG: BeeConfig = {
 	heightBaseMax: 2.0,
 	heightRange: 0.6,
 	hoverDuration: 1.5,
+	heightAboveFlower: 0.6,
 };
 
 /** Interner Zustand einer Biene */
@@ -118,6 +121,7 @@ export async function createBees(
 	);
 	const flowers = config.flowerTargets ?? [];
 	const hoverDuration = config.hoverDuration ?? 1.5;
+	const heightAboveFlower = config.heightAboveFlower ?? 0.6;
 
 	const bees: BeeState[] = [];
 
@@ -203,7 +207,7 @@ export async function createBees(
 				// Schrittgeschwindigkeit: ~2-3m/s
 				const step = Math.min(3 * 0.016, dist);
 				// Ziel-Position: Blüte + 0.35m Höhe
-				const targetPos = new THREE.Vector3(end.x, end.y + 0.6, end.z);
+				const targetPos = new THREE.Vector3(end.x, end.y + heightAboveFlower, end.z);
 				const dir = new THREE.Vector3().copy(targetPos).sub(pos).normalize();
 
 				// Neue Position = aktuell + Schritt in Richtung Ziel
