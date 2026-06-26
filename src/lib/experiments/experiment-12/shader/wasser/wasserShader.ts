@@ -4,9 +4,8 @@
  * TSL-basierte Shader für die Unterwasser-Szene:
  *
  * 1. Wasseroberfläche von unten:
- *    - Snell's-Fenster-Effekt (heller Kreis direkt oben, dunkler an den Rändern)
  *    - 6-Oktaven-Wellenfeld mit Normalen-Berechnung
- *    - Scharfe Kaustik-Highlights (Lichtbündelung an Wellenkämmen)
+ *    - Fresnel-Reflexion (gleichmäßig, ohne Snell's-Fenster-Kreis)
  *    - Stimmungsabhängige Farben (surfaceColor, highlightColor)
  *
  * 2. God Rays (Lichtstrahlen):
@@ -32,10 +31,7 @@ import {
   time,
   length as tslLength,
   normalize,
-  max,
-  abs,
   pow,
-  step,
   smoothstep,
 } from "three/tsl";
 import { MeshBasicNodeMaterial, PointsNodeMaterial } from "three/webgpu";
@@ -117,11 +113,8 @@ function waveNormal(x: any, z: any, t: any, spd: any, amp: any): any {
 /**
  * Wasseroberflächen-Material (von unten gesehen).
  *
- * Simuliert Snell's Fenster: Direkt über dem Betrachter ist die Oberfläche
- * hell (Licht von oben), zu den Rändern hin wird sie dunkler
- * (Totalreflexion – Licht kann nicht durch die Wasser/Luft-Grenze).
- *
- * Kaustiken erscheinen als helle, tanzende Lichtflecken.
+ * Ein gleichmäßiges Fresnel-basiertes Wasser ohne Snell's-Fenster-Effekte
+ * oder zitternde Kaustik-Muster.
  */
 export function createWaterSurfaceMaterial(
   options: Partial<WaterSurfaceOptions> = {},
@@ -165,44 +158,12 @@ export function createWaterSurfaceMaterial(
     waveAmp,
   );
 
-  // --- Snell's-Fenster-Effekt ---
-  // Distanz vom Zentrum der Plane (0,0). Je weiter außen, desto dunkler.
-  // Das simuliert den kritischen Winkel: ab ~48° von der Senkrechten
-  // tritt Totalreflexion ein, und von unten sieht man nur noch Dunkelheit.
-  const distFromCenter = tslLength(vec3(positionLocal.x, 0, positionLocal.z));
-  // Plane ist 16 Einheiten breit → max dist ≈ 8
-  // Snell's Fenster: bei ~6 Einheiten beginnt der Abfall
-  const snellRadius = float(5.5);
-  const snellFade = float(1.0).sub(
-    smoothstep(
-      snellRadius.sub(float(1.5)),
-      snellRadius.add(float(2.0)),
-      distFromCenter,
-    ),
-  );
-
-  // --- Fresnel (flache Wellen = dunkler) ---
+  // --- Fresnel (flache Wellen = dunkler, steile = heller) ---
+  // Gleichmäßige Oberfläche ohne kreisförmige Snell's-Fenster-Effekte.
   const fresnel = pow(normal.y.clamp(0.0, 1.0), float(2.0));
 
-  // --- Kaustiken (scharfe Lichtbündelung) ---
-  // Stärkere Krümmung = hellere Kaustik
-  const curvature = float(1.0).sub(normal.y).abs();
-  // Mehrere Frequenzen für kaustische Bandmuster
-  const caustic1 = sin(positionLocal.x.mul(12.0).add(time.mul(3.0)))
-    .mul(sin(positionLocal.z.mul(14.0).sub(time.mul(2.5))))
-    .abs();
-  const caustic2 = sin(
-    positionLocal.x.add(positionLocal.z).mul(8.0).add(time.mul(4.0)),
-  )
-    .mul(cos(positionLocal.x.sub(positionLocal.z).mul(9.0).sub(time.mul(3.5))))
-    .abs();
-  const causticPattern = caustic1.add(caustic2).mul(float(0.5));
-  // Kaustiken nur wo die Welle das Licht tatsächlich bündelt (Krümmung > Schwelle)
-  const causticIntensity = curvature.mul(float(4.0)).clamp(0.0, 1.0);
-  const caustic = causticPattern.mul(causticIntensity).mul(float(0.6));
-
-  // --- Gesamthelligkeit ---
-  const totalBrightness = fresnel.add(caustic).mul(snellFade).clamp(0.08, 1.0);
+  // --- Gesamthelligkeit (nur Fresnel, keine Kaustiken oder Snell-Kreise) ---
+  const totalBrightness = fresnel.clamp(0.08, 1.0);
 
   // --- Farbe ---
   const waterColor = mix(surfColor, highColor, totalBrightness);
