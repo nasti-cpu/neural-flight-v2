@@ -670,6 +670,11 @@ export class FishWorld {
     );
     instances.castShadow = true;
     instances.receiveShadow = true;
+    // Frustum-Culling deaktivieren – die Instanzen werden über die Matrizen
+    // einzeln positioniert, aber der Bounding-Sphere der Geometrie ist winzig.
+    // Ohne diese Zeile verschwindet der ganze Schwarm sobald dieser winzige
+    // Sphere außerhalb des Kamera-Frustums liegt (Winkel-abhängiges Flackern).
+    instances.frustumCulled = false;
 
     this.scene.add(instances);
 
