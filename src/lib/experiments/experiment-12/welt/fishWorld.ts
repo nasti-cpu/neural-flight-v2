@@ -192,8 +192,8 @@ interface SoloFish {
 interface FishSchool {
   /** InstancedMesh für das Rendering */
   instances: THREE.InstancedMesh;
-  /** Zeitpunkt, wann der Schwarm verschwinden soll (performance.now) */
-  expireAt: number;
+  /** > 0 wenn Fade-Out läuft: Zeitpunkt (performance.now) zu dem der Fade startete */
+  fadeStartedAt: number;
   /** Zeitpunkt, wann der Schwarm erschienen ist (für Fade-In) */
   spawnAt: number;
   /** Dauer des Fade-In/Fade-Out in ms */
@@ -831,19 +831,12 @@ export class FishWorld {
       (schoolMat as THREE.MeshStandardMaterial).emissive
         ?.clone() ?? new THREE.Color(0x000000);
 
-    // --- Zufällige Dauer für diesen Schwarm ---
-    const duration =
-      this.config.schoolDurationMin +
-      rand() *
-        (this.config.schoolDurationMax - this.config.schoolDurationMin);
-
     // --- Schwarm-Zustand speichern ---
-    const now = performance.now();
     const fadeMs = 2000; // 2s Fade-In und Fade-Out
     this.activeSchools.push({
       instances,
-      expireAt: now + duration * 1000,
-      spawnAt: now,
+      fadeStartedAt: 0,
+      spawnAt: performance.now(),
       fadeDuration: fadeMs,
       fishScale: this.schoolFishScale,
       glowIntensity: 0,
@@ -866,16 +859,15 @@ export class FishWorld {
     });
 
     console.log(
-      `🐟🐟🐟 Formations-Schwarm erschienen! ${schoolSize} Fische, ` +
-        `verschwindet in ${duration.toFixed(0)}s`,
+      `🐟🐟🐟 Formations-Schwarm erschienen! ${schoolSize} Fische`,
     );
   }
 
   private _updateSchools(delta: number, elapsed: number, cameraPos: THREE.Vector3): void {
     const now = performance.now();
 
-    // --- Prüfen, ob ein neuer Schwarm erscheinen soll ---
-    if (now >= this.nextSchoolTime) {
+    // --- Prüfen, ob ein neuer Schwarm erscheinen soll (max. 2 gleichzeitig) ---
+    if (now >= this.nextSchoolTime && this.activeSchools.length < 2) {
       this._spawnSchool(cameraPos);
       this._scheduleNextSchool();
     }
@@ -883,29 +875,43 @@ export class FishWorld {
     // --- Aktive Schwärme aktualisieren (Fade + Formations-Rendering) ---
     const scale = this.schoolFishScale;
     const { _up: up, _axisPitch: axisPitch, _axisRoll: axisRoll } = this;
+    const despawnDistSq = 65 * 65;
 
     for (let i = this.activeSchools.length - 1; i >= 0; i--) {
       const school = this.activeSchools[i];
       const mat = school.instances.material as THREE.MeshStandardMaterial;
 
-      // --- Fade-In / Fade-Out ---
+      // --- Distanz zur Kamera prüfen ---
+      const dx = school.centerX - cameraPos.x;
+      const dz = school.centerZ - cameraPos.z;
+      const distSq = dx * dx + dz * dz;
+
+      // --- Fade-In / Fade-Out (distanzbasiert) ---
       const elapsedSinceSpawn = now - school.spawnAt;
-      const timeUntilExpire = school.expireAt - now;
       let opacity = 1;
+
       if (elapsedSinceSpawn < school.fadeDuration) {
-        // Fade-In
+        // Fade-In nach Spawn
         opacity = elapsedSinceSpawn / school.fadeDuration;
-      } else if (timeUntilExpire < 0) {
-        // Fertig ausgeblendet → entfernen
-        this.scene.remove(school.instances);
-        school.instances.dispose();
-        this.activeSchools.splice(i, 1);
-        console.log("🐟🐟🐟 Formations-Schwarm verschwunden.");
-        continue;
-      } else if (timeUntilExpire < school.fadeDuration) {
-        // Fade-Out
-        opacity = timeUntilExpire / school.fadeDuration;
+      } else if (distSq > despawnDistSq) {
+        // Zu weit weg → Fade-Out starten oder fortsetzen
+        if (school.fadeStartedAt === 0) {
+          school.fadeStartedAt = now;
+        }
+        const fadeElapsed = now - school.fadeStartedAt;
+        if (fadeElapsed >= school.fadeDuration) {
+          // Fertig ausgeblendet → entfernen
+          this.scene.remove(school.instances);
+          school.instances.dispose();
+          this.activeSchools.splice(i, 1);
+          continue;
+        }
+        opacity = 1 - fadeElapsed / school.fadeDuration;
+      } else {
+        // In der Nähe → Fade-Out zurücksetzen (Schwarm bleibt)
+        school.fadeStartedAt = 0;
       }
+
       mat.opacity = opacity;
 
       // Schwarm-Zentrum auf Ellipsenbahn berechnen
