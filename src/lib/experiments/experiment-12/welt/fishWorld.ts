@@ -673,15 +673,36 @@ export class FishWorld {
       }
     }
 
-    const finalX = px;
-    const finalZ = pz;
+    let finalX = px;
+    let finalZ = pz;
 
-    // --- Tiefe (sanfte Sinus-Welle) -- niemals unter floorY + 1.0 (Dünen-Vermeidung) ---
+    // --- Kuppel-Kollision: Position + Orbit-Zentrum direkt korrigieren ---
+    // Wenn der Fisch trotz Orbit-Verschiebung in der Kuppel steckt, wird er
+    // gerade so weit rausgeschoben, dass er die Kuppel verlässt (~0.5–3m).
+    // Das Orbit-Zentrum folgt, damit er nicht in der nächsten Umdrehung
+    // wieder reinläuft. Kein grosser Teleport, nur eine kleine Korrektur.
+    if (this._exclusionZones.length > 0) {
+      for (const zone of this._exclusionZones) {
+        const dx3 = finalX - zone.centerX;
+        const dz3 = finalZ - zone.centerZ;
+        const dist3 = Math.sqrt(dx3 * dx3 + dz3 * dz3) || 0.001;
+        if (dist3 < zone.radius) {
+          const pushOut = zone.radius - dist3 + 0.5;
+          finalX += (dx3 / dist3) * pushOut;
+          finalZ += (dz3 / dist3) * pushOut;
+          p.centerX += (dx3 / dist3) * pushOut;
+          p.centerZ += (dz3 / dist3) * pushOut;
+        }
+      }
+    }
+
+    // --- Tiefe (sanfte Sinus-Welle) -- Boden-Abstand erhöht auf 2.0m ---
+    // Dünen gehen bis ~0.3m über floorY; Korallen und Felsen können höher sein.
     const rawY =
       p.baseY +
       Math.sin(elapsed * p.depthFreq * Math.PI * 2 + p.phaseOffset) *
         p.depthAmp;
-    const tgtY = Math.max(this.config.floorY + 1.0, rawY);
+    const tgtY = Math.max(this.config.floorY + 2.0, rawY);
 
     // --- Burst-and-Glide: Geschwindigkeits-Burst alle burstInt Sekunden ---
     const bursting = elapsed % p.burstInt < p.burstDur;
