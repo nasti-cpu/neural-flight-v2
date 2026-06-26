@@ -289,7 +289,7 @@ export class JellyWorld {
         const minDist = zone.radius + group.radius + 2; // + Gruppen-Orbit-Radius + Puffer
         if (dist < minDist) {
           const overlap = minDist - dist;
-          const pushPerFrame = Math.min(overlap, 1.0) * 0.12 * delta * 60;
+          const pushPerFrame = Math.min(overlap, 1.0) * 0.25 * delta;
           group.centerX += (dx / dist) * pushPerFrame;
           group.centerZ += (dz / dist) * pushPerFrame;
         }

@@ -651,7 +651,7 @@ export class FishWorld {
     const pz = p.centerZ + Math.sin(ang) * p.radiusZ;
 
     // --- Sanftes Ausweichen vor Kuppeln (graduelle Lenkung, kein Ruckeln) ---
-    // Das Orbit-Zentrum wird pro Frame um maximal ~0.3 m verschoben,
+    // Das Orbit-Zentrum wird mit ~0.3 m/s von der Kuppel weggeschoben,
     // sodass der Fisch eine sanfte Kurve um die Stadt fliegt.
     if (this._exclusionZones.length > 0) {
       for (const zone of this._exclusionZones) {
@@ -662,7 +662,7 @@ export class FishWorld {
         const minDist = zone.radius + 7;
         if (dist < minDist) {
           const overlap = minDist - dist;
-          const pushPerFrame = Math.min(overlap, 1.0) * 0.15 * dt * 60;
+          const pushPerFrame = Math.min(overlap, 1.0) * 0.3 * dt;
           p.centerX += (dx2 / dist) * pushPerFrame;
           p.centerZ += (dz2 / dist) * pushPerFrame;
         }
