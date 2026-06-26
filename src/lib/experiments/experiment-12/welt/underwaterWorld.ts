@@ -50,7 +50,7 @@ const WORLD_CONFIG = {
   waterSegments: 70, // Von 100 reduziert – ~50% weniger Vertex-Arbeit im Wellenshader
 
   // --- God Rays ---
-  godRayCount: 6, // Von 10 reduziert – weniger additive Overlays = weniger Ruckeln
+  godRayCount: 0, // Deaktiviert – die Kaustik-Bänder sahen aus wie zitternde Ringe
   godRayHeight: 27, // Gleicher Bodenabstand wie bei waterY=15 (unten ≈ -6.5), reicht bis ~1.5m unter Wasser
 
   // --- Partikel ---
