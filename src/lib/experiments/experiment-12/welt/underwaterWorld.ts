@@ -45,13 +45,13 @@ const WORLD_CONFIG = {
   seegrassCount: 10, // Weniger Seegras in der Tiefsee
 
   // --- Wasser ---
-  waterY: 15, // Deutlich höher – mehr Tiefe zwischen Boden und Oberfläche
+  waterY: 22, // Höher – mehr Raum zwischen Kuppelspitze und Wasseroberfläche
   waterSize: 100,
   waterSegments: 70, // Von 100 reduziert – ~50% weniger Vertex-Arbeit im Wellenshader
 
   // --- God Rays ---
   godRayCount: 6, // Von 10 reduziert – weniger additive Overlays = weniger Ruckeln
-  godRayHeight: 20, // Vom Wasser bis fast zum Boden (angepasst an höheres Wasser)
+  godRayHeight: 27, // Gleicher Bodenabstand wie bei waterY=15 (unten ≈ -6.5), reicht bis ~1.5m unter Wasser
 
   // --- Partikel ---
   particleCount: 400, // Weniger Partikel = schöner, performanter
