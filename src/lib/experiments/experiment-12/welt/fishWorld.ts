@@ -710,7 +710,7 @@ export class FishWorld {
     // Schwimmrichtung (Tangente der Ellipse)
     const tx = -Math.sin(ang) * p.radiusX;
     const tz = Math.cos(ang) * p.radiusZ;
-    const baseYaw = Math.atan2(tx, tz);
+    const baseYaw = Math.atan2(-tx, -tz);
 
     fish.mesh.rotation.set(0, 0, 0);
     fish.mesh.rotateY(baseYaw + fish.state.yaw);
@@ -896,7 +896,7 @@ export class FishWorld {
       // Schwimmrichtung = Tangente der Ellipse (Grund-Yaw)
       const tx = -Math.sin(ang) * school.swimRadiusX;
       const tz = Math.cos(ang) * school.swimRadiusZ;
-      const baseYaw = Math.atan2(tx, tz);
+      const baseYaw = Math.atan2(-tx, -tz);
       const cosA = Math.cos(baseYaw);
       const sinA = Math.sin(baseYaw);
 
