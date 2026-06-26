@@ -1,0 +1,9 @@
+[m5-bridge] Listening on ws://0.0.0.0:8787/ws/device
+[2m14:56:10[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m Re-optimizing dependencies because lockfile has changed
+
+  [32m[1mVITE[22m v7.3.1[39m  [2mready in [0m[1m757[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttps://localhost:[1m5173[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttps://141.45.36.47:[1m5173[22m/[39m
+[2m14:56:17[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32m✨ new dependencies optimized: [33mthree, three/examples/jsm/utils/BufferGeometryUtils.js[32m[39m
+[2m14:56:17[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32m✨ optimized dependencies changed. reloading[39m
