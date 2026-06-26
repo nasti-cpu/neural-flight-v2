@@ -567,7 +567,8 @@ export async function initWorld(container: HTMLElement): Promise<void> {
     coralReefWorld.setExclusionZones(exclusionZones);
 
     // --- Fische aktualisieren (mit Kameraposition für Respawn) ---
-    fishWorld.update(delta, elapsed, camera.position);
+    // Reiche Quallen als zusätzliche Echo-Ziele mit, sodass Echo-Ringe Quallen aufleuchten lassen
+    fishWorld.update(delta, elapsed, camera.position, jellyWorld.getEchoTargets());
 
     // --- Quallen aktualisieren (einzeln oder in Gruppen) ---
     jellyWorld.update(delta, elapsed, camera.position);

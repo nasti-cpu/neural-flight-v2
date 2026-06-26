@@ -16,6 +16,7 @@ import {
   type ProceduralJelly,
 } from "../animationen/quallen/proceduralJelly";
 import type { ExclusionZone } from "./cityWorld";
+import type { EchoTarget } from "../sinne/echoortung/echolocationRings";
 
 // ---------------------------------------------------------------------------
 // Konfiguration
@@ -49,14 +50,14 @@ const DEFAULT_CONFIG: JellyWorldConfig = {
 
 interface JellyGroupMember {
   jelly: ProceduralJelly;
-  /** Winkel im Gruppen-Orbit (rad) */
   angle: number;
-  /** Radius der individuellen Bahn ums Zentrum */
   orbitRadius: number;
-  /** Höhenversatz */
   yOffset: number;
-  /** Phasenversatz für eigene Animation */
   animPhase: number;
+  /** Echoortungs-Glow (0–1) */
+  glowIntensity: number;
+  /** Original-Emissive der Glocke vor dem Glow */
+  originalEmissive: THREE.Color | null;
 }
 
 interface JellyGroup {
@@ -86,6 +87,10 @@ export class JellyWorld {
   /** Exklusionszonen (Stadt-Kuppeln) – Quallen meiden diese Bereiche */
   private _exclusionZones: ExclusionZone[] = [];
 
+  // --- Echoortungs-Glow (wie bei Fischen) ---
+  private _glowColor = new THREE.Color(0xffaa00);
+  private _tmpColor = new THREE.Color();
+
   constructor(scene: THREE.Scene, config?: Partial<JellyWorldConfig>) {
     this.scene = scene;
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -101,6 +106,24 @@ export class JellyWorld {
    */
   setExclusionZones(zones: ExclusionZone[], cameraPos?: THREE.Vector3): void {
     this._exclusionZones = zones;
+  }
+
+  /**
+   * Gibt Echoortungs-Ziele für alle sichtbaren Quallen zurück.
+   * Wird von FishWorld._updateEcholocation verwendet.
+   */
+  getEchoTargets(): EchoTarget[] {
+    const targets: EchoTarget[] = [];
+    for (const group of this.groups) {
+      if (group.hidden) continue;
+      for (const member of group.members) {
+        targets.push({
+          position: member.jelly.group.position,
+          onHit: () => { member.glowIntensity = 1.0; },
+        });
+      }
+    }
+    return targets;
   }
 
   /**
@@ -146,6 +169,26 @@ export class JellyWorld {
 
     // --- Sichtbarkeit verwalten: Gruppen > 60 m verstecken, unsichtbare neu platzieren ---
     this._manageVisibility(cameraPos);
+
+    // --- Echoortungs-Glow: exponentieller Abfall ---
+    const decay = Math.exp(-3.0 * delta);
+    for (const group of this.groups) {
+      for (const member of group.members) {
+        if (member.glowIntensity < 0.01) continue;
+        const mat = member.jelly.bell.material as THREE.MeshPhysicalMaterial;
+        member.glowIntensity *= decay;
+        if (member.glowIntensity > 0.01) {
+          this._tmpColor
+            .copy(member.originalEmissive ?? new THREE.Color(0x000000))
+            .lerp(this._glowColor, member.glowIntensity);
+          mat.emissive = this._tmpColor.clone();
+          mat.emissiveIntensity = 0.2 + member.glowIntensity * 1.8;
+        } else {
+          mat.emissive = member.originalEmissive ?? new THREE.Color(0x000000);
+          mat.emissiveIntensity = 0;
+        }
+      }
+    }
 
     // --- Neue Gruppe spawnen, wenn Platz ist ---
     while (this.groups.length < cfg.maxGroups) {
@@ -218,12 +261,20 @@ export class JellyWorld {
 
       this.scene.add(jelly.group);
 
+      // Original-Emissive der Glocke speichern (für Echoortungs-Glow)
+      const bellMat = jelly.bell.material as THREE.MeshPhysicalMaterial;
+      const origEmissive = bellMat.emissive
+        ? bellMat.emissive.clone()
+        : new THREE.Color(0x000000);
+
       members.push({
         jelly,
         angle: memberAngle,
         orbitRadius,
         yOffset,
         animPhase: Math.random() * Math.PI * 2,
+        glowIntensity: 0,
+        originalEmissive: origEmissive,
       });
     }
 
@@ -418,6 +469,14 @@ export class JellyWorld {
       member.orbitRadius = 0.8 + Math.random() * 1.2;
       member.yOffset = (Math.random() - 0.5) * 1.0;
       member.animPhase = Math.random() * Math.PI * 2;
+      member.glowIntensity = 0;
+
+      // Original-Emissive neu speichern
+      const bellMat = member.jelly.bell.material as THREE.MeshPhysicalMaterial;
+      member.originalEmissive = bellMat.emissive
+        ? bellMat.emissive.clone()
+        : new THREE.Color(0x000000);
+      bellMat.emissiveIntensity = 0;
 
       member.jelly.group.position.set(
         cx + Math.cos(member.angle) * member.orbitRadius,

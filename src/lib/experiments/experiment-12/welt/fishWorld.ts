@@ -291,14 +291,22 @@ export class FishWorld {
   // Update – jeden Frame von der Render-Loop aufrufen
   // -----------------------------------------------------------------------
 
-  update(delta: number, elapsed: number, cameraPos: THREE.Vector3): void {
+  /**
+   * @param additionalTargets – Optionale zusätzliche Echo-Ziele (z. B. von Quallen)
+   */
+  update(
+    delta: number,
+    elapsed: number,
+    cameraPos: THREE.Vector3,
+    additionalTargets?: EchoTarget[],
+  ): void {
     for (const fish of this.soloFishes) {
       this._updateSoloFish(fish, delta, elapsed);
     }
 
     this._manageVisibility(cameraPos);
     this._updateSchools(delta, elapsed, cameraPos);
-    this._updateEcholocation(delta, elapsed, cameraPos);
+    this._updateEcholocation(delta, elapsed, cameraPos, additionalTargets);
   }
 
   // -----------------------------------------------------------------------
@@ -802,6 +810,7 @@ export class FishWorld {
     delta: number,
     elapsed: number,
     cameraPos: THREE.Vector3,
+    additionalTargets?: EchoTarget[],
   ): void {
     if (!this.echolocation) return;
 
@@ -825,6 +834,13 @@ export class FishWorld {
           school.glowIntensity = 1.0;
         },
       });
+    }
+
+    // Zusätzliche Echo-Targets (z. B. Quallen von JellyWorld)
+    if (additionalTargets) {
+      for (const t of additionalTargets) {
+        this._echoTargets.push(t);
+      }
     }
 
     this._echoOrigin.copy(cameraPos);
