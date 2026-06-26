@@ -14,6 +14,7 @@
 
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+export type { ExclusionZone } from "../animationen/staedte/cityConfig";
 import {
   CITY_CONFIGS,
   type CityConfig,
