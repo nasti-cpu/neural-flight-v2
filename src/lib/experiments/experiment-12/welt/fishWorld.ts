@@ -194,6 +194,10 @@ interface FishSchool {
   instances: THREE.InstancedMesh;
   /** Zeitpunkt, wann der Schwarm verschwinden soll (performance.now) */
   expireAt: number;
+  /** Zeitpunkt, wann der Schwarm erschienen ist (für Fade-In) */
+  spawnAt: number;
+  /** Dauer des Fade-In/Fade-Out in ms */
+  fadeDuration: number;
   /** Skalierungsfaktor für die Fisch-Instanzen */
   fishScale: number;
   // --- Glow (Echoortung, sofort auf 1.0 bei Treffer, dann Abfall) ---
@@ -710,7 +714,7 @@ export class FishWorld {
     // Schwimmrichtung (Tangente der Ellipse)
     const tx = -Math.sin(ang) * p.radiusX;
     const tz = Math.cos(ang) * p.radiusZ;
-    const baseYaw = Math.atan2(-tx, -tz);
+    const baseYaw = Math.atan2(tx, -tz);
 
     fish.mesh.rotation.set(0, 0, 0);
     fish.mesh.rotateY(baseYaw + fish.state.yaw);
@@ -808,6 +812,8 @@ export class FishWorld {
 
     // --- Material klonen (jeder Schwarm braucht eigene Instanz für Glow) ---
     const schoolMat = (this.schoolFishMesh.material as THREE.MeshStandardMaterial).clone();
+    schoolMat.transparent = true;
+    schoolMat.opacity = 0; // Start unsichtbar → Fade-In
 
     // --- InstancedMesh erstellen ---
     const instances = new THREE.InstancedMesh(
@@ -832,9 +838,13 @@ export class FishWorld {
         (this.config.schoolDurationMax - this.config.schoolDurationMin);
 
     // --- Schwarm-Zustand speichern ---
+    const now = performance.now();
+    const fadeMs = 2000; // 2s Fade-In und Fade-Out
     this.activeSchools.push({
       instances,
-      expireAt: performance.now() + duration * 1000,
+      expireAt: now + duration * 1000,
+      spawnAt: now,
+      fadeDuration: fadeMs,
       fishScale: this.schoolFishScale,
       glowIntensity: 0,
       originalEmissive: origEmissive,
@@ -870,22 +880,34 @@ export class FishWorld {
       this._scheduleNextSchool();
     }
 
-    // --- Abgelaufene Schwärme entfernen ---
+    // --- Aktive Schwärme aktualisieren (Fade + Formations-Rendering) ---
+    const scale = this.schoolFishScale;
+    const { _up: up, _axisPitch: axisPitch, _axisRoll: axisRoll } = this;
+
     for (let i = this.activeSchools.length - 1; i >= 0; i--) {
-      if (now >= this.activeSchools[i].expireAt) {
-        const school = this.activeSchools[i];
+      const school = this.activeSchools[i];
+      const mat = school.instances.material as THREE.MeshStandardMaterial;
+
+      // --- Fade-In / Fade-Out ---
+      const elapsedSinceSpawn = now - school.spawnAt;
+      const timeUntilExpire = school.expireAt - now;
+      let opacity = 1;
+      if (elapsedSinceSpawn < school.fadeDuration) {
+        // Fade-In
+        opacity = elapsedSinceSpawn / school.fadeDuration;
+      } else if (timeUntilExpire < 0) {
+        // Fertig ausgeblendet → entfernen
         this.scene.remove(school.instances);
         school.instances.dispose();
         this.activeSchools.splice(i, 1);
         console.log("🐟🐟🐟 Formations-Schwarm verschwunden.");
+        continue;
+      } else if (timeUntilExpire < school.fadeDuration) {
+        // Fade-Out
+        opacity = timeUntilExpire / school.fadeDuration;
       }
-    }
+      mat.opacity = opacity;
 
-    // --- Aktive Schwärme aktualisieren (Formations-Rendering) ---
-    const scale = this.schoolFishScale;
-    const { _up: up, _axisPitch: axisPitch, _axisRoll: axisRoll } = this;
-
-    for (const school of this.activeSchools) {
       // Schwarm-Zentrum auf Ellipsenbahn berechnen
       const ang = elapsed * school.speed + school.startAngle;
       const cx = school.centerX + Math.cos(ang) * school.swimRadiusX;
@@ -896,15 +918,15 @@ export class FishWorld {
       // Schwimmrichtung = Tangente der Ellipse (Grund-Yaw)
       const tx = -Math.sin(ang) * school.swimRadiusX;
       const tz = Math.cos(ang) * school.swimRadiusZ;
-      const baseYaw = Math.atan2(-tx, -tz);
+      const baseYaw = Math.atan2(tx, -tz);
       const cosA = Math.cos(baseYaw);
       const sinA = Math.sin(baseYaw);
 
-      for (let i = 0; i < school.offsets.length; i++) {
-        const offset = school.offsets[i];
-        const phaseShift = school.phaseOffsets[i];
-        const ampFactor = school.ampFactors[i];
-        const speedFactor = school.speedFactors[i];
+      for (let j = 0; j < school.offsets.length; j++) {
+        const offset = school.offsets[j];
+        const phaseShift = school.phaseOffsets[j];
+        const ampFactor = school.ampFactors[j];
+        const speedFactor = school.speedFactors[j];
 
         // Individuelle Ellipsenbahn-Position jedes Fisches (eigene Geschwindigkeit)
         const fishAng = elapsed * school.speed * speedFactor;
@@ -933,7 +955,7 @@ export class FishWorld {
 
         this._tmpScale.set(scale, scale, scale);
         this._tmpMatrix.compose(this._tmpVec3, this._tmpQuat, this._tmpScale);
-        school.instances.setMatrixAt(i, this._tmpMatrix);
+        school.instances.setMatrixAt(j, this._tmpMatrix);
       }
       school.instances.instanceMatrix.needsUpdate = true;
     }
