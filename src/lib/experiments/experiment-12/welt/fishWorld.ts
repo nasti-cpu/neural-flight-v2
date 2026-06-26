@@ -1,18 +1,13 @@
 /**
  * fishWorld.ts – Fisch-Integration für die Tiefsee-Unterwasserwelt
  *
- * Kombiniert Module aus zwei Ordnern:
- *   - modelle/fish/       → Fisch-3D-Modelle (GLB-Dateien, GLTFLoader)
- *   - animationen/fische/ → Carangiforme Undulation + Burst-and-Glide (Formations-Schwarm)
+ * Importiert die reine Bewegungs-Mathematik aus animationen/fische/ und
+ * kümmert sich um Three.js-Rendering, Exklusionszonen und Echoortung.
  *
- * Ergebnis:
- *   - 3–5 Einzelfische, die mit natürlicher Schwimm-Animation umherschwimmen
- *   - Alle 30–60 Sekunden erscheint ein Formations-Schwarm (20 Fische in V-Formation),
- *     der nach 12–20 Sekunden wieder verschwindet
- *
- * Performance:
- *   - Einzelfische: einzelne Meshes (geringe Anzahl → kein InstancedMesh nötig)
- *   - Schwärme: InstancedMesh + feste Formation (keine Boids-Berechnung nötig)
+ * Modularer Aufbau:
+ *   - orbitSwimming.ts  → Solo-Fisch-Animation (Carangiform + Burst)
+ *   - schoolFormation.ts → Schwarm-Formation (V-Formation, Ellipsen-Bahn)
+ *   - fishWorld.ts       → World-Management + Three.js-Integration
  */
 
 import * as THREE from "three/webgpu";
@@ -22,6 +17,22 @@ import {
   type EchoTarget,
   type EcholocationConfig,
 } from "../sinne/echoortung/echolocationRings";
+import {
+  type SwimParams,
+  type SwimState,
+  createSwimParams,
+  createSwimState,
+  computeOrbitPosition,
+  computeOrbitTangent,
+  updateSwimState,
+  computeTargetY,
+} from "../animationen/fische/orbitSwimming";
+import {
+  type FormationOffset,
+  type SchoolFrameFish,
+  generateVFormation,
+  computeSchoolFrame,
+} from "../animationen/fische/schoolFormation";
 
 /**
  * Lokaler Typ für eine Ausschlusszone (z. B. um eine Stadtkuppel).
@@ -85,74 +96,35 @@ const DEFAULT_FISH_CONFIG: FishWorldConfig = {
 };
 
 // ---------------------------------------------------------------------------
-// Einzelfisch – Schwimm-Parameter (Carangiforme Undulation + Burst-and-Glide)
+// Einzelfisch (Orbit-Parameter)
 // ---------------------------------------------------------------------------
 
 /**
- * Jeder Einzelfisch bekommt leicht abgewandelte Schwimm-Parameter,
- * damit sie nicht alle synchron aussehen.
+ * Nur die Orbit-spezifischen Felder – die Schwimm-Animation (Yaw/Pitch/Roll
+ * etc.) ist in SwimParams (orbitSwimming.ts) ausgelagert.
  */
 interface SoloFishParams {
-  /** Ellipsen-Bahn: Radius in X (klein, für Sichtbarkeit im Nebel) */
   radiusX: number;
-  /** Ellipsen-Bahn: Radius in Z (klein, für Sichtbarkeit im Nebel) */
   radiusZ: number;
-  /** Basis-Geschwindigkeit (rad/s) */
   speed: number;
-  /** Yaw-Amplitude (Schwanzschlag nach links/rechts) */
-  yawAmp: number;
-  /** Yaw-Frequenz */
-  yawFreq: number;
-  /** Pitch-Amplitude (auf/ab) */
-  pitchAmp: number;
-  /** Pitch-Frequenz */
-  pitchFreq: number;
-  /** Roll-Amplitude (seitlich kippen) */
-  rollAmp: number;
-  /** Tiefen-Schwankung Amplitude */
-  depthAmp: number;
-  /** Tiefen-Schwankung Frequenz */
-  depthFreq: number;
-  /** Burst-Intervall (Sekunden) */
-  burstInt: number;
-  /** Burst-Dauer (Sekunden) */
-  burstDur: number;
-  /** Burst Yaw-Multiplikator */
-  burstYawMul: number;
-  /** Start-Phasenversatz (damit Fische nicht synchron starten) */
-  phaseOffset: number;
-  /** Start-Winkel auf der Ellipse */
   startAngle: number;
-  /** Mittlere Y-Position */
   baseY: number;
-  /** Zentrum der Ellipse in X (innerhalb der Nebel-Sichtweite) */
   centerX: number;
-  /** Zentrum der Ellipse in Z (innerhalb der Nebel-Sichtweite) */
   centerZ: number;
+  swim: SwimParams;
 }
 
-/** Erzeugt leicht abgewandelte Schwimm-Parameter für einen Einzelfisch */
 function createSoloParams(config: FishWorldConfig): SoloFishParams {
   const rand = Math.random;
   return {
     radiusX: 2 + rand() * 4,
     radiusZ: 2 + rand() * 3,
     speed: 0.08 + rand() * 0.15,
-    yawAmp: 0.04 + rand() * 0.08,
-    yawFreq: 0.4 + rand() * 0.4,
-    pitchAmp: 0.02 + rand() * 0.03,
-    pitchFreq: 0.3 + rand() * 0.3,
-    rollAmp: 0.05 + rand() * 0.1,
-    depthAmp: 0.5 + rand() * 1.0,
-    depthFreq: 0.06 + rand() * 0.1,
-    burstInt: 8 + rand() * 10,
-    burstDur: 0.8 + rand() * 1.0,
-    burstYawMul: 1.3 + rand() * 0.4,
-    phaseOffset: rand() * Math.PI * 2,
     startAngle: rand() * Math.PI * 2,
     baseY: config.floorY + 1.5 + rand() * (config.waterY - config.floorY - 2.5),
     centerX: (rand() - 0.5) * 16,
     centerZ: (rand() - 0.5) * 16,
+    swim: createSwimParams(),
   };
 }
 
@@ -161,22 +133,12 @@ function createSoloParams(config: FishWorldConfig): SoloFishParams {
 // ---------------------------------------------------------------------------
 
 interface SoloFish {
-  /** Mesh in der Szene (direkt oder Group) */
   mesh: THREE.Group;
-  /** Schwimm-Parameter (individuell) */
   params: SoloFishParams;
-  /** Aktuell interpolierte Werte (werden pro Frame gelerpt) */
-  state: {
-    yaw: number;
-    pitch: number;
-    roll: number;
-    curY: number;
-  };
-  /** Geglättete Burst-Frequenz/Amplitude */
-  smoothYawFreq: number;
-  smoothYawAmp: number;
+  /** Animations-Zustand (Yaw, Pitch, Roll, curY, Burst-Glättung) */
+  state: SwimState;
 
-  // --- Glow (Echoortung, sofort auf 1.0 bei Treffer, dann Abfall) ---
+  // --- Glow (Echoortung) ---
   glowIntensity: number;
   fishMesh: THREE.Mesh | null;
   originalEmissive: THREE.Color | null;
@@ -190,48 +152,28 @@ interface SoloFish {
 // ---------------------------------------------------------------------------
 
 interface FishSchool {
-  /** InstancedMesh für das Rendering */
   instances: THREE.InstancedMesh;
-  /** > 0 wenn Fade-Out läuft: Zeitpunkt (performance.now) zu dem der Fade startete */
   fadeStartedAt: number;
-  /** Zeitpunkt, wann der Schwarm erschienen ist (für Fade-In) */
   spawnAt: number;
-  /** Dauer des Fade-In/Fade-Out in ms */
   fadeDuration: number;
-  /** Skalierungsfaktor für die Fisch-Instanzen */
   fishScale: number;
-  // --- Glow (Echoortung, sofort auf 1.0 bei Treffer, dann Abfall) ---
+
+  // --- Glow (Echoortung) ---
   glowIntensity: number;
   originalEmissive: THREE.Color;
 
-  // --- Formation-Daten (20 Fische in V-Formation, jeder auf individueller Ellipsenbahn) ---
-  /** Relative XZ/Y-Offsets jedes Fisches zur Schwarm-Mitte */
-  offsets: THREE.Vector3[];
-  /** Zufällige Phasen-Offsets für individuelle Animation */
-  phaseOffsets: number[];
-  /** Zufällige Amplitudenfaktoren für Bewegung */
-  ampFactors: number[];
-  /** Zufällige Geschwindigkeitsfaktoren für individuelle Bahnen */
-  speedFactors: number[];
+  // --- Formation-Daten (aus schoolFormation.ts) ---
+  formation: FormationOffset[];
 
   // --- Ellipsenbahn des Schwarm-Zentrums ---
-  /** Start-X der Schwarm-Mitte */
   centerX: number;
-  /** Start-Z der Schwarm-Mitte */
   centerZ: number;
-  /** Basis-Y (mittlere Höhe) */
   baseY: number;
-  /** Start-Winkel auf der Ellipse */
   startAngle: number;
-  /** Horizontaler Ellipsen-Radius (X-Achse) */
   swimRadiusX: number;
-  /** Horizontaler Ellipsen-Radius (Z-Achse) */
   swimRadiusZ: number;
-  /** Geschwindigkeit auf der Ellipsenbahn */
   speed: number;
-  /** Amplitude der vertikalen Pendelbewegung */
   depthAmp: number;
-  /** Frequenz der vertikalen Pendelbewegung */
   depthFreq: number;
 }
 
@@ -239,13 +181,6 @@ interface FishSchool {
 // Hauptklasse: FishWorld
 // ---------------------------------------------------------------------------
 
-/**
- * Verwaltet alle Fische in der Unterwasserwelt:
- * Einzelfische + periodisch erscheinende Formations-Schwärme.
- *
- * Wird von der Haupt-Experience (underwaterWorld.ts) importiert
- * und in der Render-Loop aufgerufen.
- */
 export class FishWorld {
   private scene: THREE.Scene;
   private config: FishWorldConfig;
@@ -281,9 +216,7 @@ export class FishWorld {
   private _tmpScale = new THREE.Vector3();
   private _tmpColor = new THREE.Color();
   private _glowColor = new THREE.Color(0xffaa00);
-  /** Ursprung für Echo-Ringe (Kamera-Position, aber Y nach unten versetzt) */
   private _echoOrigin = new THREE.Vector3();
-  /** Wiederverwendbarer Vektor für Distanz-Prüfungen */
   private _tmpDistVec = new THREE.Vector3();
 
   constructor(scene: THREE.Scene, config?: Partial<FishWorldConfig>) {
@@ -304,15 +237,9 @@ export class FishWorld {
   // Initialisierung (async – lädt das Fisch-Modell)
   // -----------------------------------------------------------------------
 
-  /**
-   * Lädt das Fisch-3D-Modell und erstellt alle Einzelfische.
-   * Muss VOR dem ersten Render-Aufruf abgeschlossen sein.
-   * @param cameraPos – Initiale Kameraposition für den ersten Fisch-Spawn
-   */
   async init(cameraPos?: THREE.Vector3): Promise<void> {
     console.log("🐟 FishWorld: Lade Fisch-Modell...");
 
-    // --- Fisch-Modell laden ---
     this.fishModelTemplate = await this._loadFishModel(
       "/3D Modelle/fish/Fish(3).glb",
     );
@@ -322,7 +249,7 @@ export class FishWorld {
       return;
     }
 
-    // --- Skalierung berechnen ---
+    // Skalierung berechnen
     const box = new THREE.Box3().setFromObject(this.fishModelTemplate);
     const size = new THREE.Vector3();
     box.getSize(size);
@@ -330,7 +257,7 @@ export class FishWorld {
     this.soloScale = 1.8 / maxDim;
     this.schoolFishScale = 1.2 / maxDim;
 
-    // --- Einzelfische erstellen (über Kameraposition verteilt) ---
+    // Einzelfische erstellen
     const spawnPos = cameraPos ?? new THREE.Vector3(0, 0, 0);
     for (let i = 0; i < this.config.soloCount; i++) {
       const params = createSoloParams(this.config);
@@ -339,7 +266,7 @@ export class FishWorld {
       this.soloFishes.push(fish);
     }
 
-    // --- Schwarm-Mesh für InstancedMesh extrahieren (kopieren) ---
+    // Schwarm-Mesh für InstancedMesh extrahieren
     const clone = this.fishModelTemplate.clone(true);
     this.scene.add(clone);
     let foundMesh: THREE.Mesh | null = null;
@@ -352,7 +279,6 @@ export class FishWorld {
       this.schoolFishMesh = foundMesh;
     }
 
-    // --- Nächsten Schwarm zeitlich planen ---
     this._scheduleNextSchool();
 
     console.log(
@@ -365,26 +291,13 @@ export class FishWorld {
   // Update – jeden Frame von der Render-Loop aufrufen
   // -----------------------------------------------------------------------
 
-  /**
-   * Aktualisiert alle Fische für einen Frame.
-   *
-   * @param delta    – Zeit seit letztem Frame in Sekunden
-   * @param elapsed  – Gesamtzeit seit Start in Sekunden
-   * @param cameraPos – Aktuelle Kameraposition
-   */
   update(delta: number, elapsed: number, cameraPos: THREE.Vector3): void {
-    // --- Einzelfische aktualisieren (Bahn + sanftes Ausweichen) ---
     for (const fish of this.soloFishes) {
       this._updateSoloFish(fish, delta, elapsed);
     }
 
-    // --- Sichtbarkeit verwalten: Fische > 80 m verstecken, unsichtbare neu platzieren ---
     this._manageVisibility(cameraPos);
-
-    // --- Schwärme aktualisieren (mit Kameraposition für Spawn) ---
     this._updateSchools(delta, elapsed, cameraPos);
-
-    // --- Echoortung: Ringe senden + Fische aufleuchten lassen ---
     this._updateEcholocation(delta, elapsed, cameraPos);
   }
 
@@ -392,20 +305,10 @@ export class FishWorld {
   // Exklusionszonen (Fische meiden Kuppeln)
   // -----------------------------------------------------------------------
 
-  /**
-   * Setzt die Zonen, die Fische meiden sollen (z. B. Stadt-Kuppeln).
-   * Die Fische weichen sanft über die graduelle Lenkung in _updateSoloFish aus.
-   *
-   * @param zones – Die neuen Exklusionszonen
-   */
-  setExclusionZones(zones: ExclusionZone[], cameraPos?: THREE.Vector3): void {
+  setExclusionZones(zones: ExclusionZone[], _cameraPos?: THREE.Vector3): void {
     this._exclusionZones = zones;
   }
 
-  /**
-   * Prüft, ob eine (x, z)-Position innerhalb einer Exklusionszone liegt.
-   * @param margin – Zusätzlicher Sicherheitsabstand (z. B. für Fisch-Ellipsen-Radius)
-   */
   private _isInExclusionZone(x: number, z: number, margin: number = 0): boolean {
     for (const zone of this._exclusionZones) {
       const dx = x - zone.centerX;
@@ -418,22 +321,16 @@ export class FishWorld {
     return false;
   }
 
-  /**
-   * Schiebt einen Fisch sanft aus allen Kuppeln, in denen er steckt.
-   * Das Orbit-Zentrum wird radial nach aussen versetzt, der Fisch
-   * schwimmt einfach weiter – kein Ruckeln, kein Teleport.
-   */
   private _repelFishFromZones(fish: SoloFish): void {
     const p = fish.params;
     for (const zone of this._exclusionZones) {
-      // Prüfen, ob das Orbit-Zentrum zu nah an der Kuppel ist
       const dx = p.centerX - zone.centerX;
       const dz = p.centerZ - zone.centerZ;
-      const minDist = zone.radius + 6; // Kuppelradius + max. Orbit-Radius
+      const minDist = zone.radius + 6;
       const distSq = dx * dx + dz * dz;
       if (distSq < minDist * minDist) {
         const dist = Math.sqrt(distSq) || 0.001;
-        const pushOut = minDist - dist + 2; // +2 m Sicherheit
+        const pushOut = minDist - dist + 2;
         p.centerX += (dx / dist) * pushOut;
         p.centerZ += (dz / dist) * pushOut;
       }
@@ -441,18 +338,13 @@ export class FishWorld {
     fish.repelCooldown = 2.0;
   }
 
-  /**
-   * Findet eine zufällige Position, die NICHT in einer Exklusionszone liegt.
-   * Der Margin (12) ist größer als der maximale Ellipsen-Radius (ca. 7,8),
-   * damit der Fisch auf seiner gesamten Bahn niemals in die Kuppel gerät.
-   */
   private _findValidPosition(
     baseX: number,
     baseZ: number,
     minDist: number,
     maxDist: number,
   ): { x: number; z: number } {
-    const fishMargin = 15; // Sicherheitsabstand zu Kuppeln (Orbit max ~7,8 m + Puffer)
+    const fishMargin = 15;
     let attempts = 0;
     while (attempts < 20) {
       const angle = Math.random() * Math.PI * 2;
@@ -465,7 +357,6 @@ export class FishWorld {
       }
       attempts++;
     }
-    // Fallback: noch weiter weg suchen (30-50m, damit wir sicher ausserhalb aller Kuppeln sind)
     const fallbackAngle = Math.random() * Math.PI * 2;
     const fallbackDist = 30 + Math.random() * 20;
     return {
@@ -479,7 +370,6 @@ export class FishWorld {
   // -----------------------------------------------------------------------
 
   dispose(): void {
-    // Einzelfische entfernen
     for (const fish of this.soloFishes) {
       this.scene.remove(fish.mesh);
       fish.mesh.traverse((ch) => {
@@ -496,7 +386,6 @@ export class FishWorld {
     }
     this.soloFishes.length = 0;
 
-    // Schwärme entfernen
     for (const school of this.activeSchools) {
       this.scene.remove(school.instances);
       school.instances.dispose();
@@ -506,7 +395,6 @@ export class FishWorld {
     this.fishModelTemplate = null;
     this.schoolFishMesh = null;
 
-    // Echoortung
     if (this.echolocation) {
       this.echolocation.dispose();
       this.echolocation = null;
@@ -536,10 +424,7 @@ export class FishWorld {
   // -----------------------------------------------------------------------
 
   private _createSoloFish(params: SoloFishParams): SoloFish {
-    // Template klonen (jeder Fisch hat eigene Meshes)
     const mesh = this.fishModelTemplate!.clone(true);
-
-    // Skalierung + Schatten
     mesh.scale.setScalar(this.soloScale);
     mesh.traverse((ch) => {
       if (ch instanceof THREE.Mesh) {
@@ -548,7 +433,6 @@ export class FishWorld {
       }
     });
 
-    // Erstes Mesh + Original-Emissive speichern (für Echoortung-Glow)
     let fishMesh: THREE.Mesh | null = null;
     let originalEmissive: THREE.Color | null = null;
     mesh.traverse((ch) => {
@@ -561,14 +445,15 @@ export class FishWorld {
       }
     });
 
+    // Animations-Zustand aus dem Modul erzeugen
+    const state = createSwimState(params.baseY);
+
     this.scene.add(mesh);
 
     return {
       mesh,
       params,
-      state: { yaw: 0, pitch: 0, roll: 0, curY: params.baseY },
-      smoothYawFreq: params.yawFreq,
-      smoothYawAmp: params.yawAmp,
+      state,
       glowIntensity: 0,
       fishMesh,
       originalEmissive,
@@ -577,18 +462,19 @@ export class FishWorld {
   }
 
   /**
-   * Positioniert einen Fisch in 8–16 Einheiten Entfernung zur Kamera.
-   * Der alte Standort war > 16 Einheiten (jenseits des Nebels) →
-   * der Fisch ist unsichtbar verschwunden und taucht hier neu auf.
-   * Die Ellipse wird so platziert, dass der FISCH NIEMALS in eine
-   * Kuppel geraten kann (großer Sicherheitsabstand).
+   * Positioniert einen Fisch in Kameranähe (25-40m) auf einer neuen Ellipse,
+   * die garantiert außerhalb aller Kuppeln liegt.
    */
-  private _positionFishAt(fish: SoloFish, cameraPos: THREE.Vector3, minDist?: number, maxDist?: number): void {
+  private _positionFishAt(
+    fish: SoloFish,
+    cameraPos: THREE.Vector3,
+    minDist?: number,
+    maxDist?: number,
+  ): void {
     const p = fish.params;
     const mind = minDist ?? 25;
     const maxd = maxDist ?? 40;
 
-    // Gültige Position außerhalb aller Kuppeln suchen
     const { x: validX, z: validZ } = this._findValidPosition(
       cameraPos.x,
       cameraPos.z,
@@ -603,13 +489,8 @@ export class FishWorld {
       Math.random() * (this.config.waterY - this.config.floorY - 2.5);
     p.startAngle = Math.random() * Math.PI * 2;
 
-    // Position sofort auf die neue Ellipse setzen
-    const ang = p.startAngle;
-    const fx = p.centerX + Math.cos(ang) * p.radiusX;
-    const fz = p.centerZ + Math.sin(ang) * p.radiusZ;
-
     // Startwinkel so drehen, dass der Fisch nicht in einer Zone startet
-    let finalAngle = ang;
+    let finalAngle = p.startAngle;
     if (this._exclusionZones.length > 0) {
       for (let attempt = 0; attempt < 12; attempt++) {
         const tx = p.centerX + Math.cos(finalAngle) * p.radiusX;
@@ -630,15 +511,12 @@ export class FishWorld {
     fish.state.yaw = 0;
     fish.state.pitch = 0;
     fish.state.roll = 0;
-    fish.smoothYawFreq = p.yawFreq;
-    fish.smoothYawAmp = p.yawAmp;
 
-    // Fisch ist sofort sichtbar (alter Standort war im Nebel versteckt)
     fish.mesh.visible = true;
   }
 
   // -----------------------------------------------------------------------
-  // Private: Einzelfisch animieren (Carangiform + Burst-and-Glide)
+  // Private: Einzelfisch animieren
   // -----------------------------------------------------------------------
 
   private _updateSoloFish(
@@ -647,22 +525,23 @@ export class FishWorld {
     elapsed: number,
   ): void {
     const p = fish.params;
-    const dt = Math.min(delta, 0.1);
+    const { swim } = p;
 
-    // --- Bahnposition auf der Ellipse (festes Welt-Orbit, kein Teleport) ---
-    const ang = elapsed * p.speed + p.startAngle;
-    const px = p.centerX + Math.cos(ang) * p.radiusX;
-    const pz = p.centerZ + Math.sin(ang) * p.radiusZ;
+    // --- Orbit-Position auf der Ellipse ---
+    const { px, pz, ang } = computeOrbitPosition(
+      p.centerX, p.centerZ,
+      p.radiusX, p.radiusZ,
+      p.speed, p.startAngle,
+      elapsed,
+    );
 
-    // --- Sanftes Ausweichen vor Kuppeln (graduelle Lenkung, kein Ruckeln) ---
-    // Das Orbit-Zentrum wird mit ~0.3 m/s von der Kuppel weggeschoben,
-    // sodass der Fisch eine sanfte Kurve um die Stadt fliegt.
+    // --- Sanftes Ausweichen vor Kuppeln (graduelle Lenkung) ---
     if (this._exclusionZones.length > 0) {
+      const dt = Math.min(delta, 0.1);
       for (const zone of this._exclusionZones) {
         const dx2 = p.centerX - zone.centerX;
         const dz2 = p.centerZ - zone.centerZ;
         const dist = Math.sqrt(dx2 * dx2 + dz2 * dz2) || 0.001;
-        // Sicherheitsabstand: Kuppelradius + max. Orbit-Radius (~7 m) + Puffer
         const minDist = zone.radius + 7;
         if (dist < minDist) {
           const overlap = minDist - dist;
@@ -673,14 +552,9 @@ export class FishWorld {
       }
     }
 
+    // --- Kuppel-Kollision: Position + Orbit-Zentrum direkt korrigieren ---
     let finalX = px;
     let finalZ = pz;
-
-    // --- Kuppel-Kollision: Position + Orbit-Zentrum direkt korrigieren ---
-    // Wenn der Fisch trotz Orbit-Verschiebung in der Kuppel steckt, wird er
-    // gerade so weit rausgeschoben, dass er die Kuppel verlässt (~0.5–3m).
-    // Das Orbit-Zentrum folgt, damit er nicht in der nächsten Umdrehung
-    // wieder reinläuft. Kein grosser Teleport, nur eine kleine Korrektur.
     if (this._exclusionZones.length > 0) {
       for (const zone of this._exclusionZones) {
         const dx3 = finalX - zone.centerX;
@@ -696,47 +570,28 @@ export class FishWorld {
       }
     }
 
-    // --- Tiefe (sanfte Sinus-Welle) -- Boden-Abstand erhöht auf 2.0m ---
-    // Dünen gehen bis ~0.3m über floorY; Korallen und Felsen können höher sein.
-    const rawY =
-      p.baseY +
-      Math.sin(elapsed * p.depthFreq * Math.PI * 2 + p.phaseOffset) *
-        p.depthAmp;
-    const tgtY = Math.max(this.config.floorY + 2.0, rawY);
+    // --- Tiefe berechnen (Sinus-Welle + Boden-Abstand) ---
+    const tgtY = computeTargetY(
+      p.baseY,
+      swim.depthAmp,
+      swim.depthFreq,
+      swim.phaseOffset,
+      elapsed,
+      this.config.floorY,
+    );
 
-    // --- Burst-and-Glide: Geschwindigkeits-Burst alle burstInt Sekunden ---
-    const bursting = elapsed % p.burstInt < p.burstDur;
-    const tgtBurstFreq = bursting ? p.yawFreq * p.burstYawMul : p.yawFreq;
-    const tgtBurstAmp = bursting ? p.yawAmp * 1.5 : p.yawAmp;
-    const burstLerp = 1 - Math.exp(-3.0 * dt);
-    fish.smoothYawFreq += (tgtBurstFreq - fish.smoothYawFreq) * burstLerp;
-    fish.smoothYawAmp += (tgtBurstAmp - fish.smoothYawAmp) * burstLerp;
+    // --- Schwimm-Zustand aktualisieren (Burst + Yaw/Pitch/Roll) ---
+    updateSwimState(swim, fish.state, delta, elapsed, ang);
 
-    // --- Rotation (Yaw, Pitch, Roll) ---
-    const tgtYaw =
-      Math.sin(elapsed * fish.smoothYawFreq * Math.PI * 2 + p.phaseOffset) *
-      fish.smoothYawAmp;
-    const tgtPitch =
-      Math.sin(elapsed * p.pitchFreq * Math.PI * 2 + p.phaseOffset * 0.7) *
-      p.pitchAmp;
-    const tgtRoll =
-      Math.cos(ang + p.phaseOffset * 0.3) * Math.sin(elapsed * 0.6) * p.rollAmp;
+    // Tangenten-Richtung (Blickrichtung)
+    const { baseYaw } = computeOrbitTangent(p.radiusX, p.radiusZ, ang);
 
-    // Sanft interpolieren (Lerp)
-    const lf = 1 - Math.exp(-5.0 * dt);
-    fish.state.yaw += (tgtYaw - fish.state.yaw) * lf;
-    fish.state.pitch += (tgtPitch - fish.state.pitch) * lf;
-    fish.state.roll += (tgtRoll - fish.state.roll) * lf;
+    // Y-Position lerpen
+    const lf = 1 - Math.exp(-5.0 * Math.min(delta, 0.1));
     fish.state.curY += (tgtY - fish.state.curY) * lf;
 
-    // --- Position + Rotation anwenden (mit Kuppel-Ausweich-Offset) ---
+    // --- Position + Rotation anwenden ---
     fish.mesh.position.set(finalX, fish.state.curY, finalZ);
-
-    // Schwimmrichtung (Tangente der Ellipse)
-    const tx = -Math.sin(ang) * p.radiusX;
-    const tz = Math.cos(ang) * p.radiusZ;
-    const baseYaw = Math.atan2(tx, -tz);
-
     fish.mesh.rotation.set(0, 0, 0);
     fish.mesh.rotateY(baseYaw + fish.state.yaw);
     fish.mesh.rotateX(fish.state.pitch);
@@ -744,23 +599,15 @@ export class FishWorld {
   }
 
   // -----------------------------------------------------------------------
-  // Private: Sichtbarkeit verwalten (kein Teleport sichtbarer Fische)
+  // Private: Sichtbarkeit verwalten
   // -----------------------------------------------------------------------
 
-  /**
-   * Versteckt Fische, die weiter als 80 m von der Kamera entfernt sind,
-   * und positioniert unsichtbare Fische in Kameranähe neu.
-   *
-   * So schwimmen Fische auf festen Welt-Orbits, ohne zu teleportieren,
-   * aber es sind immer genug Fische in der Nähe des Spielers sichtbar.
-   */
   private _manageVisibility(cameraPos: THREE.Vector3): void {
     const maxDistSq = 80 * 80;
     const minSpawnDist = 15;
     const maxSpawnDist = 35;
     const targetVisible = Math.max(1, this.config.soloCount);
 
-    // 1) Sichtbare Fische zählen, zu weit entfernte verstecken
     let visibleCount = 0;
     for (const fish of this.soloFishes) {
       const dx = fish.mesh.position.x - cameraPos.x;
@@ -773,7 +620,6 @@ export class FishWorld {
       }
     }
 
-    // 2) Nicht genug sichtbare Fische? → unsichtbare neu positionieren
     if (visibleCount < targetVisible) {
       for (const fish of this.soloFishes) {
         if (!fish.mesh.visible) {
@@ -803,40 +649,20 @@ export class FishWorld {
     const { schoolSize } = this.config;
     const rand = Math.random;
 
-    // --- Formation-Offsets für 20 Fische in V-Formation erzeugen ---
-    const offsets: THREE.Vector3[] = [];
-    const phaseOffsets: number[] = [];
-    const ampFactors: number[] = [];
-    const speedFactors: number[] = [];
+    // V-Formation aus dem Modul erzeugen
+    const formation = generateVFormation(schoolSize);
 
-    const baseSpacingX = 4.5;  // Horizontaler Abstand zwischen den Fischen
-    const baseSpacingZ = 5.0;  // Abstand zwischen den Reihen (von vorne nach hinten)
-
-    for (let i = 0; i < schoolSize; i++) {
-      // 5 Spalten × 4 Reihen ergibt 20 Fische
-      const col = i % 5;
-      const row = Math.floor(i / 5);
-      const centerCol = 2; // Mittlere Spalte (Index 2) ist die Spitze der V-Formation
-      const ox = (col - centerCol) * baseSpacingX;
-      const oz = -row * baseSpacingZ + (rand() - 0.5) * 2.0;
-      const oy = (row - 1.5) * 2.0 + (rand() - 0.5) * 3.0;
-      offsets.push(new THREE.Vector3(ox, oy, oz));
-      phaseOffsets.push(rand() * Math.PI * 2);
-      ampFactors.push(0.7 + rand() * 0.6);
-      speedFactors.push(0.92 + rand() * 0.16);
-    }
-
-    // --- Gültige Startposition außerhalb aller ExclusionZonen finden ---
+    // Gültige Startposition außerhalb aller Kuppeln finden
     const { x: validX, z: validZ } = this._findValidPosition(
       cameraPos.x, cameraPos.z, 12, 20,
     );
 
-    // --- Material klonen (jeder Schwarm braucht eigene Instanz für Glow) ---
+    // Material klonen (jeder Schwarm braucht eigene Instanz für Glow)
     const schoolMat = (this.schoolFishMesh.material as THREE.MeshStandardMaterial).clone();
     schoolMat.transparent = true;
-    schoolMat.opacity = 0; // Start unsichtbar → Fade-In
+    schoolMat.opacity = 0;
 
-    // --- InstancedMesh erstellen ---
+    // InstancedMesh erstellen
     const instances = new THREE.InstancedMesh(
       this.schoolFishMesh.geometry,
       schoolMat,
@@ -847,13 +673,12 @@ export class FishWorld {
 
     this.scene.add(instances);
 
-    // --- Original-Emissive speichern (für Echoortung-Glow) ---
     const origEmissive =
       (schoolMat as THREE.MeshStandardMaterial).emissive
         ?.clone() ?? new THREE.Color(0x000000);
 
-    // --- Schwarm-Zustand speichern ---
-    const fadeMs = 2000; // 2s Fade-In und Fade-Out
+    const fadeMs = 2000;
+
     this.activeSchools.push({
       instances,
       fadeStartedAt: 0,
@@ -862,12 +687,9 @@ export class FishWorld {
       fishScale: this.schoolFishScale,
       glowIntensity: 0,
       originalEmissive: origEmissive,
-      // Formation-Daten
-      offsets,
-      phaseOffsets,
-      ampFactors,
-      speedFactors,
-      // Ellipsenbahn-Zentrum
+      // Formation aus dem Modul
+      formation,
+      // Ellipsenbahn
       centerX: validX,
       centerZ: validZ,
       baseY: this.config.floorY + 2 + rand() * (this.config.waterY - this.config.floorY - 4),
@@ -878,50 +700,44 @@ export class FishWorld {
       depthAmp: 0.5 + rand() * 1.0,
       depthFreq: 0.06 + rand() * 0.08,
     });
-
-    console.log(
-      `🐟🐟🐟 Formations-Schwarm erschienen! ${schoolSize} Fische`,
-    );
   }
 
-  private _updateSchools(delta: number, elapsed: number, cameraPos: THREE.Vector3): void {
+  private _updateSchools(
+    delta: number,
+    elapsed: number,
+    cameraPos: THREE.Vector3,
+  ): void {
     const now = performance.now();
 
-    // --- Prüfen, ob ein neuer Schwarm erscheinen soll (max. 2 gleichzeitig) ---
     if (now >= this.nextSchoolTime && this.activeSchools.length < 2) {
       this._spawnSchool(cameraPos);
       this._scheduleNextSchool();
     }
 
-    // --- Aktive Schwärme aktualisieren (Fade + Formations-Rendering) ---
     const scale = this.schoolFishScale;
-    const { _up: up, _axisPitch: axisPitch, _axisRoll: axisRoll } = this;
     const despawnDistSq = 65 * 65;
 
     for (let i = this.activeSchools.length - 1; i >= 0; i--) {
       const school = this.activeSchools[i];
       const mat = school.instances.material as THREE.MeshStandardMaterial;
 
-      // --- Distanz zur Kamera prüfen ---
+      // Distanz zur Kamera prüfen
       const dx = school.centerX - cameraPos.x;
       const dz = school.centerZ - cameraPos.z;
       const distSq = dx * dx + dz * dz;
 
-      // --- Fade-In / Fade-Out (distanzbasiert) ---
+      // Fade-In / Fade-Out (distanzbasiert)
       const elapsedSinceSpawn = now - school.spawnAt;
       let opacity = 1;
 
       if (elapsedSinceSpawn < school.fadeDuration) {
-        // Fade-In nach Spawn
         opacity = elapsedSinceSpawn / school.fadeDuration;
       } else if (distSq > despawnDistSq) {
-        // Zu weit weg → Fade-Out starten oder fortsetzen
         if (school.fadeStartedAt === 0) {
           school.fadeStartedAt = now;
         }
         const fadeElapsed = now - school.fadeStartedAt;
         if (fadeElapsed >= school.fadeDuration) {
-          // Fertig ausgeblendet → entfernen
           this.scene.remove(school.instances);
           school.instances.dispose();
           this.activeSchools.splice(i, 1);
@@ -929,55 +745,40 @@ export class FishWorld {
         }
         opacity = 1 - fadeElapsed / school.fadeDuration;
       } else {
-        // In der Nähe → Fade-Out zurücksetzen (Schwarm bleibt)
         school.fadeStartedAt = 0;
       }
 
       mat.opacity = opacity;
 
-      // Schwarm-Zentrum auf Ellipsenbahn berechnen
-      const ang = elapsed * school.speed + school.startAngle;
-      const cx = school.centerX + Math.cos(ang) * school.swimRadiusX;
-      const cz = school.centerZ + Math.sin(ang) * school.swimRadiusZ;
-      const rawSchoolY = school.baseY + Math.sin(elapsed * school.depthFreq * Math.PI * 2) * school.depthAmp;
-      const cy = Math.max(this.config.floorY + 1.0, rawSchoolY);
+      // Frame-Daten aus dem Modul berechnen
+      const frame = computeSchoolFrame(
+        school.formation,
+        elapsed,
+        school.centerX,
+        school.centerZ,
+        school.baseY,
+        school.swimRadiusX,
+        school.swimRadiusZ,
+        school.speed,
+        school.startAngle,
+        school.depthAmp,
+        school.depthFreq,
+        this.config.floorY,
+      );
 
-      // Schwimmrichtung = Tangente der Ellipse (Grund-Yaw)
-      const tx = -Math.sin(ang) * school.swimRadiusX;
-      const tz = Math.cos(ang) * school.swimRadiusZ;
-      const baseYaw = Math.atan2(tx, -tz);
-      const cosA = Math.cos(baseYaw);
-      const sinA = Math.sin(baseYaw);
+      // Matrizen für jeden Fisch setzen
+      for (let j = 0; j < frame.fish.length; j++) {
+        const f = frame.fish[j];
 
-      for (let j = 0; j < school.offsets.length; j++) {
-        const offset = school.offsets[j];
-        const phaseShift = school.phaseOffsets[j];
-        const ampFactor = school.ampFactors[j];
-        const speedFactor = school.speedFactors[j];
+        this._tmpVec3.set(f.fx, f.fy, f.fz);
 
-        // Individuelle Ellipsenbahn-Position jedes Fisches (eigene Geschwindigkeit)
-        const fishAng = elapsed * school.speed * speedFactor;
-        const fishPx = school.centerX + Math.cos(fishAng) * school.swimRadiusX;
-        const fishPz = school.centerZ + Math.sin(fishAng) * school.swimRadiusZ;
-
-        // Offset in Schwimmrichtung rotieren (damit V-Formation immer nach vorne zeigt)
-        const rx = offset.x * cosA - offset.z * sinA;
-        const rz = offset.x * sinA + offset.z * cosA;
-
-        this._tmpVec3.set(fishPx + rx, cy + offset.y, fishPz + rz);
-
-        // --- Rotation: Yaw (Gier), Pitch (Nick), Roll (Wanken) ---
-        const fishYaw = Math.sin(elapsed * 1.2 * Math.PI * 2 + phaseShift) * 0.15 * ampFactor;
-        const fishPitch = Math.sin(elapsed * 0.9 * Math.PI * 2 + phaseShift * 0.7) * 0.05 * ampFactor;
-        const fishRoll = Math.cos(fishAng + phaseShift * 0.3) * Math.sin(elapsed * 0.6) * 0.2 * ampFactor;
-
-        // Quaternion in der richtigen Reihenfolge aufbauen: Yaw → Pitch → Roll
+        // Quaternion: Yaw → Pitch → Roll
         this._tmpQuat.identity();
-        this._tmpQuatA.setFromAxisAngle(up, baseYaw + fishYaw);
+        this._tmpQuatA.setFromAxisAngle(this._up, frame.baseYaw + f.yawVariation);
         this._tmpQuat.multiply(this._tmpQuatA);
-        this._tmpQuatB.setFromAxisAngle(axisPitch, fishPitch);
+        this._tmpQuatB.setFromAxisAngle(this._axisPitch, f.pitch);
         this._tmpQuat.multiply(this._tmpQuatB);
-        this._tmpQuatA.setFromAxisAngle(axisRoll, fishRoll);
+        this._tmpQuatA.setFromAxisAngle(this._axisRoll, f.roll);
         this._tmpQuat.multiply(this._tmpQuatA);
 
         this._tmpScale.set(scale, scale, scale);
@@ -992,10 +793,6 @@ export class FishWorld {
   // Private: Echoortung – Ringe aussenden + Glow-Effekt
   // -----------------------------------------------------------------------
 
-  /**
-   * Aktualisiert die Echoortungs-Ringe und wendet Glow auf getroffene Fische an.
-   * Die Ringe gehen von der Kameraposition (Spieler) aus.
-   */
   private _updateEcholocation(
     delta: number,
     elapsed: number,
@@ -1003,37 +800,33 @@ export class FishWorld {
   ): void {
     if (!this.echolocation) return;
 
-    // --- Echo-Targets aus Einzelfischen sammeln ---
+    // Echo-Targets aus Einzelfischen sammeln
     this._echoTargets.length = 0;
     for (const fish of this.soloFishes) {
       if (!fish.fishMesh) continue;
       this._echoTargets.push({
         position: fish.mesh.position,
         onHit: () => {
-          fish.glowIntensity = 1.0; // Sofort aufleuchten
+          fish.glowIntensity = 1.0;
         },
       });
     }
 
-    // --- Echo-Targets aus Schwarm-Fischen sammeln ---
-    // Für Formations-Schwärme wird vereinfacht das Zentrum genutzt
+    // Echo-Targets aus Schwärmen (vereinfacht: Zentrum)
     for (const school of this.activeSchools) {
       this._echoTargets.push({
         position: new THREE.Vector3(school.centerX, school.baseY, school.centerZ),
         onHit: () => {
-          school.glowIntensity = 1.0; // Ganzer Schwarm leuchtet auf
+          school.glowIntensity = 1.0;
         },
       });
     }
 
-    // --- Ringe aktualisieren (prüft Kollisionen mit allen Targets) ---
-    // Ursprung liegt 2 Einheiten tiefer als die Kamera, damit die Ringe
-    // unterhalb des Spielers schweben und besser sichtbar sind.
     this._echoOrigin.copy(cameraPos);
     this._echoOrigin.y -= 2.0;
     this.echolocation.update(elapsed, delta, this._echoOrigin, this._echoTargets);
 
-    // --- Glow bei Einzelfischen: exponentieller Abfall ---
+    // Glow bei Einzelfischen
     const decay = Math.exp(-3.0 * delta);
     for (const fish of this.soloFishes) {
       if (!fish.fishMesh || !fish.originalEmissive) continue;
@@ -1054,7 +847,7 @@ export class FishWorld {
       }
     }
 
-    // --- Glow bei Schwärmen: exponentieller Abfall ---
+    // Glow bei Schwärmen
     for (const school of this.activeSchools) {
       school.glowIntensity *= decay;
 
