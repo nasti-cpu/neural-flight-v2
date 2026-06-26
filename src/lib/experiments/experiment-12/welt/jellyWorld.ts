@@ -367,13 +367,12 @@ export class JellyWorld {
 
       member.jelly.group.position.x = ox;
       member.jelly.group.position.z = oz;
-      member.jelly.group.position.y = oy;
 
       const jellyElapsed = elapsed + member.animPhase;
       animateProceduralJelly(member.jelly, jellyElapsed, delta, MOON_PARAMS, false);
 
-      // Y nach der Animation korrigieren: animateProceduralJelly setzt
-      // group.position.y = lift + depthWave – wir müssen baseY + yOffset draufrechnen
+      // Y-Position setzen: animateProceduralJelly setzt group.position.y auf
+      // lift + depthWave (relativ) – wir addieren baseY + yOffset für die Welt-Position
       member.jelly.group.position.y += oy;
     }
   }

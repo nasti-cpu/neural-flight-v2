@@ -6,10 +6,10 @@
  * (Laden, Klonen, Sichtbarkeit, Fade).
  *
  * Lebenszyklus pro Stadt:
- *   pending → ready (bei < 60 m – Modell wird geklont, bereit zum Einblenden)
- *   ready → visible (bei < 22 m – sanftes Fade-In)
- *   visible → ready (bei > 30 m – sanftes Fade-Out, Szene entfernt)
- *   ready → pending (bei > 72 m – Speicher freigegeben)
+ *   pending → ready (bei < 65 m – Modell wird geklont, bereit zum Einblenden)
+ *   ready → visible (bei < 40 m – sanftes Fade-In über 30 m)
+ *   visible → ready (bei > 50 m – sanftes Fade-Out, Szene entfernt)
+ *   ready → pending (bei > 80 m – Speicher freigegeben)
  */
 
 import * as THREE from "three/webgpu";
@@ -258,7 +258,7 @@ export class CityWorld {
       return;
     }
 
-    const lerpFactor = 1 - Math.exp(-5.0 * delta);
+    const lerpFactor = 1 - Math.exp(-2.5 * delta);
     slot.opacity += (target - slot.opacity) * lerpFactor;
 
     if (slot.group) {

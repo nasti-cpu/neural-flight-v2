@@ -29,19 +29,19 @@ export const CITY_CONFIGS: Record<string, CityConfig> = {
 // Raster-Konfiguration
 // ---------------------------------------------------------------------------
 
-export const GRID_SPACING = 80;
-export const MAX_OFFSET = 16;
+export const GRID_SPACING = 120;
+export const MAX_OFFSET = 20;
 export const GRID_EXTENT = 400;
 
 // ---------------------------------------------------------------------------
 // Distanzen für den Lebenszyklus
 // ---------------------------------------------------------------------------
 
-export const DIST_READY = 60;
-export const DIST_SHOW = 22;
-export const DIST_HIDE = 30;
-export const DIST_UNLOAD = 72;
-export const DIST_FULL_OPACITY = 14;
+export const DIST_READY = 65;
+export const DIST_SHOW = 40;
+export const DIST_HIDE = 50;
+export const DIST_UNLOAD = 80;
+export const DIST_FULL_OPACITY = 25;
 
 // ---------------------------------------------------------------------------
 // Exklusionszone (auch von FishWorld/Korallen genutzt)
@@ -87,6 +87,9 @@ export function generateGrid(): CitySlotData[] {
 
   for (let gx = -steps; gx <= steps; gx++) {
     for (let gz = -steps; gz <= steps; gz++) {
+      // Keine Stadt direkt am Ursprung – Spieler startet dort
+      if (gx === 0 && gz === 0) continue;
+
       const offsetX = (Math.random() - 0.5) * MAX_OFFSET * 2;
       const offsetZ = (Math.random() - 0.5) * MAX_OFFSET * 2;
       const worldX = gx * GRID_SPACING + offsetX;

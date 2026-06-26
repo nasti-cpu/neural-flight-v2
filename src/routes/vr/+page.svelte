@@ -1,7 +1,7 @@
 <script lang="ts">
 import { Trophy } from "lucide-svelte";
 import { onDestroy, onMount } from "svelte";
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
 import type { ActiveExperience } from "$lib/experiences/loader";
 import {
@@ -17,7 +17,7 @@ import {
 } from "$lib/ws/protocol";
 
 let canvas: HTMLCanvasElement;
-let renderer: THREE.WebGLRenderer;
+let renderer: THREE.WebGPURenderer;
 let scene: THREE.Scene;
 let vrButton: HTMLElement;
 let score = $state(0);
@@ -35,79 +35,83 @@ onMount(() => {
 	scene = new THREE.Scene();
 	const dummyCamera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
 
-	renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+	renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
 	renderer.setPixelRatio(window.devicePixelRatio);
 	renderer.setSize(window.innerWidth, window.innerHeight);
 	renderer.xr.enabled = true;
 	renderer.shadowMap.enabled = true;
 	renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-	vrButton = VRButton.createButton(renderer);
-	document.body.appendChild(vrButton);
+	// Async-Initialisierung in IIAFE (Svelte 5 onMount verbietet async + cleanup)
+	(async () => {
+		await renderer.init();
 
-	// Load whichever experience is selected (persisted in localStorage)
-	const experienceId = getActiveExperienceId();
+		vrButton = VRButton.createButton(renderer);
+		document.body.appendChild(vrButton);
 
-	loadExperience(experienceId, { scene, camera: dummyCamera, renderer }).then(
-		(exp: ActiveExperience) => {
-			experienceName = exp.manifest.name;
-			hasOutputs = (exp.manifest.outputs?.length ?? 0) > 0;
-			const renderCamera = exp.state.camera as THREE.PerspectiveCamera;
+		const experienceId = getActiveExperienceId();
 
-			function onResize(): void {
-				renderCamera.aspect = window.innerWidth / window.innerHeight;
-				renderCamera.updateProjectionMatrix();
-				renderer.setSize(window.innerWidth, window.innerHeight);
-			}
-			window.addEventListener("resize", onResize);
-			removeResizeListener = () =>
-				window.removeEventListener("resize", onResize);
+		loadExperience(experienceId, { scene, camera: dummyCamera, renderer: renderer as any }).then(
+			(exp: ActiveExperience) => {
+				experienceName = exp.manifest.name;
+				hasOutputs = (exp.manifest.outputs?.length ?? 0) > 0;
+				const renderCamera = exp.state.camera as THREE.PerspectiveCamera;
 
-			renderer.setAnimationLoop(() => {
-				const delta = clock.getDelta();
+				function onResize(): void {
+					renderCamera.aspect = window.innerWidth / window.innerHeight;
+					renderCamera.updateProjectionMatrix();
+					renderer.setSize(window.innerWidth, window.innerHeight);
+				}
+				window.addEventListener("resize", onResize);
+				removeResizeListener = () =>
+					window.removeEventListener("resize", onResize);
 
-				const msg = ws.lastMessage;
-				if (msg && msg.timestamp > lastProcessedTimestamp) {
-					lastProcessedTimestamp = msg.timestamp;
+				renderer.setAnimationLoop(() => {
+					const delta = clock.getDelta();
 
-					if (isOrientationData(msg)) {
-						lastOrientation = { pitch: msg.pitch, roll: msg.roll };
-					}
-					if (isSpeedCommand(msg)) {
-						lastSpeed = {
-							accelerate: msg.action === "accelerate" && msg.active,
-							brake: msg.action === "brake" && msg.active,
-						};
-					}
-					if (isSettingsUpdate(msg)) {
-						for (const key of Object.keys(msg.settings)) {
-							exp.manifest.applySettings(
-								key,
-								msg.settings[key] as number | boolean | string,
-								exp.state,
-								scene,
-							);
+					const msg = ws.lastMessage;
+					if (msg && msg.timestamp > lastProcessedTimestamp) {
+						lastProcessedTimestamp = msg.timestamp;
+
+						if (isOrientationData(msg)) {
+							lastOrientation = { pitch: msg.pitch, roll: msg.roll };
+						}
+						if (isSpeedCommand(msg)) {
+							lastSpeed = {
+								accelerate: msg.action === "accelerate" && msg.active,
+								brake: msg.action === "brake" && msg.active,
+							};
+						}
+						if (isSettingsUpdate(msg)) {
+							for (const key of Object.keys(msg.settings)) {
+								exp.manifest.applySettings(
+									key,
+									msg.settings[key] as number | boolean | string,
+									exp.state,
+									scene,
+								);
+							}
 						}
 					}
-				}
 
-				exp.manifest.updatePlayer(lastOrientation, lastSpeed, exp.state, delta);
-				const result = exp.manifest.tick(exp.state, {
-					delta,
-					elapsed: clock.elapsedTime,
-					camera: renderCamera,
-					playerPosition: renderCamera.parent?.position ?? new THREE.Vector3(),
-					playerRotation: renderCamera.parent?.rotation ?? new THREE.Euler(),
+					exp.manifest.updatePlayer(lastOrientation, lastSpeed, exp.state, delta);
+					const result = exp.manifest.tick(exp.state, {
+						delta,
+						elapsed: clock.elapsedTime,
+						camera: renderCamera,
+						playerPosition: renderCamera.parent?.position ?? new THREE.Vector3(),
+						playerRotation: renderCamera.parent?.rotation ?? new THREE.Euler(),
+					});
+					exp.state = result.state;
+					if (result.outputs?.score !== undefined) {
+						score = result.outputs.score as number;
+					}
+
+					renderer.render(scene, renderCamera);
 				});
-				exp.state = result.state;
-				if (result.outputs?.score !== undefined) {
-					score = result.outputs.score as number;
-				}
-
-				renderer.render(scene, renderCamera);
-			});
-		},
-	);
+			},
+		);
+	})();
 
 	return () => {
 		removeResizeListener?.();
