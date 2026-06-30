@@ -13,6 +13,7 @@ import { createMeadow, type MeadowPatch, MEADOW_PRESETS } from "./Biome/Wiese/gr
 import { createFlowers, type MeadowFlowers } from "./Objekte/Blumen/blumen";
 import { createBees, type BeeSwarm } from "./Objekte/Bienen/bienen";
 import { createButterflies, type ButterflySwarm } from "./Objekte/Schmetterlinge/schmetterlinge";
+import { createAlpineRing, updateMountainsPosition } from "./Biome/Berge/mountains";
 import { CITY } from "./Objekte/Stadt/city";
 import { PheromoneSystem, type FlowerTarget } from "./Sinne/Pheromonspuren/pheromonspuren";
 import beeGlbUrl from "./Objekte/Bienen/Bee.glb?url";
@@ -27,6 +28,7 @@ interface InsectWorldV2State extends ExperienceState {
 	butterflies: ButterflySwarm;
 	pheromones: PheromoneSystem;
 	sky: THREE.Mesh;
+	mountains: THREE.Mesh;
 	city: THREE.Group | null;
 }
 
@@ -75,15 +77,19 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 	const sky = createSky("klassisch");
 	ctx.scene.add(sky);
 
-	// 2. Wiese (Frühlingswiese)
+	// 2. Bergpanorama (Horizont, folgt dem Spieler)
+	const mountains = createAlpineRing();
+	ctx.scene.add(mountains);
+
+	// 3. Wiese (Frühlingswiese)
 	const meadow = createMeadow(MEADOW_PRESETS["Frühlingswiese"], 0, 0);
 	ctx.scene.add(meadow.group);
 
-	// 3. Blumen
+	// 4. Blumen
 	const flowers = await createFlowers(0, 0, undefined, meadow.getHeightAt);
 	ctx.scene.add(flowers.group);
 
-	// 4. Stadt laden
+	// 5. Stadt laden
 	let city: THREE.Group | null = null;
 	try {
 		const cityScene = await loadGLB(CITY.MODEL);
@@ -184,7 +190,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 	// Himmelshintergrund als Fallback für den Sky-Mesh
 	ctx.scene.background = new THREE.Color(0x4a90d9);
 
-	return { camera, meadow, flowers, bees, butterflies, pheromones, sky, city };
+	return { camera, meadow, flowers, bees, butterflies, pheromones, sky, mountains, city };
 }
 
 export function tick(
@@ -199,6 +205,9 @@ export function tick(
 	s.butterflies.update(ctx.elapsed);
 	// Pheromon-Spuren-Animation
 	s.pheromones.update(ctx.elapsed);
+
+	// Bergpanorama dem Spieler folgen lassen (bleibt immer am Horizont)
+	updateMountainsPosition(s.mountains, ctx.camera.position);
 
 	return { state: s };
 }
@@ -224,6 +233,10 @@ export function dispose(state: ExperienceState, _scene: THREE.Scene): void {
 			}
 		});
 	}
+	_scene.remove(s.mountains);
+	(s.mountains.geometry as THREE.BufferGeometry).dispose();
+	(s.mountains.material as THREE.Material).dispose();
+
 	_scene.remove(s.sky);
 	(s.sky.geometry as THREE.BufferGeometry).dispose();
 	(s.sky.material as THREE.Material).dispose();
