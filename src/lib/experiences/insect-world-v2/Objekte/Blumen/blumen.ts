@@ -26,8 +26,8 @@ export interface FlowerConfig {
 }
 
 const DEFAULT_CONFIG: FlowerConfig = {
-	count: 120,
-	fieldSize: 60,
+	count: 400,
+	fieldSize: 120,
 };
 
 export interface FlowerTarget {

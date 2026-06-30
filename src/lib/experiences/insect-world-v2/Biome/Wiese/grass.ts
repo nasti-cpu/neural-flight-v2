@@ -353,3 +353,27 @@ export function createSpacingPatches(
 		return createMeadow(v.config, cx, cz, v.name);
 	});
 }
+
+/**
+ * Riesige Bodenplatte für unendlich wirkende Landschaft.
+ * Sanfte Hügel via TSL positionNode, Grasfarbe, Fog am Rand.
+ */
+export function createLargeGround(): THREE.Mesh {
+	const size = 500;
+	const segs = 128;
+	const geo = new THREE.PlaneGeometry(size, size, segs, segs);
+	geo.rotateX(-Math.PI / 2);
+
+	const x = positionLocal.x;
+	const z = positionLocal.z;
+	const hill = x.mul(0.008).sin().mul(z.mul(0.01).sin()).mul(3)
+		.add(x.mul(0.02).add(z.mul(0.015)).sin().mul(1));
+
+	const mat = new THREE.MeshBasicNodeMaterial();
+	mat.positionNode = positionLocal.add(vec3(float(0), hill, float(0)));
+	mat.colorNode = vec3(float(0.28), float(0.55), float(0.15));
+
+	const mesh = new THREE.Mesh(geo, mat);
+	mesh.frustumCulled = false;
+	return mesh;
+}
