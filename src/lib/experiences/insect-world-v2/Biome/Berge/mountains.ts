@@ -1,68 +1,62 @@
 /**
  * insect-world-v2 — Alpine Horizon Mountains (Bergpanorama).
  *
- * Ein Ring aus Bergen, der immer am Horizont bleibt.
- * Die Berge folgen der XZ-Position des Spielers,
- * sodass sie nie erreichbar sind und immer gleich weit entfernt wirken.
- * Rein dekorative Hintergrundkulisse — keine Kollision, keine Physik.
+ * Ein Ring aus Bergen, der immer am Horizont bleibt und
+ * auf dem Boden steht (folgt der Geländehöhe).
+ *
+ * Die Berge folgen der XZ-Position des Spielers, sodass sie
+ * nie erreichbar sind. Die Höhe (Y) wird dynamisch an die
+ * Bodenhöhe am aktuellen Standort angepasst.
  *
  * Optimiert für VR:
- * - 128 × 4 Segmente (geringe Polygonanzahl)
+ * - 128 × 6 Segmente
  * - TSL-Shader für Farbverlauf (Grün → Fels → Schnee)
- * - fog: false (keine Überblendung mit Sichtnebel)
- * - frustumCulled: false (bewegt sich relativ zum Spieler)
+ * - fog: false, frustumCulled: false
+ * - renderOrder: -1 (Hintergrund)
  *
  * WebGPU + TSL (siehe AGENTS.md).
  */
 import * as THREE from "three/webgpu";
 import { attribute, clamp, float, mix, smoothstep, vec3 } from "three/tsl";
+import { getWorldHeight } from "../Wiese/grass-manager";
 
 // ── Konstanten ──
-// Diese Werte bestimmen, wie weit weg die Berge sind und wie sie aussehen.
 
-const INNER_RADIUS = 350;     // Innenradius des Bergrings (Einheit: Meter)
-const OUTER_RADIUS = 450;     // Außenradius des Bergrings
-const ANGULAR_SEGMENTS = 128; // Anzahl der Unterteilungen im Kreis (je mehr, desto feiner)
-const RADIAL_SEGMENTS = 4;    // Unterteilungen von innen nach außen
-const MAX_HEIGHT = 35;        // Maximale Höhe der Berggipfel
-const Y_CENTER = 2;           // Y-Position des Rings (Horizonthöhe)
-
-// ── Hilfsfunktionen ──
+const INNER_RADIUS = 250;     // Innenradius (näher am Spieler)
+const OUTER_RADIUS = 450;     // Außenradius (weiter entfernt)
+const ANGULAR_SEGMENTS = 96;  // Unterteilungen im Kreis
+const RADIAL_SEGMENTS = 6;    // Unterteilungen von innen nach außen
+const MAX_HEIGHT = 40;        // Maximale Berghöhe ab Boden
 
 /**
- * Berechnet die Berghöhe an einem bestimmten Winkel (theta) und radialem Abstand.
- * Nutzt überlagerte Sinuswellen für natürliche, zufällig wirkende Bergkonturen.
- *
- * @param theta - Winkel im Kreis (0 bis 2π)
- * @param radialFrac - Anteil von innen (0) nach außen (1)
+ * Generiert die Berghöhe an einem bestimmten Winkel und radialem Abstand.
+ * Die Höhe ist 0 an den Rändern und steigt zur Mitte hin an,
+ * damit die Berge nahtlos in den Boden übergehen.
  */
 function mountainHeight(theta: number, radialFrac: number): number {
-	// Überlagerte Wellen mit unterschiedlichen Frequenzen erzeugen
-	// realistische Bergsilhouetten (oben/unten, links/rechts).
+	// Rausch-Wellen für die Bergsilhouette
 	const n = Math.sin(theta * 2 + 1.2) * 0.5 +
 		Math.sin(theta * 5 + 3.4) * 0.35 +
 		Math.sin(theta * 11 + 5.6) * 0.18 +
 		Math.cos(theta * 17 + 0.8) * 0.08 +
-		Math.sin(theta * 23 + 2.1) * 0.04;
+		Math.sin(theta * 23 + 2.1) * 0.04 +
+		Math.cos(theta * 31 + 4.3) * 0.03;
 
-	// Nur positive Werte = Berge, negative = Täler
-	const peak = Math.max(0, n * 1.5);
+	const peak = Math.max(0, n * 1.4);
 
-	// Außenkante etwas flacher für sanfteren Übergang zum Himmel
-	const falloff = 1 - radialFrac * 0.3;
-	return peak * MAX_HEIGHT * falloff;
+	// Sanfte Auslauframpe an den Rändern → Verbindung zum Boden
+	const edgeFade = 1 - Math.pow(Math.abs(radialFrac - 0.5) * 2, 3);
+	return peak * MAX_HEIGHT * Math.max(0, edgeFade);
 }
 
 /**
- * Baut die komplette Ring-Geometrie auf.
- * Ein Ring besteht aus vielen kleinen Vierecken (2 Dreiecke pro Viereck).
- * Jeder Vertex bekommt zusätzlich seine Höhe als Attribut für den Shader.
+ * Baut die Ring-Geometrie.
+ * Die Höhenwerte sind relativ zum Boden (0 = Boden).
  */
 function buildRingGeometry(): THREE.BufferGeometry {
-	// 1. Positionen und Höhen berechnen
 	const positions: number[] = [];
 	const heights: number[] = [];
-	const rows = ANGULAR_SEGMENTS + 1; // +1 weil letzter = erster (Kreisschluss)
+	const rows = ANGULAR_SEGMENTS + 1;
 	const cols = RADIAL_SEGMENTS + 1;
 
 	for (let i = 0; i < rows; i++) {
@@ -72,15 +66,14 @@ function buildRingGeometry(): THREE.BufferGeometry {
 
 		for (let j = 0; j < cols; j++) {
 			const frac = j / RADIAL_SEGMENTS;
-			const radius = INNER_RADIUS + frac * (OUTER_RADIUS - INNER_RADIUS);
-			const h = mountainHeight(theta, frac) + Y_CENTER;
+			const r = INNER_RADIUS + frac * (OUTER_RADIUS - INNER_RADIUS);
+			const h = mountainHeight(theta, frac);
 
-			positions.push(radius * cos, h, radius * sin);
+			positions.push(r * cos, h, r * sin);
 			heights.push(h);
 		}
 	}
 
-	// 2. Indizes für die Dreiecke (2 Dreiecke pro Viereck)
 	const indices: number[] = [];
 	for (let i = 0; i < ANGULAR_SEGMENTS; i++) {
 		for (let j = 0; j < RADIAL_SEGMENTS; j++) {
@@ -88,12 +81,10 @@ function buildRingGeometry(): THREE.BufferGeometry {
 			const b = a + 1;
 			const c = (i + 1) * cols + j;
 			const d = c + 1;
-			// Zwei Dreiecke: (oben-links, unten-links, oben-rechts) + (oben-rechts, unten-links, unten-rechts)
 			indices.push(a, c, b, b, c, d);
 		}
 	}
 
-	// 3. Geometrie erstellen
 	const geo = new THREE.BufferGeometry();
 	geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
 	geo.setAttribute("height", new THREE.Float32BufferAttribute(heights, 1));
@@ -105,52 +96,42 @@ function buildRingGeometry(): THREE.BufferGeometry {
 // ── Öffentliche API ──
 
 /**
- * Erzeugt einen Bergring, der immer am Horizont sichtbar ist.
- * Der Ring wird initial im Ursprung platziert und später
- * mit updateMountainsPosition() dem Spieler nachgeführt.
+ * Erzeugt den Bergring.
+ * Die Y-Position wird später in updateMountainsPosition() gesetzt.
  */
 export function createAlpineRing(): THREE.Mesh {
-	// Geometrie einmalig erstellen (teuer) — danach nur noch Position updaten (günstig)
 	const geo = buildRingGeometry();
 
-	// ── TSL-Shader: Höhe bestimmt die Farbe ──
-	// Je höher der Berg, desto mehr geht die Farbe von Grün über Grau zu Weiß (Schnee).
+	// TSL-Shader: relative Höhe → Farbe (Grün → Fels → Schnee)
 	const h = attribute("height", "float");
-	const t = clamp(h.sub(Y_CENTER).div(MAX_HEIGHT), float(0), float(1));
+	const t = clamp(h.div(MAX_HEIGHT), float(0), float(1));
 
-	// Unterer Bereich: dunkles Grün (bewachsene Täler)
 	const base = mix(
-		vec3(0.25, 0.40, 0.18),
-		vec3(0.55, 0.50, 0.42),
+		vec3(0.20, 0.35, 0.15),
+		vec3(0.50, 0.48, 0.40),
 		smoothstep(float(0), float(0.35), t),
 	);
 
-	// Oberer Bereich: Übergang zu Schnee
 	const color = mix(
 		base,
 		vec3(0.95, 0.95, 1.0),
-		smoothstep(float(0.45), float(0.75), t),
+		smoothstep(float(0.40), float(0.70), t),
 	);
 
-	// Material: BasicNodeMaterial (kein Licht nötig, nur Farbe)
 	const mat = new THREE.MeshBasicNodeMaterial({ colorNode: color });
-	mat.side = THREE.DoubleSide; // Von beiden Seiten sichtbar (für VR wichtig)
-	mat.fog = false; // Kein Sichtnebel — Berge bleiben immer sichtbar
+	mat.side = THREE.DoubleSide;
+	mat.fog = false;
 
 	const mesh = new THREE.Mesh(geo, mat);
-	mesh.frustumCulled = false; // Kein Culling, da Ring sich relativ zum Spieler bewegt
-	mesh.renderOrder = -1; // Vor anderen Objekten zeichnen (Hintergrund)
+	mesh.frustumCulled = false;
+	mesh.renderOrder = -1;
 
 	return mesh;
 }
 
 /**
- * Bewegt den Bergring mit dem Spieler mit.
- * So bleiben die Berge immer gleich weit entfernt am Horizont.
- * Nur XZ wird angepasst — die Höhe (Y) bleibt fix.
- *
- * Aufruf in der tick()-Funktion jeder Frame:
- *   updateMountainsPosition(state.mountains, ctx.camera.position);
+ * Setzt die Position des Bergrings auf die Bodenhöhe am Spielerstandort.
+ * Die Berge stehen auf dem Boden und folgen dem Spieler in XZ.
  */
 export function updateMountainsPosition(
 	mesh: THREE.Mesh,
@@ -158,6 +139,7 @@ export function updateMountainsPosition(
 ): void {
 	mesh.position.x = playerPosition.x;
 	mesh.position.z = playerPosition.z;
-	// Y bleibt auf Horizonthöhe — die Berge schweben nicht mit der Kamera
-	mesh.position.y = 0;
+	// Y so setzen, dass der Bergfuß im Boden steckt
+	// Die Berge ragen dann MAX_HEIGHT Meter nach oben
+	mesh.position.y = getWorldHeight(playerPosition.x, playerPosition.z) - 2;
 }

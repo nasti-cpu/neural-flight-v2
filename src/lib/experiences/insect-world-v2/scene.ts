@@ -9,11 +9,10 @@ import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { ExperienceState, SetupContext, TickContext } from "../types";
 import { createSky } from "./Biome/blauerHimmel/sky";
-import { createMeadow, type MeadowPatch, MEADOW_PRESETS } from "./Biome/Wiese/grass";
+import { GrassManager, getWorldHeight } from "./Biome/Wiese/grass-manager";
 import { createFlowers, type MeadowFlowers } from "./Objekte/Blumen/blumen";
 import { createBees, type BeeSwarm } from "./Objekte/Bienen/bienen";
 import { createButterflies, type ButterflySwarm } from "./Objekte/Schmetterlinge/schmetterlinge";
-import { createAlpineRing, updateMountainsPosition } from "./Biome/Berge/mountains";
 import { CITY } from "./Objekte/Stadt/city";
 import { PheromoneSystem, type FlowerTarget } from "./Sinne/Pheromonspuren/pheromonspuren";
 import beeGlbUrl from "./Objekte/Bienen/Bee.glb?url";
@@ -22,13 +21,12 @@ import butterflyGlbUrl from "./Objekte/Schmetterlinge/Beautiful Butterfly.glb?ur
 /** Eigenes State-Interface für insect-world-v2 */
 interface InsectWorldV2State extends ExperienceState {
 	camera: THREE.PerspectiveCamera;
-	meadow: MeadowPatch;
+	grassManager: GrassManager;
 	flowers: MeadowFlowers;
 	bees: BeeSwarm;
 	butterflies: ButterflySwarm;
 	pheromones: PheromoneSystem;
 	sky: THREE.Mesh;
-	mountains: THREE.Mesh;
 	city: THREE.Group | null;
 }
 
@@ -74,19 +72,19 @@ function clearFlowerRect(
 
 export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 	// 1. Himmel
-	const sky = createSky("klassisch");
+	const sky = createSky();
 	ctx.scene.add(sky);
 
-	// 2. Bergpanorama (Horizont, folgt dem Spieler)
-	const mountains = createAlpineRing();
-	ctx.scene.add(mountains);
+	// 2. Wiese (Chunk-basiert, unendlich)
+	const grassManager = new GrassManager({
+		fieldSize: 60, grassCount: 20000, curvature: 0.0001,
+		color: "#6aaf4c", groundColor: "#6aaf4c",
+		minHeight: 0.6, maxHeight: 1.8, windStrength: 0.06, windSpeedMultiplier: 1.0,
+	});
+	ctx.scene.add(grassManager.group);
 
-	// 3. Wiese (Frühlingswiese)
-	const meadow = createMeadow(MEADOW_PRESETS["Frühlingswiese"], 0, 0);
-	ctx.scene.add(meadow.group);
-
-	// 4. Blumen
-	const flowers = await createFlowers(0, 0, undefined, meadow.getHeightAt);
+	// 4. Blumen (riesiges Feld, nie erreichbarer Rand)
+	const flowers = await createFlowers(0, 0, { count: 2500, fieldSize: 600 }, getWorldHeight);
 	ctx.scene.add(flowers.group);
 
 	// 5. Stadt laden
@@ -100,7 +98,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 		city = cityScene;
 
 		// Gras im Stadt-Bereich entfernen
-		meadow.clearRotatedRect(CITY.CLEAR.CENTER.x, CITY.CLEAR.CENTER.z,
+		grassManager.clearRect(CITY.CLEAR.CENTER.x, CITY.CLEAR.CENTER.z,
 			CITY.CLEAR.RECT.hw, CITY.CLEAR.RECT.hd, CITY.CLEAR.RECT.angle, CITY.CLEAR.RECT.border);
 
 		// Blumen im Stadt-Bereich entfernen
@@ -138,7 +136,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 	const bees = await createBees(beeGlbUrl, {
 		count: 10,
 		scale: 0.04,
-		fieldRadius: 25,
+		fieldRadius: 200,
 		flyRadiusMin: 1,
 		flyRadiusMax: 3,
 		speedMin: 2,
@@ -155,7 +153,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 	const butterflies = await createButterflies(butterflyGlbUrl, {
 		count: 6,
 		scale: 0.036,
-		fieldRadius: 40,
+		fieldRadius: 200,
 		flyRadiusMin: 1,
 		flyRadiusMax: 4,
 		speedMin: 1.0,
@@ -190,7 +188,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 	// Himmelshintergrund als Fallback für den Sky-Mesh
 	ctx.scene.background = new THREE.Color(0x4a90d9);
 
-	return { camera, meadow, flowers, bees, butterflies, pheromones, sky, mountains, city };
+	return { camera, grassManager, flowers, bees, butterflies, pheromones, sky, city };
 }
 
 export function tick(
@@ -206,8 +204,8 @@ export function tick(
 	// Pheromon-Spuren-Animation
 	s.pheromones.update(ctx.elapsed);
 
-	// Bergpanorama dem Spieler folgen lassen (bleibt immer am Horizont)
-	updateMountainsPosition(s.mountains, ctx.camera.position);
+	// Wiese: Chunks um den Spieler laden/entladen
+	s.grassManager.update(ctx.camera.position);
 
 	return { state: s };
 }
@@ -219,7 +217,7 @@ export function dispose(state: ExperienceState, _scene: THREE.Scene): void {
 	s.butterflies.dispose();
 	s.pheromones.dispose();
 	s.flowers.dispose();
-	s.meadow.dispose();
+	s.grassManager.dispose();
 	if (s.city) {
 		_scene.remove(s.city);
 		s.city.traverse((child) => {
@@ -233,15 +231,11 @@ export function dispose(state: ExperienceState, _scene: THREE.Scene): void {
 			}
 		});
 	}
-	_scene.remove(s.mountains);
-	(s.mountains.geometry as THREE.BufferGeometry).dispose();
-	(s.mountains.material as THREE.Material).dispose();
-
 	_scene.remove(s.sky);
 	(s.sky.geometry as THREE.BufferGeometry).dispose();
 	(s.sky.material as THREE.Material).dispose();
 	// Alle Gruppen aus der Szene entfernen
-	_scene.remove(s.meadow.group);
+	_scene.remove(s.grassManager.group);
 	_scene.remove(s.flowers.group);
 	_scene.remove(s.bees.group);
 	_scene.remove(s.butterflies.group);
