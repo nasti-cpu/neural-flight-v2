@@ -182,11 +182,9 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 	pheromones.addTrails(flowerTargetsFiltered);
 	ctx.scene.add(pheromones.group);
 
-	// Kamera positionieren (Vogelperspektive ~6m)
+	// Kamera positionieren (Insektenperspektive ~2m)
 	const camera = ctx.camera;
-	camera.position.set(0, 6, 0);
-	// Himmelshintergrund als Fallback für den Sky-Mesh
-	ctx.scene.background = new THREE.Color(0x4a90d9);
+	camera.position.set(0, 2, 0);
 
 	return { camera, grassManager, flowers, bees, butterflies, pheromones, sky, city };
 }

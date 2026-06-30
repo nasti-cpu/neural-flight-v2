@@ -40,7 +40,7 @@ export function updatePlayer(
 
 	camera.position.addScaledVector(forward, moveSpeed * delta);
 
-	// Höhe über Grund halten (~6m Vogelperspektive)
-	camera.position.y += (6 - camera.position.y) * 0.5 * delta;
-	if (camera.position.y < 1) camera.position.y = 1;
+	// Höhe über Grund halten (~2m = Insekten-Perspektive)
+	camera.position.y += (2 - camera.position.y) * 0.5 * delta;
+	if (camera.position.y < 0.5) camera.position.y = 0.5;
 }

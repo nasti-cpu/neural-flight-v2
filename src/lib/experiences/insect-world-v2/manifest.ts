@@ -34,7 +34,7 @@ export const manifest: ExperienceManifest = {
 		sunColor: "#ffffff",
 		sunPosition: { x: 50, y: 80, z: 30 },
 	},
-	spawn: { position: { x: 0, y: 6, z: 0 } },
+	spawn: { position: { x: 0, y: 2, z: 0 } },
 
 	setup,
 	tick,
