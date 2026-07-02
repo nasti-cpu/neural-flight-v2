@@ -389,7 +389,11 @@ export class GrassManager {
     const worldZ = gz * CHUNK_SIZE;
     const count = content.grassCount;
 
-    const mesh = new THREE.InstancedMesh(this.bladeGeo, this.bladeMat, count);
+    // Jeder Chunk braucht eine eigene Geometrie-Kopie, weil die Instanz-Attribute
+    // (aPhase, aSpeed, aBaseX, aBaseZ) pro Chunk unterschiedliche Längen haben.
+    // Das Teilen einer Geometry würde die Buffer-Größen überschreiben → WebGPU-Fehler.
+    const bladeGeoClone = this.bladeGeo.clone();
+    const mesh = new THREE.InstancedMesh(bladeGeoClone, this.bladeMat, count);
 
     // Per-Instance-Attribute für Wind-Animation
     const phaseArr = new Float32Array(count);
