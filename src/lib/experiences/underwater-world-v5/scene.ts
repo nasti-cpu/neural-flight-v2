@@ -552,3 +552,82 @@ function _updateParticles(
     particles.position.z += cz;
   }
 }
+
+// ---------------------------------------------------------------------------
+// updatePlayer – ICAROS-Controller-Steuerung (VR-Pfad)
+// ---------------------------------------------------------------------------
+
+/** Glättungsfaktor für Controller-Daten (Rauschunterdrückung) */
+const PLAYER_LERP = 0.15;
+/** Wie stark Roll die Flugrichtung ändert */
+const ROLL_HEADING_MULT = 1.0;
+/** Basis-Geschwindigkeit als Faktor von baseSpeed (sanftes Floaten) */
+const FLOAT_SPEED_FACTOR = 0.25;
+/** Geschwindigkeits-Multiplikator bei Accelerate */
+const ACCEL_BOOST = 2.0;
+/** Geschwindigkeits-Multiplikator bei Brake */
+const BRAKE_FACTOR = 0.25;
+
+/** Gesmoothte Controller-Werte (modulweit, weil über Frames hinweg) */
+let _smoothedPitch = 0;
+let _smoothedRoll = 0;
+let _heading = 0;
+let _playerSpeed = 2;
+const _forwardVecUpdate = new THREE.Vector3();
+
+/**
+ * Verarbeitet ICAROS-Controller-Daten und steuert den FlightPlayer.
+ * Wird vom VR-Loader jeden Frame aufgerufen.
+ */
+export function updatePlayer(
+  orientation: { pitch: number; roll: number },
+  speed: { accelerate: boolean; brake: boolean },
+  state: ExperienceState,
+  delta: number,
+): void {
+  const s = state as UnderwaterWorldV5State;
+
+  // Controller-Werte sanft interpolieren
+  _smoothedPitch += (orientation.pitch - _smoothedPitch) * PLAYER_LERP;
+  _smoothedRoll += (orientation.roll - _smoothedRoll) * PLAYER_LERP;
+
+  // Roll in Heading umwandeln (Banking = Kurvenflug)
+  _heading -=
+    _smoothedRoll * THREE.MathUtils.DEG2RAD * ROLL_HEADING_MULT * delta;
+
+  // Ziel-Geschwindigkeit berechnen
+  let targetSpeed = s.player.baseSpeed * FLOAT_SPEED_FACTOR;
+  if (speed.accelerate) targetSpeed *= ACCEL_BOOST;
+  else if (speed.brake) targetSpeed *= BRAKE_FACTOR;
+  _playerSpeed += (targetSpeed - _playerSpeed) * Math.min(1, 3 * delta);
+
+  // Forward-Vektor aus Heading + Pitch (sphärische Koordinaten)
+  const pitchRad = _smoothedPitch * THREE.MathUtils.DEG2RAD;
+  _forwardVecUpdate.set(
+    -Math.sin(_heading) * Math.cos(pitchRad),
+    -Math.sin(pitchRad),
+    -Math.cos(_heading) * Math.cos(pitchRad),
+  );
+  _forwardVecUpdate.normalize();
+
+  // Rig bewegen (Welt-Position)
+  s.player.rig.position.addScaledVector(
+    _forwardVecUpdate,
+    _playerSpeed * delta,
+  );
+
+  // Rig-Rotation setzen (YXZ-Euler für flugsimulation)
+  s.player.rig.rotation.set(
+    -pitchRad,
+    _heading,
+    -_smoothedRoll * THREE.MathUtils.DEG2RAD,
+    "YXZ",
+  );
+
+  // Y-Begrenzung
+  const rigPos = s.player.rig.position;
+  if (rigPos.y < WORLD_CONFIG.floorY + 0.5)
+    rigPos.y = WORLD_CONFIG.floorY + 0.5;
+  if (rigPos.y > WORLD_CONFIG.waterY - 0.3)
+    rigPos.y = WORLD_CONFIG.waterY - 0.3;
+}

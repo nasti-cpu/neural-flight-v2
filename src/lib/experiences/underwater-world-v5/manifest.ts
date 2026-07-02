@@ -12,7 +12,7 @@
  */
 
 import type { ExperienceManifest, ParameterDef } from "../types";
-import { dispose, setup, tick } from "./scene";
+import { dispose, setup, tick, updatePlayer } from "./scene";
 import { applySettings } from "./settings";
 
 const parameters: ParameterDef[] = [
@@ -41,7 +41,7 @@ export const manifest: ExperienceManifest = {
 
   parameters,
   outputs: [],
-  interfaces: { orientation: false, speed: false },
+  interfaces: { orientation: true, speed: true },
 
   camera: { fov: 75, near: 0.1, far: 80 },
   scene: {
@@ -59,6 +59,6 @@ export const manifest: ExperienceManifest = {
   setup,
   tick,
   applySettings,
-  updatePlayer: () => {},
+  updatePlayer,
   dispose,
 };
