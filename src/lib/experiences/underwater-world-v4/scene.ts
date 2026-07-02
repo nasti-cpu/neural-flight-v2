@@ -7,7 +7,9 @@ export interface UnderwaterWorldV4State extends ExperienceState {
   camera: THREE.PerspectiveCamera;
 }
 
-export async function setup(ctx: SetupContext): Promise<UnderwaterWorldV4State> {
+export async function setup(
+  ctx: SetupContext,
+): Promise<UnderwaterWorldV4State> {
   const player = new FlightPlayer({
     fov: 75,
     near: 0.1,
@@ -16,7 +18,6 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldV4State> 
     baseSpeed: 2,
   });
   player.rollYawMultiplier = 0;
-  player.pitchMultiplier = 0;
   ctx.scene.add(player.rig);
 
   return {

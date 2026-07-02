@@ -1,24 +1,27 @@
 /**
  * settings.ts – Einstellungen für die Underwater World V5 Experience.
  *
- * Aktuell werden die Einstellungen direkt in scene.ts verwendet.
  * applySettings wird aufgerufen, wenn der Benutzer im Catalog
- * den Drift-Speed-Regler verstellt.
+ * einen Parameter (z. B. Drift-Speed) verstellt.
  */
 
 import type { ExperienceState } from "../types";
+import * as THREE from "three";
+import type { UnderwaterWorldV5State } from "./scene";
 
 /**
- * Wendet die Einstellungen auf die Experience an.
- * (Aktuell wird nur baseSpeed vom FlightPlayer über den Catalog gesteuert.)
+ * Wendet eine Parameter-Änderung auf die Experience an.
+ * Der Loader ruft diese Funktion mit der Parameter-ID und dem
+ * bereits in Real-World-Werte umgerechneten Wert auf.
  */
 export function applySettings(
-  settings: { driftSpeed?: number },
+  id: string,
+  value: string | number | boolean,
   state: ExperienceState,
+  _scene: THREE.Scene,
 ): void {
-  // Die Geschwindigkeit wird vom Catalog-Loader direkt am Player gesetzt.
-  // Diese Funktion dient als Hook für zukünftige Einstellungen.
-  if (settings.driftSpeed !== undefined) {
-    // Wird vom Loader über updatePlayer gesteuert
+  if (id === "driftSpeed") {
+    const s = state as UnderwaterWorldV5State;
+    s.player.baseSpeed = value as number;
   }
 }

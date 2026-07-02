@@ -19,9 +19,7 @@
 import * as THREE from "three/webgpu";
 import type { ExperienceState, SetupContext, TickContext } from "../types";
 import { FlightPlayer } from "$lib/three/player";
-import {
-  createWaterSurface,
-} from "../shader/wasser/wasserShader";
+import { createWaterSurface } from "$lib/experiences/underwater-world-v5/shader/wasser/wasserShader";
 import {
   uniform,
   vec3,
@@ -93,7 +91,9 @@ const PARTICLE_BOX = 40;
 // setup – Initialisiert die gesamte Unterwasserwelt
 // ---------------------------------------------------------------------------
 
-export async function setup(ctx: SetupContext): Promise<UnderwaterWorldV5State> {
+export async function setup(
+  ctx: SetupContext,
+): Promise<UnderwaterWorldV5State> {
   // --- 1. FlightPlayer für fliegende Bewegung ---
   const player = new FlightPlayer({
     fov: 75,
@@ -103,7 +103,6 @@ export async function setup(ctx: SetupContext): Promise<UnderwaterWorldV5State> 
     baseSpeed: 2,
   });
   player.rollYawMultiplier = 0;
-  player.pitchMultiplier = 0;
   ctx.scene.add(player.rig);
 
   // --- 2. Beleuchtung (Tiefsee-Stimmung) ---
@@ -286,7 +285,12 @@ export function tick(
   s.coralReefWorld.setExclusionZones(exclusionZones);
 
   // Fische + Quallen aktualisieren
-  s.fishWorld.update(ctx.delta, ctx.elapsed, camera.position, s.jellyWorld.getEchoTargets());
+  s.fishWorld.update(
+    ctx.delta,
+    ctx.elapsed,
+    camera.position,
+    s.jellyWorld.getEchoTargets(),
+  );
   s.jellyWorld.update(ctx.delta, ctx.elapsed, camera.position);
 
   // Wasseroberfläche folgt der Kamera (sanft)
