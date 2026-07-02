@@ -1,338 +1,561 @@
 /**
- * insect-world-v2 — GrassManager (Chunk-basiert).
+ * insect-world-v2 — GrassManager (Chunk-basiert + WFC).
  *
- * Lädt Gras-Chunks dynamisch um den Spieler herum.
- * Sorgt für eine unendlich fortsetzbare Wiese ohne sichtbare Kanten.
+ * Lädt Gras-Chunks und Blumen dynamisch um den Spieler herum.
+ * Nutzt den Wavefunction-Collapse-Algorithmus (Robert Heaton)
+ * für eine abwechslungsreiche, aber konsistente Welt.
  *
  * Funktionsweise:
  * - Die Welt wird in ein 80×80-Raster eingeteilt (Chunks).
- * - Nur Chunks in Sichtweite (5×5-Raster) sind aktiv.
+ * - Nur Chunks in Sichtweite (3×3-Raster) sind aktiv.
  * - Entfernte Chunks werden entfernt, neue werden erzeugt.
  * - Geometrie und Material werden einmal erzeugt und wiederverwendet.
+ * - Blumen werden aus vorab geladenen Assets instanziert.
+ * - Clear-Regionen (z.B. Stadt) verhindern Gras/Blumen in bestimmten Bereichen.
  *
  * WebGPU + TSL (siehe AGENTS.md).
  */
 import * as THREE from "three/webgpu";
 import {
-	attribute,
-	clamp,
-	dot,
-	float,
-	max,
-	mix,
-	normalize,
-	normalWorld,
-	positionLocal,
-	sin,
-	time,
-	uniform,
-	vec3,
+  attribute,
+  clamp,
+  dot,
+  float,
+  max,
+  mix,
+  normalize,
+  normalWorld,
+  positionLocal,
+  sin,
+  time,
+  uniform,
+  vec3,
 } from "three/tsl";
 import type { MeadowConfig } from "./grass";
+import { WFCEngine } from "./wfc-engine";
+import { TILE_CONTENT, TileType } from "./wfc-tiles";
+import type { PreloadedFlower } from "../../Objekte/Blumen/blumen";
 
 // ── Konstanten ──
 
-const CHUNK_SIZE = 80;       // Größe eines Chunks in Metern
-const VIEW_RADIUS = 1;       // Wie viele Chunks um den Spieler herum geladen werden (1 = 3×3 = 9 Chunks)
-const GRASS_PER_CHUNK = 6000; // Grashalme pro Chunk
+const CHUNK_SIZE = 80; // Größe eines Chunks in Metern
+const VIEW_RADIUS = 1; // Wie viele Chunks um den Spieler herum geladen werden (1 = 3×3 = 9 Chunks)
 
 // ── Hilfsfunktion: Welthöhe (sanfte Mulde um den Ursprung) ──
 
 function worldGroundHeight(x: number, z: number): number {
-	const dist = Math.sqrt(x * x + z * z);
-	return -0.00008 * dist * dist;
+  const dist = Math.sqrt(x * x + z * z);
+  return -0.00008 * dist * dist;
+}
+
+// ── ClearRegion (intern) ──
+
+interface ClearRegion {
+  cx: number;
+  cz: number;
+  hw: number;
+  hd: number;
+  angle: number;
+  border: number;
 }
 
 // ── GrassChunk (intern) ──
 
 interface GrassChunk {
-	group: THREE.Group;
-	mesh: THREE.InstancedMesh;
-	ground: THREE.Mesh;
-	gridX: number;
-	gridZ: number;
+  group: THREE.Group;
+  mesh: THREE.InstancedMesh;
+  ground: THREE.Mesh;
+  gridX: number;
+  gridZ: number;
+  /** Blumen-InstancedMeshes in diesem Chunk */
+  flowerMeshes: THREE.InstancedMesh[];
+  /** Blumen-Positionen in diesem Chunk (für Target-Tracking) */
+  flowerPositions: THREE.Vector3[];
 }
 
 // ── Welthöhen-Funktion (exportiert für Blumen/Pheromone) ──
 
 /** Höhe des Bodens an einer beliebigen Weltposition (sanfte Mulde). */
 export function getWorldHeight(x: number, z: number): number {
-	return worldGroundHeight(x, z);
+  return worldGroundHeight(x, z);
 }
 
 // ── GrassManager ──
 
 export class GrassManager {
-	readonly group = new THREE.Group();
+  readonly group = new THREE.Group();
 
-	private active = new Map<string, GrassChunk>();
-	private config: MeadowConfig;
+  private active = new Map<string, GrassChunk>();
+  private config: MeadowConfig;
+  private wfc = new WFCEngine();
+  private preloadedFlowers: PreloadedFlower[];
 
-	// Einmal erzeugte, gemeinsame Ressourcen (wiederverwendet)
-	private bladeGeo: THREE.ConeGeometry;
-	private bladeMat: THREE.MeshBasicNodeMaterial;
-	private groundMat: THREE.MeshBasicNodeMaterial;
+  /** Globale Liste aller aktiven Blumen-Positionen (für Bienen, Schmetterlinge) */
+  public readonly flowerTargets: THREE.Vector3[] = [];
 
-	constructor(config: MeadowConfig) {
-		this.config = config;
+  /** Registrierte Clear-Regionen (z.B. Stadt) */
+  private clearRegions: ClearRegion[] = [];
 
-		// ── Gemeinsame Geometrie für Grashalme ──
-		// Ein Kegel pro Halm — wird per Instancing millionenfach gezeichnet.
-		this.bladeGeo = new THREE.ConeGeometry(0.05, 1, 4);
-		this.bladeGeo.translate(0, 0.5, 0); // Drehpunkt an die Basis
+  // Einmal erzeugte, gemeinsame Ressourcen (wiederverwendet)
+  private bladeGeo: THREE.ConeGeometry;
+  private bladeMat: THREE.MeshBasicNodeMaterial;
+  private groundMat: THREE.MeshBasicNodeMaterial;
 
-		// ── Gemeinsames TSL-Material für Grashalme ──
-		this.bladeMat = this.createBladeMaterial();
+  constructor(config: MeadowConfig, preloadedFlowers: PreloadedFlower[]) {
+    this.config = config;
+    this.preloadedFlowers = preloadedFlowers;
 
-		// ── Gemeinsames Material für den Boden ──
-		this.groundMat = this.createGroundMaterial();
-	}
+    // ── Gemeinsame Geometrie für Grashalme ──
+    // Ein Kegel pro Halm — wird per Instancing millionenfach gezeichnet.
+    this.bladeGeo = new THREE.ConeGeometry(0.05, 1, 4);
+    this.bladeGeo.translate(0, 0.5, 0); // Drehpunkt an die Basis
 
-	/**
-	 * Wird jeden Frame aufgerufen.
-	 * Berechnet, welche Chunks um den Spieler herum sichtbar sein müssen,
-	 * erzeugt neue und entfernt alte.
-	 */
-	update(playerPosition: THREE.Vector3): void {
-		// Aktuelle Chunk-Koordinaten des Spielers
-		const cx = Math.floor(playerPosition.x / CHUNK_SIZE);
-		const cz = Math.floor(playerPosition.z / CHUNK_SIZE);
+    // ── Gemeinsames TSL-Material für Grashalme ──
+    this.bladeMat = this.createBladeMaterial();
 
-		// Alle benötigten Chunk-Keys sammeln
-		const needed = new Set<string>();
+    // ── Gemeinsames Material für den Boden ──
+    this.groundMat = this.createGroundMaterial();
+  }
 
-		for (let dx = -VIEW_RADIUS; dx <= VIEW_RADIUS; dx++) {
-			for (let dz = -VIEW_RADIUS; dz <= VIEW_RADIUS; dz++) {
-				const gx = cx + dx;
-				const gz = cz + dz;
-				const key = `${gx},${gz}`;
-				needed.add(key);
+  /**
+   * Wird jeden Frame aufgerufen.
+   * Berechnet, welche Chunks um den Spieler herum sichtbar sein müssen,
+   * erzeugt neue und entfernt alte.
+   */
+  update(playerPosition: THREE.Vector3): void {
+    // Aktuelle Chunk-Koordinaten des Spielers
+    const cx = Math.floor(playerPosition.x / CHUNK_SIZE);
+    const cz = Math.floor(playerPosition.z / CHUNK_SIZE);
 
-				if (!this.active.has(key)) {
-					this.createChunk(gx, gz);
-				}
-			}
-		}
+    // Alle benötigten Chunk-Keys sammeln
+    const needed = new Set<string>();
 
-		// Nicht mehr benötigte Chunks entfernen
-		for (const [key, chunk] of this.active) {
-			if (!needed.has(key)) {
-				this.group.remove(chunk.group);
-				this.disposeChunk(chunk);
-				this.active.delete(key);
-			}
-		}
-	}
+    for (let dx = -VIEW_RADIUS; dx <= VIEW_RADIUS; dx++) {
+      for (let dz = -VIEW_RADIUS; dz <= VIEW_RADIUS; dz++) {
+        const gx = cx + dx;
+        const gz = cz + dz;
+        const key = `${gx},${gz}`;
+        needed.add(key);
 
-	/** Entfernt alle Chunks (z. B. beim Experience-Wechsel). */
-	clear(): void {
-		for (const [key, chunk] of this.active) {
-			this.group.remove(chunk.group);
-			this.disposeChunk(chunk);
-		}
-		this.active.clear();
-	}
+        if (!this.active.has(key)) {
+          this.createChunk(gx, gz);
+        }
+      }
+    }
 
-	/**
-	 * Entfernt alle Grashalme in einem rotierten Rechteck (z. B. für Stadt).
-	 * Funktioniert chunk-übergreifend: sucht in allen aktiven Chunks
-	 * und versenkt Halme im Rechteck unter der Erde (y = -100).
-	 */
-	clearRect(cx: number, cz: number, hw: number, hd: number, angle: number, border: number): void {
-		const sin = Math.sin(angle);
-		const cos = Math.cos(angle);
-		const bw = hw + border;
-		const bd = hd + border;
-		const dummy = new THREE.Object3D();
-		const pos = new THREE.Vector3();
+    // Nicht mehr benötigte Chunks entfernen
+    for (const [key, chunk] of this.active) {
+      if (!needed.has(key)) {
+        this.group.remove(chunk.group);
+        this.disposeChunk(chunk);
+        this.active.delete(key);
+      }
+    }
 
-		for (const chunk of this.active.values()) {
-			const mesh = chunk.mesh;
-			const count = mesh.count;
+    // WFC-Engine aufräumen, um Speicherplatz zu sparen
+    this.wfc.cleanup(cx, cz, VIEW_RADIUS + 2);
+  }
 
-			for (let i = 0; i < count; i++) {
-				mesh.getMatrixAt(i, dummy.matrix);
-				pos.setFromMatrixPosition(dummy.matrix);
-				const dx = pos.x - cx;
-				const dz = pos.z - cz;
-				const localX = dx * cos - dz * sin;
-				const localZ = dx * sin + dz * cos;
+  /** Entfernt alle Chunks (z. B. beim Experience-Wechsel). */
+  clear(): void {
+    for (const [, chunk] of this.active) {
+      this.group.remove(chunk.group);
+      this.disposeChunk(chunk);
+    }
+    this.active.clear();
+    this.flowerTargets.length = 0;
+    this.wfc.reset();
+  }
 
-				if (Math.abs(localX) < bw && Math.abs(localZ) < bd) {
-					dummy.position.set(pos.x, -100, pos.z);
-					dummy.scale.setScalar(1);
-					dummy.rotation.set(0, 0, 0);
-					dummy.updateMatrix();
-					mesh.setMatrixAt(i, dummy.matrix);
-				}
-			}
-			mesh.instanceMatrix.needsUpdate = true;
-		}
-	}
+  /**
+   * Registriert einen Bereich, in dem kein Gras und keine Blumen wachsen sollen (z. B. Stadt).
+   * Neue Chunks beachten das automatisch. Existierende Chunks werden nachträglich bereinigt.
+   */
+  addClearRegion(
+    cx: number,
+    cz: number,
+    hw: number,
+    hd: number,
+    angle: number,
+    border: number,
+  ): void {
+    this.clearRegions.push({ cx, cz, hw, hd, angle, border });
+    // Bereits existierende Chunks nachträglich bereinigen
+    this.clearRect(cx, cz, hw, hd, angle, border);
+  }
 
-	/** Gibt alle Ressourcen frei. */
-	dispose(): void {
-		this.clear();
-		this.bladeGeo.dispose();
-		this.bladeMat.dispose();
-		this.groundMat.dispose();
-	}
+  /**
+   * Prüft, ob eine Position in einer der registrierten Clear-Regionen liegt.
+   */
+  private isPositionCleared(x: number, z: number): boolean {
+    for (const reg of this.clearRegions) {
+      const dx = x - reg.cx;
+      const dz = z - reg.cz;
+      const sinVal = Math.sin(reg.angle);
+      const cosVal = Math.cos(reg.angle);
+      const localX = dx * cosVal - dz * sinVal;
+      const localZ = dx * sinVal + dz * cosVal;
+      const bw = reg.hw + reg.border;
+      const bd = reg.hd + reg.border;
+      if (Math.abs(localX) < bw && Math.abs(localZ) < bd) {
+        return true;
+      }
+    }
+    return false;
+  }
 
-	// ── Private Hilfsfunktionen ──
+  /**
+   * Entfernt alle Grashalme in einem rotierten Rechteck (z. B. für Stadt).
+   * Funktioniert chunk-übergreifend: sucht in allen aktiven Chunks
+   * und versenkt Halme im Rechteck unter der Erde (y = -100).
+   */
+  clearRect(
+    cx: number,
+    cz: number,
+    hw: number,
+    hd: number,
+    angle: number,
+    border: number,
+  ): void {
+    const sinVal = Math.sin(angle);
+    const cosVal = Math.cos(angle);
+    const bw = hw + border;
+    const bd = hd + border;
+    const dummy = new THREE.Object3D();
+    const pos = new THREE.Vector3();
 
-	/** Erzeugt einen neuen Gras-Chunk an der angegebenen Raster-Position. */
-	private createChunk(gx: number, gz: number): void {
-		const worldX = gx * CHUNK_SIZE;
-		const worldZ = gz * CHUNK_SIZE;
+    for (const chunk of this.active.values()) {
+      const mesh = chunk.mesh;
+      const count = mesh.count;
 
-		const group = new THREE.Group();
+      for (let i = 0; i < count; i++) {
+        mesh.getMatrixAt(i, dummy.matrix);
+        pos.setFromMatrixPosition(dummy.matrix);
+        const dx = pos.x - cx;
+        const dz = pos.z - cz;
+        const localX = dx * cosVal - dz * sinVal;
+        const localZ = dx * sinVal + dz * cosVal;
 
-		// ── Bodenplatte ──
-		const ground = this.createGround(worldX, worldZ);
-		group.add(ground);
+        if (Math.abs(localX) < bw && Math.abs(localZ) < bd) {
+          dummy.position.set(pos.x, -100, pos.z);
+          dummy.scale.setScalar(0);
+          dummy.rotation.set(0, 0, 0);
+          dummy.updateMatrix();
+          mesh.setMatrixAt(i, dummy.matrix);
+        }
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
 
-		// ── Grashalme ──
-		const mesh = this.createChunkGrass(gx, gz);
-		group.add(mesh);
+  /** Gibt alle Ressourcen frei. */
+  dispose(): void {
+    this.clear();
+    this.bladeGeo.dispose();
+    this.bladeMat.dispose();
+    this.groundMat.dispose();
+  }
 
-		this.group.add(group);
-		this.active.set(`${gx},${gz}`, { group, mesh, ground, gridX: gx, gridZ: gz });
-	}
+  // ── Private Hilfsfunktionen ──
 
-	/** Erzeugt einen InstancedMesh mit Grashalmen für einen Chunk. */
-	private createChunkGrass(gx: number, gz: number): THREE.InstancedMesh {
-		const worldX = gx * CHUNK_SIZE;
-		const worldZ = gz * CHUNK_SIZE;
-		const halfSize = CHUNK_SIZE / 2;
-		const count = GRASS_PER_CHUNK;
+  /** Erzeugt einen neuen Gras-Chunk an der angegebenen Raster-Position. */
+  private createChunk(gx: number, gz: number): void {
+    const worldX = gx * CHUNK_SIZE;
+    const worldZ = gz * CHUNK_SIZE;
 
-		const mesh = new THREE.InstancedMesh(this.bladeGeo, this.bladeMat, count);
+    const group = new THREE.Group();
 
-		// Per-Instance-Attribute für Wind-Animation
-		const phaseArr = new Float32Array(count);
-		const speedArr = new Float32Array(count);
-		const baseXArr = new Float32Array(count);
-		const baseZArr = new Float32Array(count);
+    // ── Bodenplatte ──
+    const ground = this.createGround(worldX, worldZ);
+    group.add(ground);
 
-		const dummy = new THREE.Object3D();
+    // ── WFC-Typ und Content bestimmen ──
+    const tileType = this.wfc.getTileType(gx, gz);
+    const content = TILE_CONTENT[tileType];
 
-		for (let i = 0; i < count; i++) {
-			// Zufällige Position innerhalb des Chunks
-			const x = worldX + (Math.random() - 0.5) * CHUNK_SIZE;
-			const z = worldZ + (Math.random() - 0.5) * CHUNK_SIZE;
+    // ── Grashalme ──
+    const mesh = this.createChunkGrass(gx, gz, content);
+    group.add(mesh);
 
-			// Zufällige Höhe und Rotation
-			const h = this.config.minHeight + Math.random() * (this.config.maxHeight - this.config.minHeight);
-			const rotY = Math.random() * Math.PI * 2;
-			const sx = 0.5 + Math.random() * 0.8;
-			const sz = 0.5 + Math.random() * 0.8;
+    // ── Blumen generieren ──
+    const flowerMeshes: THREE.InstancedMesh[] = [];
+    const flowerPositions: THREE.Vector3[] = [];
 
-			// Bodenniveau am Weltpunkt
-			const baseY = worldGroundHeight(x, z);
+    if (content.flowerCount > 0 && this.preloadedFlowers.length > 0) {
+      this.generateFlowersForChunk(
+        worldX,
+        worldZ,
+        content.flowerCount,
+        group,
+        flowerMeshes,
+        flowerPositions,
+      );
+    }
 
-			// Wind-Daten
-			phaseArr[i] = Math.random() * Math.PI * 2;
-			speedArr[i] = 0.5 + Math.random() * 1.5;
-			baseXArr[i] = x;
-			baseZArr[i] = z;
+    this.group.add(group);
+    this.active.set(`${gx},${gz}`, {
+      group,
+      mesh,
+      ground,
+      gridX: gx,
+      gridZ: gz,
+      flowerMeshes,
+      flowerPositions,
+    });
+  }
 
-			// Instanz-Matrix setzen
-			dummy.position.set(x, baseY + h / 2, z);
-			dummy.scale.set(sx, h, sz);
-			dummy.rotation.set(0, rotY, 0);
-			dummy.updateMatrix();
-			mesh.setMatrixAt(i, dummy.matrix);
-		}
+  /**
+   * Generiert Blumen für einen Chunk aus den vorab geladenen Assets.
+   * Verhindert Performance-Einbrüche beim dynamischen Laden.
+   */
+  private generateFlowersForChunk(
+    worldX: number,
+    worldZ: number,
+    flowerCount: number,
+    group: THREE.Group,
+    flowerMeshesOut: THREE.InstancedMesh[],
+    flowerPositionsOut: THREE.Vector3[],
+  ): void {
+    const dummy = new THREE.Object3D();
 
-		mesh.instanceMatrix.needsUpdate = true;
+    // Positionen pro Blumentyp sammeln
+    const flowerInstances: Array<
+      { x: number; y: number; z: number; rotY: number; s: number }[]
+    > = Array.from({ length: this.preloadedFlowers.length }, () => []);
 
-		// Instanz-Attribute für den TSL-Shader
-		mesh.geometry.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phaseArr, 1));
-		mesh.geometry.setAttribute("aSpeed", new THREE.InstancedBufferAttribute(speedArr, 1));
-		mesh.geometry.setAttribute("aBaseX", new THREE.InstancedBufferAttribute(baseXArr, 1));
-		mesh.geometry.setAttribute("aBaseZ", new THREE.InstancedBufferAttribute(baseZArr, 1));
+    for (let i = 0; i < flowerCount; i++) {
+      const typeIdx = Math.floor(Math.random() * this.preloadedFlowers.length);
+      const x = worldX + (Math.random() - 0.5) * CHUNK_SIZE;
+      const z = worldZ + (Math.random() - 0.5) * CHUNK_SIZE;
 
-		return mesh;
-	}
+      // Überspringen, wenn Position in Clear-Region liegt (z.B. Stadt)
+      if (this.isPositionCleared(x, z)) {
+        continue;
+      }
 
-	/** Erzeugt die Bodenplatte für einen Chunk mit leichter Wölbung. */
-	private createGround(worldX: number, worldZ: number): THREE.Mesh {
-		const segs = 8;
-		const geo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, segs, segs);
-		geo.rotateX(-Math.PI / 2);
+      const y = worldGroundHeight(x, z) + Math.random() * 0.05;
+      const rotY = Math.random() * Math.PI * 2;
+      const s =
+        this.preloadedFlowers[typeIdx].scale * (0.8 + Math.random() * 0.7);
 
-		// Höhen anpassen (sanfte Mulde zum Ursprung hin)
-		const pos = geo.attributes.position as THREE.Float32BufferAttribute;
-		for (let i = 0; i < pos.count; i++) {
-			const x = pos.getX(i) + worldX;
-			const z = pos.getZ(i) + worldZ;
-			pos.setY(i, worldGroundHeight(x, z));
-		}
-		pos.needsUpdate = true;
-		geo.computeVertexNormals();
+      flowerInstances[typeIdx].push({ x, y, z, rotY, s });
+    }
 
-		const mesh = new THREE.Mesh(geo, this.groundMat);
-		mesh.position.set(worldX, 0, worldZ);
-		return mesh;
-	}
+    // InstancedMeshes pro Blumentyp erstellen
+    for (let typeIdx = 0; typeIdx < this.preloadedFlowers.length; typeIdx++) {
+      const flower = this.preloadedFlowers[typeIdx];
+      const instances = flowerInstances[typeIdx];
+      const count = instances.length;
 
-	/** Erzeugt das TSL-Material für die Grashalme. */
-	private createBladeMaterial(): THREE.MeshBasicNodeMaterial {
-		//── Uniforms ──
-		const uWindStrength = uniform(this.config.windStrength);
-		const uWindSpeed = uniform(this.config.windSpeedMultiplier);
-		const uColor = uniform(new THREE.Color(this.config.color));
-		const uGroundColor = uniform(new THREE.Color(this.config.groundColor));
-		const uMinHeight = uniform(this.config.minHeight);
-		const uMaxHeight = uniform(this.config.maxHeight);
+      if (count > 0) {
+        for (const { geometry, material } of flower.materialGroups) {
+          const fMesh = new THREE.InstancedMesh(geometry, material, count);
+          for (let i = 0; i < count; i++) {
+            const p = instances[i];
+            dummy.position.set(p.x, p.y, p.z);
+            dummy.scale.setScalar(p.s);
+            dummy.rotation.set(0, p.rotY, 0);
+            dummy.updateMatrix();
+            fMesh.setMatrixAt(i, dummy.matrix);
+          }
+          fMesh.instanceMatrix.needsUpdate = true;
+          fMesh.castShadow = false;
+          fMesh.receiveShadow = false;
+          group.add(fMesh);
+          flowerMeshesOut.push(fMesh);
+        }
 
-		//── Instanz-Attribute ──
-		const aPhase = attribute("aPhase", "float");
-		const aSpeed = attribute("aSpeed", "float");
-		const aBaseX = attribute("aBaseX", "float");
-		const aBaseZ = attribute("aBaseZ", "float");
+        // Positionen als Targets registrieren (für Bienen, Schmetterlinge, Pheromone)
+        for (const p of instances) {
+          const pos = new THREE.Vector3(p.x, p.y, p.z);
+          flowerPositionsOut.push(pos);
+          this.flowerTargets.push(pos);
+        }
+      }
+    }
+  }
 
-		//── positionNode: Wind ──
-		const timeFactor = time.mul(uWindSpeed);
-		const swayX = sin(timeFactor.mul(aSpeed).add(aPhase).add(aBaseX.mul(0.5)))
-			.mul(uWindStrength).mul(positionLocal.y);
-		const swayZ = sin(timeFactor.mul(aSpeed).mul(0.7).add(aPhase).add(aBaseZ.mul(0.5)))
-			.mul(uWindStrength).mul(0.7).mul(positionLocal.y);
+  /** Erzeugt einen InstancedMesh mit Grashalmen für einen Chunk. */
+  private createChunkGrass(
+    gx: number,
+    gz: number,
+    content: {
+      grassCount: number;
+      grassMinHeight: number;
+      grassMaxHeight: number;
+    },
+  ): THREE.InstancedMesh {
+    const worldX = gx * CHUNK_SIZE;
+    const worldZ = gz * CHUNK_SIZE;
+    const count = content.grassCount;
 
-		//── colorNode: Höhenfärbung + Licht ──
-		const heightT = clamp(
-			positionLocal.y.sub(uMinHeight).div(uMaxHeight.sub(uMinHeight).add(0.001)),
-			float(0), float(1),
-		);
-		const lightDir = normalize(vec3(0.5, 0.8, 0.3));
-		const diff = max(dot(normalWorld, lightDir), float(0));
-		const lightFactor = float(0.35).add(diff.mul(0.65));
+    const mesh = new THREE.InstancedMesh(this.bladeGeo, this.bladeMat, count);
 
-		const mat = new THREE.MeshBasicNodeMaterial();
-		mat.positionNode = positionLocal.add(vec3(swayX, float(0), swayZ));
-		mat.colorNode = mix(uGroundColor, uColor, heightT).mul(lightFactor);
-		mat.fog = true;
+    // Per-Instance-Attribute für Wind-Animation
+    const phaseArr = new Float32Array(count);
+    const speedArr = new Float32Array(count);
+    const baseXArr = new Float32Array(count);
+    const baseZArr = new Float32Array(count);
 
-		return mat;
-	}
+    const dummy = new THREE.Object3D();
 
-	/** Erzeugt das TSL-Material für die Bodenplatte. */
-	private createGroundMaterial(): THREE.MeshBasicNodeMaterial {
-		const gc = new THREE.Color(this.config.groundColor);
-		const mat = new THREE.MeshBasicNodeMaterial();
-		mat.colorNode = vec3(gc.r, gc.g, gc.b);
-		mat.fog = true;
-		return mat;
-	}
+    for (let i = 0; i < count; i++) {
+      // Zufällige Position innerhalb des Chunks
+      const x = worldX + (Math.random() - 0.5) * CHUNK_SIZE;
+      const z = worldZ + (Math.random() - 0.5) * CHUNK_SIZE;
 
-	/** Räumt einen Chunk auf (geht zurück in den Pool). */
-	private disposeChunk(chunk: GrassChunk): void {
-		// Instanz-Geometrie freigeben (die Instanz-Attribute werden jedes Mal neu erstellt)
-		chunk.mesh.geometry.dispose();
-		chunk.mesh.removeFromParent();
+      // Zufällige Höhe und Rotation
+      const h =
+        content.grassMinHeight +
+        Math.random() * (content.grassMaxHeight - content.grassMinHeight);
+      const rotY = Math.random() * Math.PI * 2;
+      const sx = 0.5 + Math.random() * 0.8;
+      const sz = 0.5 + Math.random() * 0.8;
 
-		// Boden-Geometrie freigeben
-		chunk.ground.geometry.dispose();
-		chunk.ground.removeFromParent();
-	}
+      // Bodenniveau am Weltpunkt
+      const baseY = worldGroundHeight(x, z);
+
+      // Wind-Daten
+      phaseArr[i] = Math.random() * Math.PI * 2;
+      speedArr[i] = 0.5 + Math.random() * 1.5;
+      baseXArr[i] = x;
+      baseZArr[i] = z;
+
+      // Instanz-Matrix setzen (unter die Erde, wenn in Clear-Region)
+      if (this.isPositionCleared(x, z)) {
+        dummy.position.set(x, -100, z);
+        dummy.scale.setScalar(0);
+      } else {
+        dummy.position.set(x, baseY + h / 2, z);
+        dummy.scale.set(sx, h, sz);
+      }
+      dummy.rotation.set(0, rotY, 0);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+
+    mesh.instanceMatrix.needsUpdate = true;
+
+    // Instanz-Attribute für den TSL-Shader
+    mesh.geometry.setAttribute(
+      "aPhase",
+      new THREE.InstancedBufferAttribute(phaseArr, 1),
+    );
+    mesh.geometry.setAttribute(
+      "aSpeed",
+      new THREE.InstancedBufferAttribute(speedArr, 1),
+    );
+    mesh.geometry.setAttribute(
+      "aBaseX",
+      new THREE.InstancedBufferAttribute(baseXArr, 1),
+    );
+    mesh.geometry.setAttribute(
+      "aBaseZ",
+      new THREE.InstancedBufferAttribute(baseZArr, 1),
+    );
+
+    return mesh;
+  }
+
+  /** Erzeugt die Bodenplatte für einen Chunk mit leichter Wölbung. */
+  private createGround(worldX: number, worldZ: number): THREE.Mesh {
+    const segs = 8;
+    const geo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, segs, segs);
+    geo.rotateX(-Math.PI / 2);
+
+    // Höhen anpassen (sanfte Mulde zum Ursprung hin)
+    const pos = geo.attributes.position as THREE.Float32BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i) + worldX;
+      const z = pos.getZ(i) + worldZ;
+      pos.setY(i, worldGroundHeight(x, z));
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+
+    const mesh = new THREE.Mesh(geo, this.groundMat);
+    mesh.position.set(worldX, 0, worldZ);
+    return mesh;
+  }
+
+  /** Erzeugt das TSL-Material für die Grashalme. */
+  private createBladeMaterial(): THREE.MeshBasicNodeMaterial {
+    //── Uniforms ──
+    const uWindStrength = uniform(this.config.windStrength);
+    const uWindSpeed = uniform(this.config.windSpeedMultiplier);
+    const uColor = uniform(new THREE.Color(this.config.color));
+    const uGroundColor = uniform(new THREE.Color(this.config.groundColor));
+    const uMinHeight = uniform(this.config.minHeight);
+    const uMaxHeight = uniform(this.config.maxHeight);
+
+    //── Instanz-Attribute ──
+    const aPhase = attribute("aPhase", "float");
+    const aSpeed = attribute("aSpeed", "float");
+    const aBaseX = attribute("aBaseX", "float");
+    const aBaseZ = attribute("aBaseZ", "float");
+
+    //── positionNode: Wind ──
+    const timeFactor = time.mul(uWindSpeed);
+    const swayX = sin(timeFactor.mul(aSpeed).add(aPhase).add(aBaseX.mul(0.5)))
+      .mul(uWindStrength)
+      .mul(positionLocal.y);
+    const swayZ = sin(
+      timeFactor.mul(aSpeed).mul(0.7).add(aPhase).add(aBaseZ.mul(0.5)),
+    )
+      .mul(uWindStrength)
+      .mul(0.7)
+      .mul(positionLocal.y);
+
+    //── colorNode: Höhenfärbung + Licht ──
+    const heightT = clamp(
+      positionLocal.y
+        .sub(uMinHeight)
+        .div(uMaxHeight.sub(uMinHeight).add(0.001)),
+      float(0),
+      float(1),
+    );
+    const lightDir = normalize(vec3(0.5, 0.8, 0.3));
+    const diff = max(dot(normalWorld, lightDir), float(0));
+    const lightFactor = float(0.35).add(diff.mul(0.65));
+
+    const mat = new THREE.MeshBasicNodeMaterial();
+    mat.positionNode = positionLocal.add(vec3(swayX, float(0), swayZ));
+    mat.colorNode = mix(uGroundColor, uColor, heightT).mul(lightFactor);
+    mat.fog = true;
+
+    return mat;
+  }
+
+  /** Erzeugt das TSL-Material für die Bodenplatte. */
+  private createGroundMaterial(): THREE.MeshBasicNodeMaterial {
+    const gc = new THREE.Color(this.config.groundColor);
+    const mat = new THREE.MeshBasicNodeMaterial();
+    mat.colorNode = vec3(gc.r, gc.g, gc.b);
+    mat.fog = true;
+    return mat;
+  }
+
+  /** Räumt einen Chunk auf (geht zurück in den Pool). */
+  private disposeChunk(chunk: GrassChunk): void {
+    // Instanz-Geometrie freigeben
+    chunk.mesh.geometry.dispose();
+    chunk.mesh.removeFromParent();
+
+    // Boden-Geometrie freigeben
+    chunk.ground.geometry.dispose();
+    chunk.ground.removeFromParent();
+
+    // Blumen-Instanzen aus globalen Targets austragen
+    for (const pos of chunk.flowerPositions) {
+      const idx = this.flowerTargets.indexOf(pos);
+      if (idx !== -1) {
+        this.flowerTargets.splice(idx, 1);
+      }
+    }
+
+    // Blumen-InstancedMeshes entfernen
+    for (const fMesh of chunk.flowerMeshes) {
+      fMesh.removeFromParent();
+    }
+  }
 }
