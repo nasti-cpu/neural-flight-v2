@@ -92,6 +92,8 @@ export class GrassManager {
 
   /** Globale Liste aller aktiven Blumen-Positionen (für Bienen, Schmetterlinge) */
   public readonly flowerTargets: THREE.Vector3[] = [];
+  /** Globale Liste aller Blumen-Farben (parallel zu flowerTargets, für Pheromon-Spuren) */
+  public readonly flowerColors: THREE.Color[] = [];
 
   /** Registrierte Clear-Regionen (z.B. Stadt) */
   private clearRegions: ClearRegion[] = [];
@@ -389,6 +391,8 @@ export class GrassManager {
           const pos = new THREE.Vector3(p.x, p.y, p.z);
           flowerPositionsOut.push(pos);
           this.flowerTargets.push(pos);
+          // Farbe der Blume speichern (pink, gelb oder weiß – für Pheromon-Spuren)
+          this.flowerColors.push(flower.color.clone());
         }
       }
     }
