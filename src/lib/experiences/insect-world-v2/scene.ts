@@ -132,7 +132,12 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 
   // 7. Pheromon-Spuren (Glühwürmchen-Variante)
   const pheromones = new PheromoneSystem();
-  pheromones.addTrails(grassManager.flowerTargets as any);
+  // Vector3[] → FlowerTarget[] umwandeln (Pheromone brauchen .position und .color)
+  const pheromoneTargets = grassManager.flowerTargets.map((pos) => ({
+    position: pos,
+    color: new THREE.Color(0xffffff),
+  }));
+  pheromones.addTrails(pheromoneTargets);
   ctx.scene.add(pheromones.group);
 
   // Kamera positionieren (Insektenperspektive ~2m)
