@@ -1,9 +1,13 @@
 /**
- * cityWorld.ts – Städte in der Tiefsee-Welt, auf festem Raster.
+ * cityWorld.ts – Städte in der Tiefsee-Welt, WFC-gesteuert.
  *
- * Importiert Konfiguration, Raster und Bauwerke aus
- * animationen/staedte/ und kümmert sich um den Lebenszyklus
- * (Laden, Klonen, Sichtbarkeit, Fade).
+ * Städte werden NICHT mehr über ein festes Raster platziert.
+ * Stattdessen fragt der ChunkManager den WFC-Algorithmus,
+ * und wenn ein Chunk den Typ "STADT" bekommt, wird hier eine
+ * Stadt für diese Position registriert.
+ *
+ * Importiert Konfiguration und Bauwerke aus animationen/staedte/
+ * und kümmert sich um den Lebenszyklus (Laden, Klonen, Sichtbarkeit, Fade).
  *
  * Lebenszyklus pro Stadt:
  *   pending → ready (bei < 65 m – Modell wird geklont, bereit zum Einblenden)
@@ -17,12 +21,9 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 export type { ExclusionZone } from "../animationen/staedte/cityConfig";
 import {
   CITY_CONFIGS,
-  type CityConfig,
   type ExclusionZone,
-  type CitySlotData,
   type CityState,
   CITY_TYPES,
-  generateGrid,
   DIST_READY,
   DIST_SHOW,
   DIST_HIDE,
@@ -37,12 +38,14 @@ import {
 } from "../animationen/staedte/cityStructures";
 
 // ---------------------------------------------------------------------------
-// Interner Stadt-Slot (erweitert CitySlotData um Laufzeit-Zustand)
+// Interner Stadt-Slot
 // ---------------------------------------------------------------------------
 
 interface CitySlot {
-  gridX: number;
-  gridZ: number;
+  /** Chunk-Koordinaten (wo WFC "STADT" gesagt hat) */
+  chunkX: number;
+  chunkZ: number;
+  /** Welt-Position (Mitte des Chunks) */
   worldX: number;
   worldZ: number;
   type: string;
@@ -55,38 +58,40 @@ interface CitySlot {
 }
 
 // ---------------------------------------------------------------------------
-// CityWorld
+// CityWorld – jetzt WFC-gesteuert
 // ---------------------------------------------------------------------------
 
 export class CityWorld {
   private scene: THREE.Scene;
   private loader: GLTFLoader;
   private floorY: number;
+  /** Chunk-Größe für Welt-Koordinaten-Berechnung */
+  private chunkSize: number;
 
   /** Vorgeladene Modell-Templates (nach Typ) */
   private _templates: Map<string, THREE.Object3D> = new Map();
-  /** Bounding-Box-Daten pro Template (für Kuppelradius) */
-  private _templateData: Map<
-    string,
-    { domeRadius: number; height: number }
-  > = new Map();
+  private _templateData: Map<string, { domeRadius: number; height: number }> =
+    new Map();
 
-  /** Alle Stadt-Slots (Raster-Positionen + Zustand) */
+  /** Alle Stadt-Slots (WFC-Positionen + Zustand) */
   private _slots: CitySlot[] = [];
+  /** Map: chunkKey → Slot-Index für schnellen Lookup */
+  private _slotByChunk: Map<string, number> = new Map();
 
   /** Gecachte Stadt-Positionen */
   private _cachedPositions: THREE.Vector3[] = [];
   /** Gecachte Exklusionszonen */
   private _cachedZones: ExclusionZone[] = [];
 
-  constructor(scene: THREE.Scene, floorY: number = -4) {
+  constructor(scene: THREE.Scene, floorY: number = -4, chunkSize: number = 16) {
     this.scene = scene;
     this.loader = new GLTFLoader();
     this.floorY = floorY;
+    this.chunkSize = chunkSize;
   }
 
   // -----------------------------------------------------------------------
-  // Initialisierung
+  // Initialisierung – lädt nur die Templates, keine festen Positionen!
   // -----------------------------------------------------------------------
 
   async init(): Promise<void> {
@@ -115,33 +120,58 @@ export class CityWorld {
       this._templateData.set(key, { domeRadius, height: modelHeight });
 
       console.log(
-        `🏙️ CityWorld: "${key}" geladen (Kuppelradius ${domeRadius.toFixed(1)})`,
+        `🏙️ CityWorld WFC: "${key}" geladen (Kuppelradius ${domeRadius.toFixed(1)})`,
       );
     }
 
-    // Raster-Positionen aus dem Modul generieren
-    const gridData = generateGrid();
-    this._slots = gridData.map((d: CitySlotData) => ({
-      ...d,
-      state: "pending" as CityState,
+    console.log(
+      `🏙️ CityWorld WFC bereit – Städte werden on-demand vom WFC platziert`,
+    );
+  }
+
+  // -----------------------------------------------------------------------
+  // WFC-Callback: Registriert eine neue Stadt-Position
+  // -----------------------------------------------------------------------
+
+  /**
+   * Wird vom ChunkManager aufgerufen, wenn der WFC einen "STADT"-Chunk
+   * kollabiert hat. Registriert einen neuen Stadt-Slot an dieser Position.
+   */
+  public registerCityAtChunk(cx: number, cz: number): void {
+    const key = `${cx},${cz}`;
+    if (this._slotByChunk.has(key)) return; // Schon registriert
+
+    const worldX = cx * this.chunkSize + this.chunkSize / 2;
+    const worldZ = cz * this.chunkSize + this.chunkSize / 2;
+    const types = CITY_TYPES;
+    const type = types[Math.floor(Math.random() * types.length)];
+
+    const slot: CitySlot = {
+      chunkX: cx,
+      chunkZ: cz,
+      worldX,
+      worldZ,
+      type,
+      state: "pending",
       group: null,
       domeRadius: 10,
       height: 10,
       opacity: 0,
       lights: [],
-    }));
+    };
 
-    this._cachedPositions.length = 0;
-    for (const s of this._slots) {
-      this._cachedPositions.push(new THREE.Vector3(s.worldX, 0, s.worldZ));
-    }
-    this._rebuildExclusionZones();
+    const index = this._slots.length;
+    this._slots.push(slot);
+    this._slotByChunk.set(key, index);
+    this._cachedPositions.push(new THREE.Vector3(worldX, 0, worldZ));
 
-    console.log(`🏙️ CityWorld bereit: ${this._slots.length} Städte im Raster`);
+    console.log(
+      `🧠 WFC: Neue Stadt registriert bei Chunk(${cx}, ${cz}) – Welt(${worldX.toFixed(0)}, ${worldZ.toFixed(0)})`,
+    );
   }
 
   // -----------------------------------------------------------------------
-  // Update
+  // Update – lädt/entlädt Städte basierend auf Kamera-Distanz
   // -----------------------------------------------------------------------
 
   update(delta: number, cameraX: number, cameraZ: number): void {
@@ -152,7 +182,7 @@ export class CityWorld {
       const distSq = dx * dx + dz * dz;
       const dist = Math.sqrt(distSq);
 
-      this._updateSlotState(slot, dist, distSq, delta);
+      this._updateSlotState(slot, dist, delta);
     }
   }
 
@@ -177,6 +207,9 @@ export class CityWorld {
       this._removeGroupFromScene(slot);
     }
     this._slots.length = 0;
+    this._slotByChunk.clear();
+    this._cachedPositions.length = 0;
+    this._cachedZones.length = 0;
     this._templates.clear();
     this._templateData.clear();
   }
@@ -192,7 +225,7 @@ export class CityWorld {
         this._cachedZones.push({
           centerX: s.worldX,
           centerZ: s.worldZ,
-          radius: s.domeRadius * 1.2,
+          radius: s.domeRadius * 1.8,
         });
       }
     }
@@ -202,12 +235,7 @@ export class CityWorld {
   // Private: Slot-State verwalten
   // -----------------------------------------------------------------------
 
-  private _updateSlotState(
-    slot: CitySlot,
-    dist: number,
-    _distSq: number,
-    delta: number,
-  ): void {
+  private _updateSlotState(slot: CitySlot, dist: number, delta: number): void {
     switch (slot.state) {
       case "pending":
         if (dist < DIST_READY) {
@@ -246,11 +274,7 @@ export class CityWorld {
   // Private: Opazitäts-Animation
   // -----------------------------------------------------------------------
 
-  private _animateOpacity(
-    slot: CitySlot,
-    target: number,
-    delta: number,
-  ): void {
+  private _animateOpacity(slot: CitySlot, target: number, delta: number): void {
     target = Math.max(0, Math.min(1, target));
 
     if (Math.abs(slot.opacity - target) < 0.01) {
@@ -308,7 +332,8 @@ export class CityWorld {
 
     // Landschaft (nur Pittsburgh)
     if (slot.type === "pittsburgh") {
-      const halfExtent = Math.max(box.max.x - box.min.x, box.max.z - box.min.z) / 2;
+      const halfExtent =
+        Math.max(box.max.x - box.min.x, box.max.z - box.min.z) / 2;
       const landscape = createLandscape(data.domeRadius, groundY, halfExtent);
       group.add(landscape);
     }

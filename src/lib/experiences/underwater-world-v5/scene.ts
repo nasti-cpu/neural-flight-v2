@@ -269,6 +269,21 @@ export async function setup(
   // =========================================================================
   const bioParticles = new BioParticles(ctx.scene);
 
+  // =========================================================================
+  // 14. WFC-Callbacks registrieren:
+  //     Wenn ein Chunk kollabiert, werden CityWorld und CoralReefWorld
+  //     benachrichtigt, damit sie Städte/Riffe an den richtigen Positionen platzieren
+  // =========================================================================
+  chunkManager.onChunkCollapsed((cx, cz, type) => {
+    if (type === "STADT") {
+      cityWorld.registerCityAtChunk(cx, cz);
+    } else if (type === "RIFF") {
+      coralReefWorld.registerReefAtChunk(cx, cz);
+    }
+    // FISCH und QUALLE werden von FishWorld/JellyWorld selbstständig
+    // um den Spieler herum gespawnt (kein fester Chunk nötig)
+  });
+
   console.log("🌊 Underwater World V5 gestartet! (WFC-gesteuert)");
   console.log("   🧠 WFC bestimmt die Weltverteilung von Städten & Riffen");
   console.log("   🌫️  Dynamischer Tiefsee-Nebel + Beleuchtung");

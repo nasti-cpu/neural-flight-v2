@@ -57,10 +57,25 @@ export class ChunkManager {
   /** Letzter Zonen-String zum Erkennen von Änderungen */
   private _lastZoneKey: string = "";
 
+  /** WFC-Callbacks: Werden benachrichtigt, wenn ein Chunk-Typ kollabiert */
+  private _wfcCallbacks: Array<
+    (cx: number, cz: number, type: ChunkType) => void
+  > = [];
+
   constructor(scene: THREE.Scene, config: ChunkManagerConfig) {
     this.scene = scene;
     this.config = config;
     this.wfc = new WFCSystem();
+  }
+
+  /**
+   * Registriert einen Callback, der bei jedem WFC-Kollaps aufgerufen wird.
+   * CityWorld und CoralReefWorld nutzen das, um Städte/Riffe zu platzieren.
+   */
+  public onChunkCollapsed(
+    callback: (cx: number, cz: number, type: ChunkType) => void,
+  ): void {
+    this._wfcCallbacks.push(callback);
   }
 
   /**
@@ -153,13 +168,18 @@ export class ChunkManager {
       }
     }
 
-    // --- Lädt neue Chunks (inkl. WFC-Kollaps) ---
+    // --- Lädt neue Chunks (inkl. WFC-Kollaps + Callback) ---
     for (const { cx, cz } of neededCoords) {
       const key = this._chunkKey(cx, cz);
       if (!this.chunks.has(key)) {
         // WFC-Collapse passiert hier automatisch beim ersten Aufruf
-        this.wfc.getChunkType(cx, cz);
+        const chunkType = this.wfc.getChunkType(cx, cz);
         this._loadChunk(cx, cz);
+
+        // Benachrichtige alle registrierten Callbacks (CityWorld, CoralReefWorld, etc.)
+        for (const cb of this._wfcCallbacks) {
+          cb(cx, cz, chunkType);
+        }
       }
     }
 

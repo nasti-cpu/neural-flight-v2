@@ -1,18 +1,18 @@
 /**
- * coralReefWorld.ts – Korallenriffe in der Tiefsee-Welt.
+ * coralReefWorld.ts – Korallenriffe in der Tiefsee-Welt, WFC-gesteuert.
+ *
+ * Riffe werden NICHT mehr zufällig um die Kamera herum gespawnt.
+ * Stattdessen fragt der ChunkManager den WFC-Algorithmus,
+ * und wenn ein Chunk den Typ "RIFF" bekommt, wird hier ein
+ * Riff für diese Position registriert.
  *
  * Importiert die Riff-Erzeugung aus animationen/korallen/coralReef.ts
  * und kümmert sich um den Lebenszyklus (Laden, Sichtbarkeit, Fade).
  *
  * Lebenszyklus pro Riff:
- *   pending → visible (bei < 60 m – target ≈ 0.14, kaum sichtbar im Nebel)
+ *   pending → visible (bei < 60 m)
  *   visible → pending (bei > 65 m – sanftes Fade-Out)
  *   pending → gelöscht (bei > 70 m – komplett aus dem Array)
- *
- * Opazität folgt der Distanz:
- *   dist ≤ 30 m → 1.0 (voll sichtbar)
- *   30 m < dist < 65 m → linear von 1.0 auf 0
- *   dist ≥ 65 m → 0 (unsichtbar)
  */
 
 import * as THREE from "three/webgpu";
@@ -24,13 +24,16 @@ import {
 import type { ExclusionZone } from "../animationen/staedte/cityConfig";
 
 // ---------------------------------------------------------------------------
-// Reef-Slot (ein Riff = mehrere Korallen an einer Position)
+// Reef-Slot
 // ---------------------------------------------------------------------------
 
 type ReefState = "pending" | "visible";
 
 interface ReefSlot {
   id: number;
+  /** Chunk-Koordinaten (wo WFC "RIFF" gesagt hat) */
+  chunkX: number;
+  chunkZ: number;
   worldX: number;
   worldZ: number;
   state: ReefState;
@@ -39,19 +42,22 @@ interface ReefSlot {
 }
 
 // ---------------------------------------------------------------------------
-// CoralReefWorld
+// CoralReefWorld – jetzt WFC-gesteuert
 // ---------------------------------------------------------------------------
 
 export class CoralReefWorld {
   private scene: THREE.Scene;
   private loader: GLTFLoader;
   private floorY: number;
+  private chunkSize: number;
 
   /** Vorgeladene Korallen-Modelle (nach Pfad) */
   private _templates: Map<string, THREE.Group> = new Map();
 
   /** Alle Riffe (pending + visible) */
   private _reefs: ReefSlot[] = [];
+  /** Map: chunkKey → Riff-Index */
+  private _reefByChunk: Map<string, number> = new Map();
 
   /** Exklusionszonen (Stadt-Kuppeln) – keine Riffe darin */
   private _exclusionZones: ExclusionZone[] = [];
@@ -59,29 +65,26 @@ export class CoralReefWorld {
   /** Nächste ID für Riffe */
   private _nextId: number = 0;
 
-  /** Letzte Kameraposition – für Bewegungserkennung */
-  private _lastCamX: number = 0;
-  private _lastCamZ: number = 0;
-
-  constructor(scene: THREE.Scene, floorY: number = -4) {
+  constructor(scene: THREE.Scene, floorY: number = -4, chunkSize: number = 16) {
     this.scene = scene;
     this.loader = new GLTFLoader();
     this.floorY = floorY;
+    this.chunkSize = chunkSize;
   }
 
   // -----------------------------------------------------------------------
-  // Initialisierung – lädt alle Korallenmodelle vor
+  // Initialisierung
   // -----------------------------------------------------------------------
 
   async init(): Promise<void> {
-    console.log("🪸 CoralReefWorld: Lade Korallenmodelle...");
+    console.log("🪸 CoralReefWorld WFC: Lade Korallenmodelle...");
 
     for (const config of CORAL_CONFIGS) {
       try {
         const model = await this._loadModel(config.path);
         if (model) {
           this._templates.set(config.path, model);
-          console.log(`   🪸 Geladen: ${config.key} → ${config.path}`);
+          console.log(`   🪸 Geladen: ${config.key}`);
         }
       } catch {
         console.warn(`⚠️ Koralle konnte nicht geladen werden: ${config.path}`);
@@ -89,8 +92,41 @@ export class CoralReefWorld {
     }
 
     console.log(
-      `🪸 CoralReefWorld bereit: ${this._templates.size}/${CORAL_CONFIGS.length} Korallen-Typen`,
+      `🪸 CoralReefWorld WFC bereit: ${this._templates.size} Korallen-Typen – Riffe werden on-demand vom WFC platziert`,
     );
+  }
+
+  // -----------------------------------------------------------------------
+  // WFC-Callback: Registriert ein neues Riff
+  // -----------------------------------------------------------------------
+
+  /**
+   * Wird vom ChunkManager aufgerufen, wenn der WFC einen "RIFF"-Chunk
+   * kollabiert hat.
+   */
+  public registerReefAtChunk(cx: number, cz: number): void {
+    const key = `${cx},${cz}`;
+    if (this._reefByChunk.has(key)) return;
+
+    const worldX = cx * this.chunkSize + this.chunkSize / 2;
+    const worldZ = cz * this.chunkSize + this.chunkSize / 2;
+
+    // Nicht in Städte-Exklusionszonen platzieren
+    if (this._isInExclusionZone(worldX, worldZ, 12)) return;
+
+    const reef: ReefSlot = {
+      id: this._nextId++,
+      chunkX: cx,
+      chunkZ: cz,
+      worldX,
+      worldZ,
+      state: "pending",
+      group: null,
+      opacity: 0,
+    };
+
+    this._reefByChunk.set(key, this._reefs.length);
+    this._reefs.push(reef);
   }
 
   // -----------------------------------------------------------------------
@@ -102,7 +138,7 @@ export class CoralReefWorld {
   }
 
   // -----------------------------------------------------------------------
-  // Update – jeden Frame von der Render-Loop aufrufen
+  // Update
   // -----------------------------------------------------------------------
 
   update(delta: number, cameraX: number, cameraZ: number): void {
@@ -114,11 +150,10 @@ export class CoralReefWorld {
 
       switch (reef.state) {
         case "pending":
-          // Weit draußen aktivieren (60m) – target = ~0.14 → kaum sichtbar im Nebel
           if (dist < 60) {
             this._showReef(reef);
           } else if (dist > 70) {
-            this._reefs.splice(i, 1);
+            this._removeReefByIndex(i);
           }
           break;
 
@@ -130,7 +165,6 @@ export class CoralReefWorld {
       }
 
       if (reef.state === "visible") {
-        // Opazität: 0–30m = voll sichtbar, 30–65m = linearer Fade auf 0
         const fullOpacityDist = 30;
         const hideDist = 65;
         let target = 1.0;
@@ -148,14 +182,6 @@ export class CoralReefWorld {
         }
       }
     }
-
-    const moved =
-      Math.abs(cameraX - this._lastCamX) + Math.abs(cameraZ - this._lastCamZ);
-    if (moved > 8) {
-      this._spawnReefsNear(cameraX, cameraZ);
-      this._lastCamX = cameraX;
-      this._lastCamZ = cameraZ;
-    }
   }
 
   // -----------------------------------------------------------------------
@@ -167,7 +193,26 @@ export class CoralReefWorld {
       this._removeReefGroup(reef);
     }
     this._reefs.length = 0;
+    this._reefByChunk.clear();
     this._templates.clear();
+  }
+
+  // -----------------------------------------------------------------------
+  // Private: Index-basierte Entfernung (Map-konsistent)
+  // -----------------------------------------------------------------------
+
+  private _removeReefByIndex(index: number): void {
+    const reef = this._reefs[index];
+    if (!reef) return;
+    this._removeReefGroup(reef);
+    this._reefs.splice(index, 1);
+
+    // Map neu aufbauen (weil sich Indizes verschoben haben)
+    this._reefByChunk.clear();
+    for (let i = 0; i < this._reefs.length; i++) {
+      const r = this._reefs[i];
+      this._reefByChunk.set(`${r.chunkX},${r.chunkZ}`, i);
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -181,51 +226,11 @@ export class CoralReefWorld {
         (gltf) => resolve(gltf.scene),
         undefined,
         (err) => {
-          console.error(`❌ CoralReefWorld: Fehler beim Laden: ${path}`, err);
+          console.error(`❌ CoralReefWorld: Fehler: ${path}`, err);
           resolve(null);
         },
       );
     });
-  }
-
-  // -----------------------------------------------------------------------
-  // Private: Neue Riffe in der Umgebung spawnen
-  // -----------------------------------------------------------------------
-
-  private _spawnReefsNear(cx: number, cz: number): void {
-    const totalCount = this._reefs.length;
-    if (totalCount >= 15) return;
-
-    const spawnCount = Math.min(3, 15 - totalCount);
-
-    for (let i = 0; i < spawnCount; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const dist = 12 + Math.random() * 15;
-      const wx = cx + Math.cos(angle) * dist;
-      const wz = cz + Math.sin(angle) * dist;
-
-      if (this._isInExclusionZone(wx, wz)) continue;
-
-      let tooClose = false;
-      for (const reef of this._reefs) {
-        const dx = wx - reef.worldX;
-        const dz = wz - reef.worldZ;
-        if (dx * dx + dz * dz < 400) {
-          tooClose = true;
-          break;
-        }
-      }
-      if (tooClose) continue;
-
-      this._reefs.push({
-        id: this._nextId++,
-        worldX: wx,
-        worldZ: wz,
-        state: "pending",
-        group: null,
-        opacity: 0,
-      });
-    }
   }
 
   // -----------------------------------------------------------------------
@@ -241,7 +246,6 @@ export class CoralReefWorld {
     );
     if (!group) return;
 
-    // Alle Materialien transparent machen und auf 0 setzen (Fade-In Start)
     group.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material) {
         const mats = Array.isArray(child.material)
@@ -263,25 +267,15 @@ export class CoralReefWorld {
     reef.state = "visible";
   }
 
-  // -----------------------------------------------------------------------
-  // Private: Riff unsichtbar machen
-  // -----------------------------------------------------------------------
-
   private _hideReef(reef: ReefSlot): void {
     this._removeReefGroup(reef);
     reef.state = "pending";
     reef.group = null;
   }
 
-  // -----------------------------------------------------------------------
-  // Private: Gruppe aus Szene entfernen + Speicher freigeben
-  // -----------------------------------------------------------------------
-
   private _removeReefGroup(reef: ReefSlot): void {
     if (!reef.group) return;
-
     this.scene.remove(reef.group);
-
     reef.group.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         child.geometry?.dispose();
@@ -294,10 +288,6 @@ export class CoralReefWorld {
       }
     });
   }
-
-  // -----------------------------------------------------------------------
-  // Private: Opazität auf alle Meshes einer Gruppe anwenden
-  // -----------------------------------------------------------------------
 
   private _applyOpacity(group: THREE.Group, opacity: number): void {
     group.traverse((child) => {
@@ -312,10 +302,6 @@ export class CoralReefWorld {
       }
     });
   }
-
-  // -----------------------------------------------------------------------
-  // Private: Prüfen, ob Position in einer Exklusionszone liegt
-  // -----------------------------------------------------------------------
 
   private _isInExclusionZone(
     x: number,
