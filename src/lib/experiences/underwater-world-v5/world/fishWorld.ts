@@ -218,6 +218,7 @@ export class FishWorld {
   private _glowColor = new THREE.Color(0xffaa00);
   private _echoOrigin = new THREE.Vector3();
   private _tmpDistVec = new THREE.Vector3();
+  private _tmpSchoolCenter = new THREE.Vector3();
 
   constructor(scene: THREE.Scene, config?: Partial<FishWorldConfig>) {
     this.scene = scene;
@@ -317,7 +318,11 @@ export class FishWorld {
     this._exclusionZones = zones;
   }
 
-  private _isInExclusionZone(x: number, z: number, margin: number = 0): boolean {
+  private _isInExclusionZone(
+    x: number,
+    z: number,
+    margin: number = 0,
+  ): boolean {
     for (const zone of this._exclusionZones) {
       const dx = x - zone.centerX;
       const dz = z - zone.centerZ;
@@ -537,9 +542,12 @@ export class FishWorld {
 
     // --- Orbit-Position auf der Ellipse ---
     const { px, pz, ang } = computeOrbitPosition(
-      p.centerX, p.centerZ,
-      p.radiusX, p.radiusZ,
-      p.speed, p.startAngle,
+      p.centerX,
+      p.centerZ,
+      p.radiusX,
+      p.radiusZ,
+      p.speed,
+      p.startAngle,
       elapsed,
     );
 
@@ -662,11 +670,16 @@ export class FishWorld {
 
     // Gültige Startposition außerhalb aller Kuppeln finden
     const { x: validX, z: validZ } = this._findValidPosition(
-      cameraPos.x, cameraPos.z, 12, 20,
+      cameraPos.x,
+      cameraPos.z,
+      12,
+      20,
     );
 
     // Material klonen (jeder Schwarm braucht eigene Instanz für Glow)
-    const schoolMat = (this.schoolFishMesh.material as THREE.MeshStandardMaterial).clone();
+    const schoolMat = (
+      this.schoolFishMesh.material as THREE.MeshStandardMaterial
+    ).clone();
     schoolMat.transparent = true;
     schoolMat.opacity = 0;
 
@@ -687,8 +700,8 @@ export class FishWorld {
     this.scene.add(instances);
 
     const origEmissive =
-      (schoolMat as THREE.MeshStandardMaterial).emissive
-        ?.clone() ?? new THREE.Color(0x000000);
+      (schoolMat as THREE.MeshStandardMaterial).emissive?.clone() ??
+      new THREE.Color(0x000000);
 
     const fadeMs = 2000;
 
@@ -705,7 +718,10 @@ export class FishWorld {
       // Ellipsenbahn
       centerX: validX,
       centerZ: validZ,
-      baseY: this.config.floorY + 2 + rand() * (this.config.waterY - this.config.floorY - 4),
+      baseY:
+        this.config.floorY +
+        2 +
+        rand() * (this.config.waterY - this.config.floorY - 4),
       startAngle: rand() * Math.PI * 2,
       swimRadiusX: 8 + rand() * 6,
       swimRadiusZ: 5 + rand() * 5,
@@ -787,7 +803,10 @@ export class FishWorld {
 
         // Quaternion: Yaw → Pitch → Roll
         this._tmpQuat.identity();
-        this._tmpQuatA.setFromAxisAngle(this._up, frame.baseYaw + f.yawVariation);
+        this._tmpQuatA.setFromAxisAngle(
+          this._up,
+          frame.baseYaw + f.yawVariation,
+        );
         this._tmpQuat.multiply(this._tmpQuatA);
         this._tmpQuatB.setFromAxisAngle(this._axisPitch, f.pitch);
         this._tmpQuat.multiply(this._tmpQuatB);
@@ -826,10 +845,14 @@ export class FishWorld {
       });
     }
 
-    // Echo-Targets aus Schwärmen (vereinfacht: Zentrum)
+    // Echo-Targets aus Schwärmen (wiederverwendeter Vector3 – kein GC!)
     for (const school of this.activeSchools) {
       this._echoTargets.push({
-        position: new THREE.Vector3(school.centerX, school.baseY, school.centerZ),
+        position: this._tmpSchoolCenter.set(
+          school.centerX,
+          school.baseY,
+          school.centerZ,
+        ),
         onHit: () => {
           school.glowIntensity = 1.0;
         },
@@ -845,7 +868,12 @@ export class FishWorld {
 
     this._echoOrigin.copy(cameraPos);
     this._echoOrigin.y -= 2.0;
-    this.echolocation.update(elapsed, delta, this._echoOrigin, this._echoTargets);
+    this.echolocation.update(
+      elapsed,
+      delta,
+      this._echoOrigin,
+      this._echoTargets,
+    );
 
     // Glow bei Einzelfischen
     const decay = Math.exp(-3.0 * delta);

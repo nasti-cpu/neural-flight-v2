@@ -55,9 +55,11 @@ export class GuidanceSystem {
   private orbMat: THREE.MeshBasicMaterial;
 
   /** Letzte bekannte Ziel-Stadt (für Änderungserkennung) */
-  private lastTarget: THREE.Vector3 | null = null;
+  private lastTarget = new THREE.Vector3();
   /** Letzte bekannte Spieler-Position (für Threshold) */
-  private lastPlayerPos: THREE.Vector3 | null = null;
+  private lastPlayerPos = new THREE.Vector3();
+  /** Ob lastTarget jemals gesetzt wurde */
+  private _hasLastTarget = false;
 
   constructor(scene: THREE.Scene, floorY: number = -4) {
     this.scene = scene;
@@ -115,8 +117,8 @@ export class GuidanceSystem {
 
     if (playerMoved || targetChanged) {
       this._placeOrbsAlongPath(playerPos, target);
-      this.lastTarget = target.clone();
-      this.lastPlayerPos = playerPos.clone();
+      this.lastTarget.copy(target);
+      this.lastPlayerPos.copy(playerPos);
     }
 
     // --- Kugeln animieren (sanftes Bobbing + Pulsieren) ---
@@ -127,14 +129,16 @@ export class GuidanceSystem {
       const phase = i * 0.5;
 
       // Auf und Ab schweben
-      const bob = Math.sin(elapsed * GUIDANCE_CONFIG.bobSpeed + phase)
-        * GUIDANCE_CONFIG.bobAmplitude;
+      const bob =
+        Math.sin(elapsed * GUIDANCE_CONFIG.bobSpeed + phase) *
+        GUIDANCE_CONFIG.bobAmplitude;
       orb.position.y = (orb.userData.baseY as number) + bob;
 
       // Pulsieren (Skalierung)
-      const pulse = 1.0
-        + Math.sin(elapsed * GUIDANCE_CONFIG.pulseSpeed + phase * 1.3)
-          * GUIDANCE_CONFIG.pulseAmplitude;
+      const pulse =
+        1.0 +
+        Math.sin(elapsed * GUIDANCE_CONFIG.pulseSpeed + phase * 1.3) *
+          GUIDANCE_CONFIG.pulseAmplitude;
       orb.scale.setScalar(pulse);
     }
   }
@@ -200,8 +204,10 @@ export class GuidanceSystem {
    */
   private _playerMovedSignificantly(playerPos: THREE.Vector3): boolean {
     if (!this.lastPlayerPos) return true;
-    return playerPos.distanceToSquared(this.lastPlayerPos)
-      > GUIDANCE_CONFIG.rebuildThreshold * GUIDANCE_CONFIG.rebuildThreshold;
+    return (
+      playerPos.distanceToSquared(this.lastPlayerPos) >
+      GUIDANCE_CONFIG.rebuildThreshold * GUIDANCE_CONFIG.rebuildThreshold
+    );
   }
 
   /**
