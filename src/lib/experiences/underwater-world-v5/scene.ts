@@ -315,6 +315,14 @@ export function tick(
 
   const { camera } = s;
 
+  // Y-Begrenzung: nicht unter den Boden, nicht über die Wasseroberfläche
+  if (camera.position.y < WORLD_CONFIG.floorY + 0.5) {
+    camera.position.y = WORLD_CONFIG.floorY + 0.5;
+  }
+  if (camera.position.y > WORLD_CONFIG.waterY - 0.3) {
+    camera.position.y = WORLD_CONFIG.waterY - 0.3;
+  }
+
   // =========================================================================
   // Tiefenabhängige Beleuchtung & Nebel (dunkler je tiefer)
   // =========================================================================
