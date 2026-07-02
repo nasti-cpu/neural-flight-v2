@@ -87,6 +87,9 @@ export class JellyWorld {
   /** Exklusionszonen (Stadt-Kuppeln) – Quallen meiden diese Bereiche */
   private _exclusionZones: ExclusionZone[] = [];
 
+  /** Wiederverwendeter Array für getEchoTargets (vermeidet GC) */
+  private _cachedEchoTargets: EchoTarget[] = [];
+
   // --- Echoortungs-Glow (wie bei Fischen) ---
   private _glowColor = new THREE.Color(0xffaa00);
   private _tmpColor = new THREE.Color();
@@ -113,17 +116,17 @@ export class JellyWorld {
    * Wird von FishWorld._updateEcholocation verwendet.
    */
   getEchoTargets(): EchoTarget[] {
-    const targets: EchoTarget[] = [];
+    this._cachedEchoTargets.length = 0;
     for (const group of this.groups) {
       if (group.hidden) continue;
       for (const member of group.members) {
-        targets.push({
+        this._cachedEchoTargets.push({
           position: member.jelly.group.position,
           onHit: () => { member.glowIntensity = 1.0; },
         });
       }
     }
-    return targets;
+    return this._cachedEchoTargets;
   }
 
   /**

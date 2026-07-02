@@ -5,9 +5,14 @@
  * und kümmert sich um den Lebenszyklus (Laden, Sichtbarkeit, Fade).
  *
  * Lebenszyklus pro Riff:
- *   pending → visible (bei < 20 m – Gruppe wird der Szene hinzugefügt)
- *   visible → pending (bei > 30 m – Gruppe wird entfernt)
- *   pending → gelöscht (bei > 50 m – komplett aus dem Array)
+ *   pending → visible (bei < 60 m – target ≈ 0.14, kaum sichtbar im Nebel)
+ *   visible → pending (bei > 65 m – sanftes Fade-Out)
+ *   pending → gelöscht (bei > 70 m – komplett aus dem Array)
+ *
+ * Opazität folgt der Distanz:
+ *   dist ≤ 30 m → 1.0 (voll sichtbar)
+ *   30 m < dist < 65 m → linear von 1.0 auf 0
+ *   dist ≥ 65 m → 0 (unsichtbar)
  */
 
 import * as THREE from "three/webgpu";
@@ -109,23 +114,36 @@ export class CoralReefWorld {
 
       switch (reef.state) {
         case "pending":
-          if (dist < 20) {
+          // Weit draußen aktivieren (60m) – target = ~0.14 → kaum sichtbar im Nebel
+          if (dist < 60) {
             this._showReef(reef);
-          } else if (dist > 50) {
+          } else if (dist > 70) {
             this._reefs.splice(i, 1);
           }
           break;
 
         case "visible":
-          if (dist > 30) {
+          if (dist > 65) {
             this._hideReef(reef);
           }
           break;
       }
 
-      if (reef.state === "visible" && reef.opacity < 1) {
-        reef.opacity += (1 - reef.opacity) * Math.min(1, delta * 3);
-        if (reef.group) {
+      if (reef.state === "visible") {
+        // Opazität: 0–30m = voll sichtbar, 30–65m = linearer Fade auf 0
+        const fullOpacityDist = 30;
+        const hideDist = 65;
+        let target = 1.0;
+        if (dist > fullOpacityDist) {
+          const fadeRange = hideDist - fullOpacityDist;
+          target = 1.0 - (dist - fullOpacityDist) / fadeRange;
+        }
+        target = Math.max(0, Math.min(1, target));
+
+        reef.opacity += (target - reef.opacity) * Math.min(1, delta * 2.5);
+        if (reef.opacity < 0.01 && target === 0) {
+          this._hideReef(reef);
+        } else if (reef.group) {
           this._applyOpacity(reef.group, reef.opacity);
         }
       }

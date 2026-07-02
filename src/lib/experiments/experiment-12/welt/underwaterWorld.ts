@@ -152,6 +152,7 @@ let _playerPitch = 0;        // Aktuelle Pitch-Neigung in Grad (gesmootht)
 let _playerRoll = 0;         // Aktuelle Roll-Neigung in Grad (gesmootht)
 let _heading = 0;            // Kumulierte Gier-Richtung im Bogenmaß
 let _playerSpeed = WORLD_CONFIG.moveSpeed;
+const _forwardVec = new THREE.Vector3(); // Wiederverwendet, vermeidet GC
 
 // ---------------------------------------------------------------------------
 // Initialisierung
@@ -261,7 +262,9 @@ export async function initWorld(container: HTMLElement): Promise<void> {
     forward.y = 0;
     forward.normalize();
     right.crossVectors(forward, camera.up).normalize();
-    camera.position.add(forward.clone().multiplyScalar(0.9 * delta));
+    camera.position.x += forward.x * 0.9 * delta;
+    camera.position.y += forward.y * 0.9 * delta;
+    camera.position.z += forward.z * 0.9 * delta;
 
     moveDir.set(0, 0, 0);
     if (_keys["KeyW"]) moveDir.add(forward);
@@ -781,15 +784,15 @@ export function updatePlayer(
   // Forward-Vektor aus Heading + Pitch (sphärische Koordinaten)
   const pitchRad = _playerPitch * THREE.MathUtils.DEG2RAD;
   const headingRad = _heading;
-  const forward = new THREE.Vector3(
+  _forwardVec.set(
     -Math.sin(headingRad) * Math.cos(pitchRad),
     -Math.sin(pitchRad),
     -Math.cos(headingRad) * Math.cos(pitchRad),
   );
-  forward.normalize();
+  _forwardVec.normalize();
 
   // Kamera bewegen
-  state.camera.position.addScaledVector(forward, _playerSpeed * delta);
+  state.camera.position.addScaledVector(_forwardVec, _playerSpeed * delta);
 
   // Kamera-Rotation setzen (für Non-VR-Modus)
   state.camera.rotation.set(-pitchRad, headingRad, -_playerRoll * THREE.MathUtils.DEG2RAD, "YXZ");

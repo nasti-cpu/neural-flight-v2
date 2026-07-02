@@ -55,7 +55,9 @@ onMount(() => {
 			(exp: ActiveExperience) => {
 				experienceName = exp.manifest.name;
 				hasOutputs = (exp.manifest.outputs?.length ?? 0) > 0;
-				const renderCamera = exp.state.camera as THREE.PerspectiveCamera;
+
+				// Fallback: nutze dummyCamera falls die Experience keine camera im State hat
+				const renderCamera = (exp.state.camera as THREE.PerspectiveCamera | undefined) ?? dummyCamera;
 
 				function onResize(): void {
 					renderCamera.aspect = window.innerWidth / window.innerHeight;
