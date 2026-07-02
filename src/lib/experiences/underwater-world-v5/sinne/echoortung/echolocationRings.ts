@@ -4,8 +4,10 @@
  * Sendet periodisch expandierende Ringe von einer Quelle (Spieler) aus.
  * Trifft ein Ring ein Ziel-Objekt (z. B. Fisch), wird ein Hit-Callback ausgelöst.
  *
- * Extrahiert aus echolocation.ts – für Wiederverwendung in der Welt.
- * Nutzt Ringe (Modus 1) aus dem Echoortungs-Experiment.
+ * Performance-optimiert:
+ * - Nutzt distanceToSquared statt distanceTo (vermeidet sqrt)
+ * - Cache für Distanz-Quadrate pro Frame (kein GC)
+ * - Ring-Pooling (kein Erstellen/Löschen von Meshes)
  */
 
 import * as THREE from "three/webgpu";
@@ -14,25 +16,15 @@ import * as THREE from "three/webgpu";
 // Typen
 // ---------------------------------------------------------------------------
 
-/**
- * Konfiguration der Echoortungs-Ringe.
- */
 export interface EcholocationConfig {
-  /** Maximale Reichweite eines Rings (in Einheiten) */
   ringMaxRadius: number;
-  /** Expandier-Geschwindigkeit (Einheiten/Sekunde) */
   ringSpeed: number;
-  /** Alle wie viel Sekunden ein neuer Ring ausgesendet wird */
   ringInterval: number;
-  /** Farbe der Ringe im Normalzustand */
   ringColor: THREE.ColorRepresentation;
-  /** Farbe der Ringe bei einem Treffer (aktuell nur Fisch-Glow, Ring bleibt blau) */
   hitColor: THREE.ColorRepresentation;
-  /** Dicke des Ring-Torus */
   tubeRadius: number;
 }
 
-/** Ein Ziel für die Echoortung: Position + Callback bei Treffer */
 export interface EchoTarget {
   position: THREE.Vector3;
   onHit: (intensity: number) => void;
@@ -48,20 +40,13 @@ const DEFAULT_CONFIG: EcholocationConfig = {
   ringInterval: 6,
   ringColor: 0x44ccff,
   hitColor: 0xffcc44,
-  tubeRadius: 0.002, // Sehr dünn – der Ring bleibt schmal
+  tubeRadius: 0.002,
 };
 
 // ---------------------------------------------------------------------------
 // EcholocationRings
 // ---------------------------------------------------------------------------
 
-/**
- * Verwaltet expandierende Ringe für die Echoortung.
- *
- * - Ringe werden in einem Pool vorgehalten (Round-Robin).
- * - Jeder Ring expandiert, wird dünner und verblasst mit der Zeit.
- * - Trifft ein Ring ein Ziel, feuert der onHit-Callback.
- */
 export class EcholocationRings {
   private scene: THREE.Scene;
   private config: EcholocationConfig;
@@ -74,19 +59,21 @@ export class EcholocationRings {
 
   private ringGeom: THREE.TorusGeometry;
 
+  // Cache: pro Frame einmal berechnete Distanz-Quadrate (vermeidet GC)
+  private _distCache: Float64Array = new Float64Array(0);
+
   constructor(scene: THREE.Scene, config?: Partial<EcholocationConfig>) {
     this.scene = scene;
     this.config = { ...DEFAULT_CONFIG, ...config };
 
-    // Anzahl Ringe im Pool berechnen: Lebensdauer / Intervall + Puffer
     const lifetime = this.config.ringMaxRadius / this.config.ringSpeed;
     this.ringCount = Math.ceil(lifetime / this.config.ringInterval) + 2;
     this.ringBirthTimes = new Array(this.ringCount).fill(-999);
 
-    // Torus-Geometrie für alle Ringe (wiederverwendet)
+    // Torus-Geometrie für alle Ringe (wird gemeinsam genutzt)
     this.ringGeom = new THREE.TorusGeometry(1, this.config.tubeRadius, 16, 64);
 
-    // Ring-Pool erstellen
+    // Ring-Pool vorab erstellen
     for (let i = 0; i < this.ringCount; i++) {
       const mat = new THREE.MeshBasicMaterial({
         color: this.config.ringColor,
@@ -95,7 +82,7 @@ export class EcholocationRings {
         depthWrite: false,
       });
       const ring = new THREE.Mesh(this.ringGeom, mat);
-      ring.rotation.x = -Math.PI / 2; // Flach in XZ-Ebene
+      ring.rotation.x = -Math.PI / 2;
       ring.visible = false;
       ring.renderOrder = 1;
       this.scene.add(ring);
@@ -105,11 +92,8 @@ export class EcholocationRings {
 
   /**
    * Aktualisiert alle Ringe und prüft Kollisionen mit Zielen.
-   *
-   * @param elapsed  – Vergangene Gesamtzeit in Sekunden
-   * @param delta    – Zeit seit letztem Frame in Sekunden
-   * @param origin   – Position der Schallquelle (Spieler/Kamera)
-   * @param targets  – Array von Zielen mit Position und Hit-Callback
+   * Performance: Distanzen werden einmal pro Frame gecached, dann per
+   * distanceToSquared verglichen (kein sqrt, kein new Vector3).
    */
   update(
     elapsed: number,
@@ -117,72 +101,82 @@ export class EcholocationRings {
     origin: THREE.Vector3,
     targets: EchoTarget[],
   ): void {
+    // Cache-Größe anpassen (nur wenn nötig)
+    if (this._distCache.length < targets.length) {
+      this._distCache = new Float64Array(targets.length);
+    }
+
+    // Distanz-Quadrate einmal pro Frame berechnen (kein GC!)
+    for (let t = 0; t < targets.length; t++) {
+      const dx = targets[t].position.x - origin.x;
+      const dy = targets[t].position.y - origin.y;
+      const dz = targets[t].position.z - origin.z;
+      this._distCache[t] = dx * dx + dy * dy + dz * dz;
+    }
+
     const lifetime = this.config.ringMaxRadius / this.config.ringSpeed;
 
-    // --- Neuen Ring aussenden, wenn Intervall abgelaufen ---
+    // --- Neuen Ring aussenden ---
     if (elapsed - this.lastEmitTime >= this.config.ringInterval) {
       this.lastEmitTime = elapsed;
-
       const idx = this.nextRingIndex;
       this.ringBirthTimes[idx] = elapsed;
       this.nextRingIndex = (idx + 1) % this.ringCount;
 
       const ring = this.ringMeshes[idx];
       ring.visible = true;
-      ring.scale.set(0.05, 0.05, 1); // Start: ganz klein, tube bleibt dünn
-      ring.position.copy(origin);
+      ring.scale.set(0.05, 0.05, 1);
+      ring.position.x = origin.x;
+      ring.position.y = origin.y;
+      ring.position.z = origin.z;
       (ring.material as THREE.MeshBasicMaterial).opacity = 0.6;
-      (ring.material as THREE.MeshBasicMaterial).color.set(
-        this.config.ringColor,
-      );
     }
 
-    // --- Jeden lebenden Ring animieren und auf Kollision prüfen ---
-    for (let i = 0; i < this.ringCount; i++) {
-      const ring = this.ringMeshes[i];
-      const birthTime = this.ringBirthTimes[i];
+    // --- Jeden lebenden Ring animieren ---
+    const hitRangeHalf = 1.8;
+    const hitRangeSq = hitRangeHalf * hitRangeHalf;
 
+    for (let i = 0; i < this.ringCount; i++) {
+      const birthTime = this.ringBirthTimes[i];
       if (birthTime < 0) {
-        ring.visible = false;
+        this.ringMeshes[i].visible = false;
         continue;
       }
 
       const age = elapsed - birthTime;
-
       if (age > lifetime) {
-        ring.visible = false;
+        this.ringMeshes[i].visible = false;
         this.ringBirthTimes[i] = -999;
         continue;
       }
 
       const radius = age * this.config.ringSpeed;
-      // Nur XZ skalieren, Y (tube) bleibt dünn
+      const radiusSq = radius * radius;
+
+      const ring = this.ringMeshes[i];
       ring.scale.set(radius, radius, 1);
-      ring.position.copy(origin); // Folgt der Quelle
+      ring.position.x = origin.x;
+      ring.position.y = origin.y;
+      ring.position.z = origin.z;
 
-      // Opazität: zuerst konstant, dann linear ausblenden
+      // Opazität
       const fadeProgress = age / lifetime;
-      let opacity: number;
-      if (fadeProgress < 0.15) {
-        opacity = 0.6;
-      } else {
-        const t = (fadeProgress - 0.15) / 0.85;
-        opacity = 0.6 * (1 - t);
-      }
+      const opacity =
+        fadeProgress < 0.15 ? 0.6 : 0.6 * (1 - (fadeProgress - 0.15) / 0.85);
+      (ring.material as THREE.MeshBasicMaterial).opacity = opacity;
 
-      // Kollision mit Zielen prüfen – nur onHit feuern, Ring bleibt blau
-      for (const target of targets) {
-        const dist = target.position.distanceTo(origin);
-        if (Math.abs(radius - dist) < 1.8) {
-          target.onHit(1.0);
+      // Kollision: |radius - dist| < hitRangeHalf  ⇔  |radius² - dist²| / (radius + dist)
+      // Nutze den Cache für schnelle Vergleiche ohne GC
+      for (let t = 0; t < targets.length; t++) {
+        const distSq = this._distCache[t];
+        const diff = Math.abs(radiusSq - distSq) / (radius + Math.sqrt(distSq));
+        if (diff < hitRangeHalf) {
+          targets[t].onHit(1.0);
         }
       }
-
-      (ring.material as THREE.MeshBasicMaterial).opacity = opacity;
     }
   }
 
-  /** Räumt alle Ressourcen frei */
   dispose(): void {
     for (const ring of this.ringMeshes) {
       this.scene.remove(ring);
