@@ -104,10 +104,9 @@ export class GuidanceSystem {
     const target = this._findNearest(playerPos, cityPositions);
 
     if (!target) {
-      // Keine Stadt vorhanden → alle Kugeln ausblenden
+      // Keine Stadt vorhanden → alle Kugeln ausblenden + Reset
       this._hideAllOrbs();
-      this.lastTarget = null;
-      this.lastPlayerPos = null;
+      this._hasLastTarget = false;
       return;
     }
 
@@ -238,7 +237,5 @@ export class GuidanceSystem {
     this.orbs.length = 0;
     this.orbGeom.dispose();
     this.orbMat.dispose();
-    this.lastTarget = null;
-    this.lastPlayerPos = null;
   }
 }

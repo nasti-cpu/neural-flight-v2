@@ -17,18 +17,12 @@ import * as THREE from "three/webgpu";
 // ---------------------------------------------------------------------------
 
 const SPOT_CONFIG = {
-  /** Lichtfarbe: kaltes Blau-Weiss (typisch für Unterwasser-LED) */
   color: 0x88ddff,
-  /** Helligkeit */
-  intensity: 28,
-  /** Maximale Reichweite des Lichts (in Einheiten) */
-  distance: 18,
-  /** Kegelwinkel in Radiant (~31°) – relativ eng für "Scheinwerfer"-Look */
+  intensity: 80,
+  distance: 30,
   angle: 0.55,
-  /** Weichheit des Lichtkegel-Rands (0 = hart, 1 = sehr weich) */
   penumbra: 0.4,
-  /** Abfall des Lichts mit der Entfernung (1 = realistisch, 2 = dramatisch) */
-  decay: 1.5,
+  decay: 1.2,
 };
 
 // ---------------------------------------------------------------------------
@@ -86,9 +80,7 @@ export class SubmarineSpotlight {
 
     // Ziel 10 Einheiten vor der Kamera platzieren
     camera.getWorldDirection(this._dir);
-    this.target.position
-      .copy(this._pos)
-      .add(this._dir.multiplyScalar(10));
+    this.target.position.copy(this._pos).add(this._dir.multiplyScalar(10));
   }
 
   // -----------------------------------------------------------------------
