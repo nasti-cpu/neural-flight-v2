@@ -191,18 +191,10 @@ export class ChunkManager {
       }
     }
 
-    // --- Boden-Mesh: neu bauen wenn Spieler in neuen Chunk wechselt ---
-    const chunkChanged =
-      playerChunkX !== this._lastFloorChunkX ||
-      playerChunkZ !== this._lastFloorChunkZ;
-    if (!this.floorMesh || chunkChanged) {
-      if (this.floorMesh) {
-        this.scene.remove(this.floorMesh);
-        this.floorMesh.geometry?.dispose();
-      }
+    // --- Boden-Mesh: Einmal bauen, dann nur der Kamera folgen ---
+    // Der Nebel kaschiert das leichte Dünen-Wandern beim Verschieben.
+    if (!this.floorMesh) {
       this._buildFloorMesh(neededCoords);
-      this._lastFloorChunkX = playerChunkX;
-      this._lastFloorChunkZ = playerChunkZ;
     }
     if (!this.floorMesh) return;
     const cs = this.config.chunkSize;
