@@ -57,3 +57,8 @@ Jede Datei beginnt mit einem kurzen Kommentar, der beschreibt, was die Datei mac
 - mache immer das, wozu du aufgefordert wurdest
 - immer git check point machen vor änderungen
 - wenn ich dir Fragen stelle, beantworte diese zuerst bevor du weiter machst und frage dann ob du sie umsetzten sollst
+
+## Welten aufbau
+- nach dem Wavefunction Collapse Algorithm (WFC) Prinzip
+- mit Nebel damit man den Aufbau nicht sieht
+- performance ist prio 1

@@ -128,6 +128,8 @@ export async function setup(
     baseSpeed: 2,
   });
   player.rollYawMultiplier = 0;
+  // clampToTerrain deaktivieren – wir haben unseren eigenen Y-Clamp
+  player.minClearance = -1000;
   ctx.scene.add(player.rig);
 
   // =========================================================================
@@ -328,15 +330,17 @@ export function tick(
   // Player bewegen (fliegt automatisch vorwärts)
   s.player.tick(ctx.delta);
 
-  const { camera } = s;
-
   // Y-Begrenzung: nicht unter den Boden, nicht über die Wasseroberfläche
-  if (camera.position.y < WORLD_CONFIG.floorY + 0.5) {
-    camera.position.y = WORLD_CONFIG.floorY + 0.5;
+  // Wichtig: player.rig.position ist die Welt-Position, camera.position ist lokal!
+  const rigPos = s.player.rig.position;
+  if (rigPos.y < WORLD_CONFIG.floorY + 0.5) {
+    rigPos.y = WORLD_CONFIG.floorY + 0.5;
   }
-  if (camera.position.y > WORLD_CONFIG.waterY - 0.3) {
-    camera.position.y = WORLD_CONFIG.waterY - 0.3;
+  if (rigPos.y > WORLD_CONFIG.waterY - 0.3) {
+    rigPos.y = WORLD_CONFIG.waterY - 0.3;
   }
+
+  const { camera } = s;
 
   // =========================================================================
   // Tiefenabhängige Beleuchtung & Nebel (dunkler je tiefer)
