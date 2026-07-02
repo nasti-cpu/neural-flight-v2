@@ -119,10 +119,16 @@
                         window.removeEventListener("resize", onResize);
 
                     renderer.setAnimationLoop(() => {
-                        // delta cappen (verhindert Sprünge nach Tab-Wechsel)
+                        // delta = Zeit seit letztem Frame in Sekunden.
+                        // Nach Tab-Wechsel oder VR-Session-Start kann delta
+                        // riesig werden (>1s). Wir deckeln es auf 0.1s,
+                        // damit der Spieler nicht plötzlich 100m weit fliegt.
                         const delta = Math.min(clock.getDelta(), 0.1);
 
-                        // VR-Check: Nutze XR-Kamera während VR-Session aktiv ist
+                        // In VR zeigt die Brille zwei leicht versetzte Bilder
+                        // (eins pro Auge). Three.js verwaltet dafür eine eigene
+                        // XR-Kamera. Wir MÜSSEN sie nutzen, sonst sehen wir
+                        // in der Brille nichts.
                         const activeCam = renderer.xr.isPresenting
                             ? (renderer.xr.getCamera() as THREE.PerspectiveCamera)
                             : renderCamera;

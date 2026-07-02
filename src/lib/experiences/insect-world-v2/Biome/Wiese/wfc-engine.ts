@@ -155,8 +155,14 @@ export class WFCEngine {
   }
 
   /**
-   * Legt einen Tile-Typ manuell fest, bevor WFC läuft.
-   * Nützlich für Spawn-Chunk (garantiert Blumen am Start).
+   * Legt einen Tile-Typ manuell fest, BEVOR der WFC-Algorithmus läuft.
+   *
+   * Normalerweise bestimmt WFC den Chunk-Typ zufällig (gewichtet).
+   * Mit preSeed() können wir sagen: "Dieser eine Chunk soll GARANTIERT
+   * dieser Typ sein". Die Nachbar-Chunks passen sich dann automatisch
+   * an (Propagation).
+   *
+   * Beispiel: preSeed(0, 0, FLOWERS_DENSE) → Spawn-Chunk hat immer Blumen.
    */
   preSeed(gx: number, gz: number, tile: TileType): void {
     this.collapsed.set(`${gx},${gz}`, tile);

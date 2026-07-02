@@ -119,10 +119,20 @@ export class GrassManager {
 
   /**
    * Stellt sicher, dass der Spawn-Chunk (0,0) garantiert Blumen hat.
-   * Wird einmalig beim Setup aufgerufen, bevor update() läuft.
+   *
+   * Problem ohne diesen Aufruf:
+   * - Die WFC-Engine würfelt den Chunk-Typ zufällig
+   * - Nur ~34% der Chunks haben Blumen (FLOWERS_SPARSE/DENSE)
+   * - Der Spieler startet also meistens in einer leeren Wiese
+   *
+   * Lösung:
+   * - Wir sagen der WFC-Engine: "Chunk (0,0) = FLOWERS_DENSE"
+   * - Das sind 30 Blumen auf 80×80m, direkt beim Start sichtbar
+   * - Die umliegenden Chunks passen sich automatisch an (WFC-Propagation)
    */
   preSeedSpawn(): void {
-    // Spawn-Chunk = Chunk (0,0), soll immer FLOWERS_DENSE sein
+    // "flowers_dense" als String, weil TileType ein Enum ist
+    // (der Import des Enums würde eine zirkuläre Abhängigkeit erzeugen)
     this.wfc.preSeed(0, 0, "flowers_dense" as any);
   }
 

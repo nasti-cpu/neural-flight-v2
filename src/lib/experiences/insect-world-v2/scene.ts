@@ -91,12 +91,15 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     console.warn("[V2] Stadt konnte nicht geladen werden:", e);
   }
 
-  // Spawn-Chunk soll garantiert Blumen haben (FLOWERS_DENSE)
-  // → Wird vor dem ersten update() besät, damit die WFC richtig läuft
+  // 4b. Spawn-Chunk vorbereiten: Wir sagen der WFC-Engine,
+  // dass der Chunk an Position (0,0) auf jeden Fall FLOWERS_DENSE sein soll.
+  // Das garantiert, dass direkt beim Start Blumen zu sehen sind.
+  // Ohne diesen Aufruf wäre der Chunk-Typ zufällig (nur ~34% Chance auf Blumen).
   grassManager.preSeedSpawn();
 
-  // Initialen Chunk-Ladevorgang um den Startpunkt anstoßen,
-  // damit die ersten Blumen und Gräser sofort da sind.
+  // 4c. Ersten Chunk-Ladevorgang anstoßen.
+  // Der Spieler startet bei (0, 2, 0) → Chunk (0,0) wird geladen.
+  // Jetzt sind Gras, Boden und Blumen sofort sichtbar.
   grassManager.update(new THREE.Vector3(0, 2, 0));
 
   // 5. Bienen (fliegen von Blüte zu Blüte)
