@@ -59,6 +59,7 @@ Jede Datei beginnt mit einem kurzen Kommentar, der beschreibt, was die Datei mac
 - wenn ich dir Fragen stelle, beantworte diese zuerst bevor du weiter machst und frage dann ob du sie umsetzten sollst
 
 ## Welten aufbau
+- es soll eine sich immer weiter aufbauende welt sein und so undendlich wirken
 - nach dem Wavefunction Collapse Algorithm (WFC) Prinzip
 - mit Nebel damit man den Aufbau nicht sieht
 - performance ist prio 1

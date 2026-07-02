@@ -346,7 +346,7 @@ export function tick(
   // Tiefenabhängige Beleuchtung & Nebel (dunkler je tiefer)
   // =========================================================================
   const depthRange = WORLD_CONFIG.waterY - WORLD_CONFIG.floorY;
-  const surfaceT = (camera.position.y - WORLD_CONFIG.floorY) / depthRange;
+  const surfaceT = (rigPos.y - WORLD_CONFIG.floorY) / depthRange;
   const lightFactor = surfaceT * surfaceT;
 
   s.ambientLight.intensity = 0.6 + lightFactor * 1.2;
@@ -360,13 +360,13 @@ export function tick(
   // =========================================================================
   // Chunks aktualisieren (WFC-Collapse passiert automatisch bei neuen Chunks!)
   // =========================================================================
-  s.chunkManager.update(camera.position.x, camera.position.z);
+  s.chunkManager.update(rigPos.x, rigPos.z);
 
   // =========================================================================
   // Städte + Korallen (Lebenszyklus: laden, einblenden, ausblenden, entladen)
   // =========================================================================
-  s.cityWorld.update(ctx.delta, camera.position.x, camera.position.z);
-  s.coralReefWorld.update(ctx.delta, camera.position.x, camera.position.z);
+  s.cityWorld.update(ctx.delta, rigPos.x, rigPos.z);
+  s.coralReefWorld.update(ctx.delta, rigPos.x, rigPos.z);
 
   // =========================================================================
   // Leitsystem (zeigt den Weg zur nächsten Stadt)
@@ -374,7 +374,7 @@ export function tick(
   s.guidanceSystem.update(
     ctx.delta,
     ctx.elapsed,
-    camera.position,
+    rigPos,
     s.cityWorld.getActiveCityPositions(),
   );
 
@@ -386,14 +386,14 @@ export function tick(
   // =========================================================================
   // Biolumineszenz
   // =========================================================================
-  s.bioParticles.update(camera.position);
+  s.bioParticles.update(rigPos);
 
   // =========================================================================
   // Exklusionszonen für Kuppeln (Fische & Quallen & Seegras meiden Städte)
   // =========================================================================
   const exclusionZones = s.cityWorld.getExclusionZones();
-  s.fishWorld.setExclusionZones(exclusionZones, camera.position);
-  s.jellyWorld.setExclusionZones(exclusionZones, camera.position);
+  s.fishWorld.setExclusionZones(exclusionZones, rigPos);
+  s.jellyWorld.setExclusionZones(exclusionZones, rigPos);
   s.chunkManager.setExclusionZones(exclusionZones);
   s.coralReefWorld.setExclusionZones(exclusionZones);
 
@@ -403,10 +403,10 @@ export function tick(
   s.fishWorld.update(
     ctx.delta,
     ctx.elapsed,
-    camera.position,
+    rigPos,
     s.jellyWorld.getEchoTargets(),
   );
-  s.jellyWorld.update(ctx.delta, ctx.elapsed, camera.position);
+  s.jellyWorld.update(ctx.delta, ctx.elapsed, rigPos);
 
   // =========================================================================
   // Wasseroberfläche folgt der Kamera (sanft)
