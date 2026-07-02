@@ -55,6 +55,7 @@ interface CitySlot {
   height: number;
   opacity: number;
   lights: THREE.PointLight[];
+  _loading?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -244,8 +245,12 @@ export class CityWorld {
         break;
 
       case "ready":
-        if (dist < DIST_SHOW) {
-          this._showCity(slot);
+        if (dist < DIST_SHOW && !slot._loading) {
+          slot._loading = true;
+          requestAnimationFrame(() => {
+            this._showCity(slot);
+            slot._loading = false;
+          });
         } else if (dist > DIST_UNLOAD) {
           this._backToPending(slot);
         }

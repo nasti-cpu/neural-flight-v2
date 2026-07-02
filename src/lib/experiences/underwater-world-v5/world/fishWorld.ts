@@ -84,7 +84,7 @@ const DEFAULT_FISH_CONFIG: FishWorldConfig = {
   floorY: -4,
   waterY: 15,
   worldRadius: 50,
-  soloCount: 6,
+  soloCount: 12,
   fishMinSize: 1.2,
   fishMaxSize: 2.5,
   schoolIntervalMin: 20,
@@ -887,11 +887,11 @@ export class FishWorld {
         this._tmpColor
           .copy(fish.originalEmissive)
           .lerp(this._glowColor, fish.glowIntensity);
-        mat.emissive = this._tmpColor.clone();
+        mat.emissive.copy(this._tmpColor);
         mat.emissiveIntensity = 0.2 + fish.glowIntensity * 1.8;
       } else {
         const mat = fish.fishMesh.material as THREE.MeshStandardMaterial;
-        mat.emissive = fish.originalEmissive;
+        mat.emissive.copy(fish.originalEmissive!);
         mat.emissiveIntensity = 0;
       }
     }
@@ -905,7 +905,7 @@ export class FishWorld {
         this._tmpColor
           .copy(school.originalEmissive)
           .lerp(this._glowColor, school.glowIntensity);
-        mat.emissive = this._tmpColor.clone();
+        mat.emissive.copy(this._tmpColor);
         mat.emissiveIntensity = 0.2 + school.glowIntensity * 1.8;
       } else {
         const mat = school.instances.material as THREE.MeshStandardMaterial;

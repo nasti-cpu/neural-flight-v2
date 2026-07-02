@@ -37,7 +37,7 @@ export interface EchoTarget {
 const DEFAULT_CONFIG: EcholocationConfig = {
   ringMaxRadius: 30,
   ringSpeed: 5,
-  ringInterval: 6,
+  ringInterval: 2,
   ringColor: 0x44ccff,
   hitColor: 0xffcc44,
   tubeRadius: 0.002,
@@ -133,7 +133,7 @@ export class EcholocationRings {
     }
 
     // --- Jeden lebenden Ring animieren ---
-    const hitRangeHalf = 1.8;
+    const hitRangeHalf = 3.5;
     const hitRangeSq = hitRangeHalf * hitRangeHalf;
 
     for (let i = 0; i < this.ringCount; i++) {

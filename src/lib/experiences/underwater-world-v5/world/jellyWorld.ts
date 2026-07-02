@@ -93,6 +93,8 @@ export class JellyWorld {
   // --- Echoortungs-Glow (wie bei Fischen) ---
   private _glowColor = new THREE.Color(0xffaa00);
   private _tmpColor = new THREE.Color();
+  /** Merkt sich, ob überhaupt Glow aktiv ist (Performance-Optimierung) */
+  private _hasActiveGlow: boolean = false;
 
   constructor(scene: THREE.Scene, config?: Partial<JellyWorldConfig>) {
     this.scene = scene;
@@ -122,7 +124,9 @@ export class JellyWorld {
       for (const member of group.members) {
         this._cachedEchoTargets.push({
           position: member.jelly.group.position,
-          onHit: () => { member.glowIntensity = 1.0; },
+          onHit: () => {
+            member.glowIntensity = 1.0;
+          },
         });
       }
     }
@@ -133,7 +137,11 @@ export class JellyWorld {
    * Prüft, ob eine (x, z)-Position innerhalb einer Exklusionszone liegt.
    * @param margin – Zusätzlicher Sicherheitsabstand
    */
-  private _isInExclusionZone(x: number, z: number, margin: number = 0): boolean {
+  private _isInExclusionZone(
+    x: number,
+    z: number,
+    margin: number = 0,
+  ): boolean {
     for (const zone of this._exclusionZones) {
       const dx = x - zone.centerX;
       const dz = z - zone.centerZ;
@@ -174,21 +182,30 @@ export class JellyWorld {
     this._manageVisibility(cameraPos);
 
     // --- Echoortungs-Glow: exponentieller Abfall ---
-    const decay = Math.exp(-3.0 * delta);
-    for (const group of this.groups) {
-      for (const member of group.members) {
-        if (member.glowIntensity < 0.01) continue;
-        const mat = member.jelly.bell.material as THREE.MeshPhysicalMaterial;
-        member.glowIntensity *= decay;
-        if (member.glowIntensity > 0.01) {
-          this._tmpColor
-            .copy(member.originalEmissive ?? new THREE.Color(0x000000))
-            .lerp(this._glowColor, member.glowIntensity);
-          mat.emissive = this._tmpColor.clone();
-          mat.emissiveIntensity = 0.2 + member.glowIntensity * 1.8;
-        } else {
-          mat.emissive = member.originalEmissive ?? new THREE.Color(0x000000);
-          mat.emissiveIntensity = 0;
+    // Performance: nur weitermachen, wenn überhaupt Glow aktiv ist
+    if (this._hasActiveGlow) {
+      const decay = Math.exp(-3.0 * delta);
+      this._hasActiveGlow = false;
+      for (const group of this.groups) {
+        for (const member of group.members) {
+          if (member.glowIntensity < 0.01) continue;
+          member.glowIntensity *= decay;
+          if (member.glowIntensity > 0.01) {
+            this._hasActiveGlow = true;
+            const mat = member.jelly.bell
+              .material as THREE.MeshPhysicalMaterial;
+            this._tmpColor
+              .copy(member.originalEmissive ?? this._tmpColor.set(0x000000))
+              .lerp(this._glowColor, member.glowIntensity);
+            mat.emissive.copy(this._tmpColor);
+            mat.emissiveIntensity = 0.2 + member.glowIntensity * 1.8;
+          } else {
+            const mat = member.jelly.bell
+              .material as THREE.MeshPhysicalMaterial;
+            if (member.originalEmissive)
+              mat.emissive.copy(member.originalEmissive);
+            mat.emissiveIntensity = 0;
+          }
         }
       }
     }
@@ -223,7 +240,8 @@ export class JellyWorld {
     do {
       const angle = Math.random() * Math.PI * 2;
       const dist =
-        cfg.spawnMinDist + Math.random() * (cfg.spawnMaxDist - cfg.spawnMinDist);
+        cfg.spawnMinDist +
+        Math.random() * (cfg.spawnMaxDist - cfg.spawnMinDist);
       cx = cameraPos.x + Math.cos(angle) * dist;
       cz = cameraPos.z + Math.sin(angle) * dist;
       attempts++;
@@ -234,9 +252,7 @@ export class JellyWorld {
     );
 
     const baseY =
-      cfg.floorY +
-      1.5 +
-      Math.random() * (cfg.waterY - cfg.floorY - 3);
+      cfg.floorY + 1.5 + Math.random() * (cfg.waterY - cfg.floorY - 3);
 
     // Gruppengröße: 1 oder 3 (max. 3 Quallen insgesamt)
     const sizeRoll = Math.random();
@@ -372,7 +388,13 @@ export class JellyWorld {
       member.jelly.group.position.z = oz;
 
       const jellyElapsed = elapsed + member.animPhase;
-      animateProceduralJelly(member.jelly, jellyElapsed, delta, MOON_PARAMS, false);
+      animateProceduralJelly(
+        member.jelly,
+        jellyElapsed,
+        delta,
+        MOON_PARAMS,
+        false,
+      );
 
       // Y-Position setzen: animateProceduralJelly setzt group.position.y auf
       // lift + depthWave (relativ) – wir addieren baseY + yOffset für die Welt-Position
@@ -432,10 +454,7 @@ export class JellyWorld {
   // Private: Gruppe an neue Position versetzen (wie Fisch-Respawn)
   // -----------------------------------------------------------------------
 
-  private _repositionGroup(
-    group: JellyGroup,
-    cameraPos: THREE.Vector3,
-  ): void {
+  private _repositionGroup(group: JellyGroup, cameraPos: THREE.Vector3): void {
     const cfg = this.config;
 
     // Neue Position außerhalb aller Exklusionszonen suchen
@@ -445,7 +464,8 @@ export class JellyWorld {
     do {
       const angle = Math.random() * Math.PI * 2;
       const dist =
-        cfg.spawnMinDist + Math.random() * (cfg.spawnMaxDist - cfg.spawnMinDist);
+        cfg.spawnMinDist +
+        Math.random() * (cfg.spawnMaxDist - cfg.spawnMinDist);
       cx = cameraPos.x + Math.cos(angle) * dist;
       cz = cameraPos.z + Math.sin(angle) * dist;
       attempts++;
@@ -456,9 +476,7 @@ export class JellyWorld {
     );
 
     const baseY =
-      cfg.floorY +
-      1.5 +
-      Math.random() * (cfg.waterY - cfg.floorY - 3);
+      cfg.floorY + 1.5 + Math.random() * (cfg.waterY - cfg.floorY - 3);
 
     group.centerX = cx;
     group.centerZ = cz;
@@ -467,7 +485,8 @@ export class JellyWorld {
 
     for (let i = 0; i < group.members.length; i++) {
       const member = group.members[i];
-      member.angle = (i / group.members.length) * Math.PI * 2 + Math.random() * 0.5;
+      member.angle =
+        (i / group.members.length) * Math.PI * 2 + Math.random() * 0.5;
       member.orbitRadius = 0.8 + Math.random() * 1.2;
       member.yOffset = (Math.random() - 0.5) * 1.0;
       member.animPhase = Math.random() * Math.PI * 2;
