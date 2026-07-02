@@ -97,6 +97,12 @@
                     (exp.state.camera as THREE.PerspectiveCamera | undefined) ??
                     dummyCamera;
 
+                /**
+                 * Aktualisiert die Kamera-Aspect-Ratio beim Fenster-Resize.
+                 * Wird auch beim Start einmal aufgerufen, damit die Kamera
+                 * sofort die richtige Perspektive hat (sonst wirkt alles
+                 * langgezogen, weil der Initial-Wert 1 ist).
+                 */
                 function onResize(): void {
                     renderCamera.aspect =
                         window.innerWidth / window.innerHeight;
@@ -104,6 +110,10 @@
                     renderer.setSize(window.innerWidth, window.innerHeight);
                 }
                 window.addEventListener("resize", onResize);
+
+                // ✨ Beim Start einmal ausführen, damit die Aspect Ratio
+                //    zur Fenstergröße passt und nichts gestreckt aussieht.
+                onResize();
                 removeResizeListener = () =>
                     window.removeEventListener("resize", onResize);
 
