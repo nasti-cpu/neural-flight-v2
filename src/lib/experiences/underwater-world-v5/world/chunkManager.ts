@@ -48,6 +48,10 @@ export class ChunkManager {
   /** Das EINE Boden-Mesh, das alle Chunks abdeckt */
   private floorMesh: THREE.Mesh | null = null;
 
+  /** Letzter Chunk, für den das Boden-Mesh gebaut wurde */
+  private _lastFloorChunkX: number = Number.NaN;
+  private _lastFloorChunkZ: number = Number.NaN;
+
   /** Exklusionszonen – hier wächst kein Seegras */
   private _exclusionZones: ExclusionZone[] = [];
   /** Letzter Zonen-String zum Erkennen von Änderungen */
@@ -73,7 +77,10 @@ export class ChunkManager {
    */
   setExclusionZones(zones: ExclusionZone[]): void {
     const newKey = zones
-      .map((z) => `${z.centerX.toFixed(2)},${z.centerZ.toFixed(2)},${z.radius.toFixed(2)}`)
+      .map(
+        (z) =>
+          `${z.centerX.toFixed(2)},${z.centerZ.toFixed(2)},${z.radius.toFixed(2)}`,
+      )
       .join("|");
     const changed = newKey !== this._lastZoneKey;
 
@@ -164,9 +171,18 @@ export class ChunkManager {
       }
     }
 
-    // --- Boden-Mesh: Einmal bauen, dann nur der Kamera folgen ---
-    if (!this.floorMesh) {
+    // --- Boden-Mesh: neu bauen wenn Spieler in neuen Chunk wechselt ---
+    const chunkChanged =
+      playerChunkX !== this._lastFloorChunkX ||
+      playerChunkZ !== this._lastFloorChunkZ;
+    if (!this.floorMesh || chunkChanged) {
+      if (this.floorMesh) {
+        this.scene.remove(this.floorMesh);
+        this.floorMesh.geometry?.dispose();
+      }
       this._buildFloorMesh(neededCoords);
+      this._lastFloorChunkX = playerChunkX;
+      this._lastFloorChunkZ = playerChunkZ;
     }
     if (!this.floorMesh) return;
     const cs = this.config.chunkSize;
