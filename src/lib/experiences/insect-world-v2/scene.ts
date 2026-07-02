@@ -91,13 +91,17 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     console.warn("[V2] Stadt konnte nicht geladen werden:", e);
   }
 
+  // Spawn-Chunk soll garantiert Blumen haben (FLOWERS_DENSE)
+  // → Wird vor dem ersten update() besät, damit die WFC richtig läuft
+  grassManager.preSeedSpawn();
+
   // Initialen Chunk-Ladevorgang um den Startpunkt anstoßen,
   // damit die ersten Blumen und Gräser sofort da sind.
   grassManager.update(new THREE.Vector3(0, 2, 0));
 
   // 5. Bienen (fliegen von Blüte zu Blüte)
   const bees = await createBees(beeGlbUrl, {
-    count: 10,
+    count: 20,
     scale: 0.04,
     fieldRadius: 200,
     flyRadiusMin: 1,
@@ -114,7 +118,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 
   // 6. Schmetterlinge (fliegen von Blüte zu Blüte)
   const butterflies = await createButterflies(butterflyGlbUrl, {
-    count: 6,
+    count: 12,
     scale: 0.036,
     fieldRadius: 200,
     flyRadiusMin: 1,

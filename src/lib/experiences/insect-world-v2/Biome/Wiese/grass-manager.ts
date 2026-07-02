@@ -39,7 +39,7 @@ import type { PreloadedFlower } from "../../Objekte/Blumen/blumen";
 // ── Konstanten ──
 
 const CHUNK_SIZE = 80; // Größe eines Chunks in Metern
-const VIEW_RADIUS = 1; // Wie viele Chunks um den Spieler herum geladen werden (1 = 3×3 = 9 Chunks)
+const VIEW_RADIUS = 2; // Wie viele Chunks um den Spieler herum geladen werden (2 = 5×5 = 25 Chunks)
 
 // ── Hilfsfunktion: Welthöhe (sanfte Mulde um den Ursprung) ──
 
@@ -115,6 +115,15 @@ export class GrassManager {
 
     // ── Gemeinsames Material für den Boden ──
     this.groundMat = this.createGroundMaterial();
+  }
+
+  /**
+   * Stellt sicher, dass der Spawn-Chunk (0,0) garantiert Blumen hat.
+   * Wird einmalig beim Setup aufgerufen, bevor update() läuft.
+   */
+  preSeedSpawn(): void {
+    // Spawn-Chunk = Chunk (0,0), soll immer FLOWERS_DENSE sein
+    this.wfc.preSeed(0, 0, "flowers_dense" as any);
   }
 
   /**

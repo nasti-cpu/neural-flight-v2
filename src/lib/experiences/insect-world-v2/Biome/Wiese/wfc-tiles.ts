@@ -18,16 +18,16 @@
  * Jeder bestimmt, was in einem 80×80m-Chunk wächst.
  */
 export enum TileType {
-	/** Kahle Fläche (kaum Gras, keine Blumen) */
-	EMPTY = "empty",
-	/** Normale Wiese mit Gras */
-	MEADOW = "meadow",
-	/** Wiese mit ein paar Blumen */
-	FLOWERS_SPARSE = "flowers_sparse",
-	/** Wiese mit vielen Blumen (Blütenwiese) */
-	FLOWERS_DENSE = "flowers_dense",
-	/** Hohes Gras (keine Blumen) */
-	TALL_GRASS = "tall_grass",
+  /** Kahle Fläche (kaum Gras, keine Blumen) */
+  EMPTY = "empty",
+  /** Normale Wiese mit Gras */
+  MEADOW = "meadow",
+  /** Wiese mit ein paar Blumen */
+  FLOWERS_SPARSE = "flowers_sparse",
+  /** Wiese mit vielen Blumen (Blütenwiese) */
+  FLOWERS_DENSE = "flowers_dense",
+  /** Hohes Gras (keine Blumen) */
+  TALL_GRASS = "tall_grass",
 }
 
 /**
@@ -39,31 +39,20 @@ export enum TileType {
  * in A's Erlaubnis-Liste sein (symmetrische Regel).
  */
 export const ADJACENCY_RULES: Record<TileType, TileType[]> = {
-	[TileType.EMPTY]: [
-		TileType.EMPTY,
-		TileType.MEADOW,
-		TileType.TALL_GRASS,
-	],
-	[TileType.MEADOW]: [
-		TileType.EMPTY,
-		TileType.MEADOW,
-		TileType.FLOWERS_SPARSE,
-		TileType.TALL_GRASS,
-	],
-	[TileType.FLOWERS_SPARSE]: [
-		TileType.MEADOW,
-		TileType.FLOWERS_SPARSE,
-		TileType.FLOWERS_DENSE,
-	],
-	[TileType.FLOWERS_DENSE]: [
-		TileType.FLOWERS_SPARSE,
-		TileType.FLOWERS_DENSE,
-	],
-	[TileType.TALL_GRASS]: [
-		TileType.EMPTY,
-		TileType.MEADOW,
-		TileType.TALL_GRASS,
-	],
+  [TileType.EMPTY]: [TileType.EMPTY, TileType.MEADOW, TileType.TALL_GRASS],
+  [TileType.MEADOW]: [
+    TileType.EMPTY,
+    TileType.MEADOW,
+    TileType.FLOWERS_SPARSE,
+    TileType.TALL_GRASS,
+  ],
+  [TileType.FLOWERS_SPARSE]: [
+    TileType.MEADOW,
+    TileType.FLOWERS_SPARSE,
+    TileType.FLOWERS_DENSE,
+  ],
+  [TileType.FLOWERS_DENSE]: [TileType.FLOWERS_SPARSE, TileType.FLOWERS_DENSE],
+  [TileType.TALL_GRASS]: [TileType.EMPTY, TileType.MEADOW, TileType.TALL_GRASS],
 };
 
 /**
@@ -73,11 +62,11 @@ export const ADJACENCY_RULES: Record<TileType, TileType[]> = {
  * ausgewählt wird. Höheres Gewicht = häufigeres Vorkommen.
  */
 export const TILE_WEIGHTS: Record<TileType, number> = {
-	[TileType.EMPTY]: 2,
-	[TileType.MEADOW]: 8,
-	[TileType.FLOWERS_SPARSE]: 5,
-	[TileType.FLOWERS_DENSE]: 2,
-	[TileType.TALL_GRASS]: 4,
+  [TileType.EMPTY]: 2,
+  [TileType.MEADOW]: 8,
+  [TileType.FLOWERS_SPARSE]: 5,
+  [TileType.FLOWERS_DENSE]: 2,
+  [TileType.TALL_GRASS]: 4,
 };
 
 /**
@@ -85,14 +74,14 @@ export const TILE_WEIGHTS: Record<TileType, number> = {
  * Bestimmt, wieviel Gras und Blumen generiert werden.
  */
 export interface TileContent {
-	/** Anzahl Grashalme im Chunk (0 = kein Gras) */
-	grassCount: number;
-	/** Anzahl Blumen im Chunk (0 = keine Blumen) */
-	flowerCount: number;
-	/** Minimale Grashöhe */
-	grassMinHeight: number;
-	/** Maximale Grashöhe */
-	grassMaxHeight: number;
+  /** Anzahl Grashalme im Chunk (0 = kein Gras) */
+  grassCount: number;
+  /** Anzahl Blumen im Chunk (0 = keine Blumen) */
+  flowerCount: number;
+  /** Minimale Grashöhe */
+  grassMinHeight: number;
+  /** Maximale Grashöhe */
+  grassMaxHeight: number;
 }
 
 /**
@@ -104,36 +93,36 @@ export interface TileContent {
  * EMPTY → fast nichts (Sand/Stein)
  */
 export const TILE_CONTENT: Record<TileType, TileContent> = {
-	[TileType.EMPTY]: {
-		grassCount: 200,
-		flowerCount: 0,
-		grassMinHeight: 0.1,
-		grassMaxHeight: 0.3,
-	},
-	[TileType.MEADOW]: {
-		grassCount: 6000,
-		flowerCount: 0,
-		grassMinHeight: 0.6,
-		grassMaxHeight: 1.8,
-	},
-	[TileType.FLOWERS_SPARSE]: {
-		grassCount: 4000,
-		flowerCount: 4,
-		grassMinHeight: 0.6,
-		grassMaxHeight: 1.8,
-	},
-	[TileType.FLOWERS_DENSE]: {
-		grassCount: 3000,
-		flowerCount: 12,
-		grassMinHeight: 0.6,
-		grassMaxHeight: 1.8,
-	},
-	[TileType.TALL_GRASS]: {
-		grassCount: 8000,
-		flowerCount: 0,
-		grassMinHeight: 1.2,
-		grassMaxHeight: 2.5,
-	},
+  [TileType.EMPTY]: {
+    grassCount: 200,
+    flowerCount: 0,
+    grassMinHeight: 0.1,
+    grassMaxHeight: 0.3,
+  },
+  [TileType.MEADOW]: {
+    grassCount: 6000,
+    flowerCount: 0,
+    grassMinHeight: 0.6,
+    grassMaxHeight: 1.8,
+  },
+  [TileType.FLOWERS_SPARSE]: {
+    grassCount: 3500,
+    flowerCount: 12,
+    grassMinHeight: 0.6,
+    grassMaxHeight: 1.8,
+  },
+  [TileType.FLOWERS_DENSE]: {
+    grassCount: 2500,
+    flowerCount: 30,
+    grassMinHeight: 0.6,
+    grassMaxHeight: 1.8,
+  },
+  [TileType.TALL_GRASS]: {
+    grassCount: 8000,
+    flowerCount: 0,
+    grassMinHeight: 1.2,
+    grassMaxHeight: 2.5,
+  },
 };
 
 /**
@@ -145,5 +134,5 @@ export const ALL_TILE_TYPES: TileType[] = Object.values(TileType);
  * Maximale Anzahl Blumen pro Chunk (für Buffer-Allokation).
  */
 export const MAX_FLOWERS_PER_CHUNK = Math.max(
-	...Object.values(TILE_CONTENT).map((c) => c.flowerCount),
+  ...Object.values(TILE_CONTENT).map((c) => c.flowerCount),
 );
