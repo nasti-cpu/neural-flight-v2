@@ -19,7 +19,10 @@
 import * as THREE from "three/webgpu";
 import type { ExperienceState, SetupContext, TickContext } from "../types";
 import { FlightPlayer } from "$lib/three/player";
-import { createWaterSurface } from "$lib/experiences/underwater-world-v5/shader/wasser/wasserShader";
+import {
+  createWaterSurface,
+  createGodRay,
+} from "$lib/experiences/underwater-world-v5/shader/wasser/wasserShader";
 import {
   uniform,
   vec3,
@@ -60,17 +63,24 @@ export interface UnderwaterWorldV5State extends ExperienceState {
 
   // Visuelle Elemente
   waterSurface: THREE.Mesh;
+  godRays: Array<{ mesh: THREE.Mesh; offsetX: number; offsetZ: number }>;
   particles: THREE.Points;
   particlePositions: THREE.BufferAttribute;
   particleArr: Float32Array;
 
-  // Szene-Referenzen für sauberes Cleanup
+  // Beleuchtung & Nebel (für dynamische Tiefen-Anpassung)
+  ambientLight: THREE.AmbientLight;
+  sunLight: THREE.DirectionalLight;
+  fillLight: THREE.DirectionalLight;
+  sceneFog: THREE.Fog;
+
+  // Szene-Referenz für sauberes Cleanup
   _scene: THREE.Scene;
   _frameCount: number;
 }
 
 // ---------------------------------------------------------------------------
-// Welt-Konfiguration
+// Welt-Konfiguration (Tiefsee – dunkel, neblig)
 // ---------------------------------------------------------------------------
 
 const WORLD_CONFIG = {
@@ -79,33 +89,53 @@ const WORLD_CONFIG = {
   chunkSize: 16,
   renderDistance: 2,
   seegrassCount: 10,
+
   waterY: 22,
   waterSize: 100,
   waterSegments: 70,
+
+  godRayCount: 0,
+  godRayHeight: 27,
+
   particleCount: 400,
 };
 
 const PARTICLE_BOX = 40;
 
 // ---------------------------------------------------------------------------
-// setup – Initialisiert die gesamte Unterwasserwelt
+// setup – Initialisiert die gesamte Tiefsee-Unterwasserwelt
 // ---------------------------------------------------------------------------
 
 export async function setup(
   ctx: SetupContext,
 ): Promise<UnderwaterWorldV5State> {
-  // --- 1. FlightPlayer für fliegende Bewegung ---
+  // =========================================================================
+  // 0. Tiefsee-Nebel überschreiben (der Loader setzt Manifest-Werte,
+  //    aber wir wollen engen, dunklen Tiefsee-Nebel wie in V4)
+  // =========================================================================
+  ctx.scene.background = new THREE.Color("#000814");
+  const sceneFog = new THREE.Fog("#000814", 4, 24);
+  ctx.scene.fog = sceneFog;
+
+  // =========================================================================
+  // 1. FlightPlayer für fliegende Bewegung
+  // =========================================================================
   const player = new FlightPlayer({
     fov: 75,
     near: 0.1,
-    far: 600,
+    far: 80, // Kamera-Far-Clip passend zum Nebel
     spawnPosition: { x: 0, y: 4, z: 0 },
     baseSpeed: 2,
   });
   player.rollYawMultiplier = 0;
   ctx.scene.add(player.rig);
 
-  // --- 2. Beleuchtung (Tiefsee-Stimmung) ---
+  // =========================================================================
+  // 2. Tiefsee-Beleuchtung (eigene Lichter, nicht die vom Loader)
+  // =========================================================================
+  // Loader-Lichter entfernen (wir machen unser eigenes Setup)
+  _removeLoaderLights(ctx.scene);
+
   const ambientLight = new THREE.AmbientLight("#1a3355", 1.2);
   ctx.scene.add(ambientLight);
   const sunLight = new THREE.DirectionalLight("#3366aa", 1.5);
@@ -115,7 +145,9 @@ export async function setup(
   fillLight.position.set(-4, 2, -3);
   ctx.scene.add(fillLight);
 
-  // --- 3. Wasseroberfläche ---
+  // =========================================================================
+  // 3. Wasseroberfläche (von unten gesehen, mit Wellen)
+  // =========================================================================
   const waterSurface = createWaterSurface(
     {
       waveAmplitude: 0.45,
@@ -130,7 +162,15 @@ export async function setup(
   waterSurface.position.y = WORLD_CONFIG.waterY;
   ctx.scene.add(waterSurface);
 
-  // --- 4. Biolumineszente Partikel ---
+  // =========================================================================
+  // 4. God Rays (deaktiviert für Tiefsee, aber Struktur bleibt)
+  // =========================================================================
+  const godRays: Array<{ mesh: THREE.Mesh; offsetX: number; offsetZ: number }> =
+    [];
+
+  // =========================================================================
+  // 5. Biolumineszente Partikel (schwebendes Plankton)
+  // =========================================================================
   const particleMat = new PointsNodeMaterial();
   particleMat.transparent = true;
   particleMat.blending = THREE.AdditiveBlending;
@@ -171,7 +211,9 @@ export async function setup(
   ) as THREE.BufferAttribute;
   const particleArr = particlePositions.array as Float32Array;
 
-  // --- 5. Chunk-Manager (mit WFC-Integration!) ---
+  // =========================================================================
+  // 6. Chunk-Manager (mit WFC-Integration!)
+  // =========================================================================
   const chunkConfig: ChunkManagerConfig = {
     chunkSize: WORLD_CONFIG.chunkSize,
     floorY: WORLD_CONFIG.floorY,
@@ -181,7 +223,9 @@ export async function setup(
   };
   const chunkManager = new ChunkManager(ctx.scene, chunkConfig);
 
-  // --- 6. Fisch-System ---
+  // =========================================================================
+  // 7. Fisch-System
+  // =========================================================================
   const fishWorld = new FishWorld(ctx.scene, {
     floorY: WORLD_CONFIG.floorY,
     waterY: WORLD_CONFIG.waterY,
@@ -189,32 +233,45 @@ export async function setup(
   });
   await fishWorld.init(player.camera.position);
 
-  // --- 7. Quallen-System ---
+  // =========================================================================
+  // 8. Quallen-System
+  // =========================================================================
   const jellyWorld = new JellyWorld(ctx.scene, {
     floorY: WORLD_CONFIG.floorY,
     waterY: WORLD_CONFIG.waterY,
   });
   await jellyWorld.init(player.camera.position);
 
-  // --- 8. Stadtmodelle (City-World, nutzt WFC-Typen!) ---
+  // =========================================================================
+  // 9. Stadtmodelle
+  // =========================================================================
   const cityWorld = new CityWorld(ctx.scene, WORLD_CONFIG.floorY);
   await cityWorld.init();
 
-  // --- 9. Korallenriffe ---
+  // =========================================================================
+  // 10. Korallenriffe
+  // =========================================================================
   const coralReefWorld = new CoralReefWorld(ctx.scene, WORLD_CONFIG.floorY);
   await coralReefWorld.init();
 
-  // --- 10. Leitsystem ---
+  // =========================================================================
+  // 11. Leitsystem
+  // =========================================================================
   const guidanceSystem = new GuidanceSystem(ctx.scene, WORLD_CONFIG.floorY);
 
-  // --- 11. Unterwasser-Scheinwerfer ---
+  // =========================================================================
+  // 12. Unterwasser-Scheinwerfer
+  // =========================================================================
   const submarineSpotlight = new SubmarineSpotlight(ctx.scene);
 
-  // --- 12. Biolumineszenz ---
+  // =========================================================================
+  // 13. Biolumineszenz
+  // =========================================================================
   const bioParticles = new BioParticles(ctx.scene);
 
   console.log("🌊 Underwater World V5 gestartet! (WFC-gesteuert)");
   console.log("   🧠 WFC bestimmt die Weltverteilung von Städten & Riffen");
+  console.log("   🌫️  Dynamischer Tiefsee-Nebel + Beleuchtung");
   console.log("   🐟 Fische + Schwärme | 🪼 Quallen | 🏙️ Städte | 🪸 Korallen");
   console.log("   🧭 Leitsystem | 🔦 Scheinwerfer | ✨ Biolumineszenz");
 
@@ -230,9 +287,14 @@ export async function setup(
     submarineSpotlight,
     bioParticles,
     waterSurface,
+    godRays,
     particles,
     particlePositions,
     particleArr,
+    ambientLight,
+    sunLight,
+    fillLight,
+    sceneFog,
     _scene: ctx.scene,
     _frameCount: 0,
   };
@@ -253,17 +315,35 @@ export function tick(
 
   const { camera } = s;
 
-  // Tiefenabhängige Beleuchtung (wird dunkler, je tiefer man taucht)
-  _updateDepthLighting(s);
+  // =========================================================================
+  // Tiefenabhängige Beleuchtung & Nebel (dunkler je tiefer)
+  // =========================================================================
+  const depthRange = WORLD_CONFIG.waterY - WORLD_CONFIG.floorY;
+  const surfaceT = (camera.position.y - WORLD_CONFIG.floorY) / depthRange;
+  const lightFactor = surfaceT * surfaceT;
 
+  s.ambientLight.intensity = 0.6 + lightFactor * 1.2;
+  s.sunLight.intensity = 0.8 + lightFactor * 2.7;
+  s.fillLight.intensity = 0.3 + lightFactor * 0.9;
+
+  // Dynamischer Nebel: oben weiter, unten enger
+  s.sceneFog.near = 4 + lightFactor * 8;
+  s.sceneFog.far = 24 + lightFactor * 40;
+
+  // =========================================================================
   // Chunks aktualisieren (WFC-Collapse passiert automatisch bei neuen Chunks!)
+  // =========================================================================
   s.chunkManager.update(camera.position.x, camera.position.z);
 
+  // =========================================================================
   // Städte + Korallen (Lebenszyklus: laden, einblenden, ausblenden, entladen)
+  // =========================================================================
   s.cityWorld.update(ctx.delta, camera.position.x, camera.position.z);
   s.coralReefWorld.update(ctx.delta, camera.position.x, camera.position.z);
 
+  // =========================================================================
   // Leitsystem (zeigt den Weg zur nächsten Stadt)
+  // =========================================================================
   s.guidanceSystem.update(
     ctx.delta,
     ctx.elapsed,
@@ -271,20 +351,28 @@ export function tick(
     s.cityWorld.getActiveCityPositions(),
   );
 
+  // =========================================================================
   // Scheinwerfer folgt der Kamera
+  // =========================================================================
   s.submarineSpotlight.update(camera);
 
+  // =========================================================================
   // Biolumineszenz
+  // =========================================================================
   s.bioParticles.update(camera.position);
 
+  // =========================================================================
   // Exklusionszonen für Kuppeln (Fische & Quallen & Seegras meiden Städte)
+  // =========================================================================
   const exclusionZones = s.cityWorld.getExclusionZones();
   s.fishWorld.setExclusionZones(exclusionZones, camera.position);
   s.jellyWorld.setExclusionZones(exclusionZones, camera.position);
   s.chunkManager.setExclusionZones(exclusionZones);
   s.coralReefWorld.setExclusionZones(exclusionZones);
 
+  // =========================================================================
   // Fische + Quallen aktualisieren
+  // =========================================================================
   s.fishWorld.update(
     ctx.delta,
     ctx.elapsed,
@@ -293,10 +381,14 @@ export function tick(
   );
   s.jellyWorld.update(ctx.delta, ctx.elapsed, camera.position);
 
+  // =========================================================================
   // Wasseroberfläche folgt der Kamera (sanft)
+  // =========================================================================
   _updateWaterPosition(s);
 
+  // =========================================================================
   // Partikel-Wrap-Around (um die Kamera herum)
+  // =========================================================================
   _updateParticles(s, camera);
 
   return { state: s };
@@ -310,6 +402,8 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
   const s = state as UnderwaterWorldV5State;
 
   scene.remove(s.player.rig);
+
+  s.godRays.length = 0;
 
   s.chunkManager.dispose();
   s.fishWorld.dispose();
@@ -339,23 +433,26 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 // Private Hilfsfunktionen (kurz, <20 Zeilen, eine Aufgabe pro Funktion)
 // ---------------------------------------------------------------------------
 
-/** Passt die Beleuchtung an die Tiefe des Spielers an */
-function _updateDepthLighting(s: UnderwaterWorldV5State): void {
-  const depthRange = WORLD_CONFIG.waterY - WORLD_CONFIG.floorY;
-  const surfaceT = (s.camera.position.y - WORLD_CONFIG.floorY) / depthRange;
-  const lightFactor = surfaceT * surfaceT;
-
-  // Wir greifen auf die Ambient/Directional-Lights zu, die in setup erstellt wurden
-  // und noch in der Szene hängen
-  s._scene.traverse((obj) => {
-    if (obj instanceof THREE.AmbientLight) {
-      obj.intensity = 0.6 + lightFactor * 1.2;
-    } else if (obj instanceof THREE.DirectionalLight && obj.position.y > 5) {
-      obj.intensity = 0.8 + lightFactor * 2.7;
-    } else if (obj instanceof THREE.DirectionalLight && obj.position.y < 5) {
-      obj.intensity = 0.3 + lightFactor * 0.9;
+/**
+ * Entfernt die vom Loader erstellten Lichter, weil wir eigene
+ * Tiefsee-Beleuchtung brauchen. Der Loader erstellt Ambient + Sun.
+ */
+function _removeLoaderLights(scene: THREE.Scene): void {
+  const toRemove: THREE.Object3D[] = [];
+  scene.traverse((obj) => {
+    if (
+      obj instanceof THREE.AmbientLight ||
+      obj instanceof THREE.DirectionalLight
+    ) {
+      toRemove.push(obj);
     }
   });
+  for (const obj of toRemove) {
+    scene.remove(obj);
+    if (obj instanceof THREE.Light) {
+      obj.dispose();
+    }
+  }
 }
 
 /** Wasseroberfläche folgt der Kamera sanft */
