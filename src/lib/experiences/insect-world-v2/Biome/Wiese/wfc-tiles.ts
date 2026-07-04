@@ -94,31 +94,31 @@ export interface TileContent {
  */
 export const TILE_CONTENT: Record<TileType, TileContent> = {
   [TileType.EMPTY]: {
-    grassCount: 200,
+    grassCount: 6000,
     flowerCount: 0,
     grassMinHeight: 0.1,
     grassMaxHeight: 0.3,
   },
   [TileType.MEADOW]: {
-    grassCount: 6000,
+    grassCount: 60000,
     flowerCount: 0,
     grassMinHeight: 0.6,
     grassMaxHeight: 1.8,
   },
   [TileType.FLOWERS_SPARSE]: {
-    grassCount: 3500,
+    grassCount: 36000,
     flowerCount: 12,
     grassMinHeight: 0.6,
     grassMaxHeight: 1.8,
   },
   [TileType.FLOWERS_DENSE]: {
-    grassCount: 2500,
+    grassCount: 24000,
     flowerCount: 30,
     grassMinHeight: 0.6,
     grassMaxHeight: 1.8,
   },
   [TileType.TALL_GRASS]: {
-    grassCount: 8000,
+    grassCount: 80000,
     flowerCount: 0,
     grassMinHeight: 1.2,
     grassMaxHeight: 2.5,
