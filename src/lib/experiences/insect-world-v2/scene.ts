@@ -144,7 +144,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     position: pos,
     color: grassManager.flowerColors[i] ?? new THREE.Color(0xffffff),
   }));
-  pheromones.addTrails(pheromoneTargets);
+  pheromones.addTrails(pheromoneTargets, ctx.camera.position);
   ctx.scene.add(pheromones.group);
 
   // Kamera positionieren (Insektenperspektive ~2m)

@@ -183,7 +183,10 @@ export class PheromoneSystem {
     this.variantIndex = Math.max(0, Math.min(index, VARIANTS.length - 1));
   }
 
-  addTrails(flowers: FlowerTarget[]): void {
+  addTrails(
+    flowers: FlowerTarget[],
+    playerPosition: THREE.Vector3 = new THREE.Vector3(0, 2, 0),
+  ): void {
     this.clearTrails();
     const v = VARIANTS[this.variantIndex];
     for (
@@ -191,34 +194,57 @@ export class PheromoneSystem {
       i < flowers.length;
       i += PHEROMON.EVERY_NTH_FLOWER
     ) {
-      this.addTrail(flowers[i], v);
+      this.addTrail(flowers[i], v, playerPosition);
     }
   }
 
-  rebuild(flowers: FlowerTarget[]): void {
-    this.addTrails(flowers);
+  rebuild(
+    flowers: FlowerTarget[],
+    playerPosition: THREE.Vector3 = new THREE.Vector3(0, 2, 0),
+  ): void {
+    this.addTrails(flowers, playerPosition);
   }
 
-  private addTrail(flower: FlowerTarget, v: PheromonVariant): void {
+  /**
+   * Baut eine einzelne Spur von einer Blume aus.
+   * Die Spur verläuft entlang der Linie Player → Blume,
+   * sodass der Player die Partikel direkt vor sich sieht und ihnen
+   * zur Blume folgen kann.
+   */
+  private addTrail(
+    flower: FlowerTarget,
+    v: PheromonVariant,
+    playerPosition: THREE.Vector3,
+  ): void {
     const count = v.particlesPerTrail;
     const positions = new Float32Array(count * 3);
 
-    const angle = Math.random() * Math.PI * 2;
+    // Richtung: von der Blume weg zum Player
+    const dirToPlayer = new THREE.Vector3().subVectors(
+      playerPosition,
+      flower.position,
+    );
+    dirToPlayer.y = 0;
+    dirToPlayer.normalize();
+
+    // Startpunkt: zwischen Player und Blume, nahe der Blume
     const dist =
       v.trailLengthMin + Math.random() * (v.trailLengthMax - v.trailLengthMin);
-    const startX = flower.position.x + Math.cos(angle) * dist;
-    const startZ = flower.position.z + Math.sin(angle) * dist;
+    const startX = flower.position.x + dirToPlayer.x * dist;
+    const startZ = flower.position.z + dirToPlayer.z * dist;
     const startY = 0.2 + Math.random() * 0.6;
 
     const steps = 80;
     const curve: THREE.Vector3[] = [];
+    // Wind-Richtung basierend auf der Linie Player → Blume
+    const windBaseAngle = Math.atan2(dirToPlayer.z, dirToPlayer.x);
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       let x = startX * (1 - t) + flower.position.x * t;
       let z = startZ * (1 - t) + flower.position.z * t;
       let y = startY * (1 - t) + flower.position.y * t;
 
-      const windPhase = angle + t * v.windFrequency;
+      const windPhase = windBaseAngle + t * v.windFrequency * 2;
       const wind = v.windAmplitude * t * (1 - t) * 4;
       x += Math.sin(windPhase) * wind;
       z += Math.cos(windPhase * 0.8) * wind;
