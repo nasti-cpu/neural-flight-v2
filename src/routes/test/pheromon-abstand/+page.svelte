@@ -7,90 +7,22 @@
     import { createSky } from "$lib/experiences/insect-world-v2/Biome/blauerHimmel/sky";
     import type { PheromonVariant } from "$lib/experiences/insect-world-v2/Sinne/Pheromonspuren/pheromonspuren";
 
-    // ── 5 Abstands-Varianten ──
-    // Nur trailLengthMin/Max unterscheidet sich.
-    const DISTANCE_VARIANTS: (PheromonVariant & { color: string })[] = [
-        {
-            name: "① Sehr kurz",
-            color: "#ff6b6b",
-            desc: "1–3m – wie aktuell – Spur fast nur an der Blume",
-            particlesPerTrail: 80,
-            particleSize: 0.18,
-            opacity: 0.85,
-            trailLengthMin: 1,
-            trailLengthMax: 3,
-            windAmplitude: 0.25,
-            windFrequency: 1.5,
-            scatterWidth: 0.3,
-            scatterHeight: 0.15,
-            pulseSpeed: 1.5,
-            pulseAmount: 0.25,
-        },
-        {
-            name: "② Kurz",
-            color: "#ffa94d",
-            desc: "3–6m – Spur beginnt etwas früher",
-            particlesPerTrail: 80,
-            particleSize: 0.18,
-            opacity: 0.85,
-            trailLengthMin: 3,
-            trailLengthMax: 6,
-            windAmplitude: 0.25,
-            windFrequency: 1.5,
-            scatterWidth: 0.3,
-            scatterHeight: 0.15,
-            pulseSpeed: 1.5,
-            pulseAmount: 0.25,
-        },
-        {
-            name: "③ Mittel",
-            color: "#ffd43b",
-            desc: "6–12m – gut sichtbar von Weitem",
-            particlesPerTrail: 80,
-            particleSize: 0.18,
-            opacity: 0.85,
-            trailLengthMin: 6,
-            trailLengthMax: 12,
-            windAmplitude: 0.25,
-            windFrequency: 1.5,
-            scatterWidth: 0.3,
-            scatterHeight: 0.15,
-            pulseSpeed: 1.5,
-            pulseAmount: 0.25,
-        },
-        {
-            name: "④ Weit",
-            color: "#69db7c",
-            desc: "12–20m – deutlich sichtbar von Weitem",
-            particlesPerTrail: 80,
-            particleSize: 0.18,
-            opacity: 0.85,
-            trailLengthMin: 12,
-            trailLengthMax: 20,
-            windAmplitude: 0.25,
-            windFrequency: 1.5,
-            scatterWidth: 0.3,
-            scatterHeight: 0.15,
-            pulseSpeed: 1.5,
-            pulseAmount: 0.25,
-        },
-        {
-            name: "⑤ Sehr weit",
-            color: "#4dabf7",
-            desc: "20–35m – schon von ganz weit weg sichtbar",
-            particlesPerTrail: 80,
-            particleSize: 0.18,
-            opacity: 0.85,
-            trailLengthMin: 20,
-            trailLengthMax: 35,
-            windAmplitude: 0.25,
-            windFrequency: 1.5,
-            scatterWidth: 0.3,
-            scatterHeight: 0.15,
-            pulseSpeed: 1.5,
-            pulseAmount: 0.25,
-        },
-    ];
+    // ── Parameter (wie "Leuchtpfad", aber 20–35m Distanz) ──
+    const TRAIL_VARIANT: PheromonVariant = {
+        name: "Test",
+        desc: "",
+        particlesPerTrail: 80,
+        particleSize: 0.18,
+        opacity: 0.85,
+        trailLengthMin: 20,
+        trailLengthMax: 35,
+        windAmplitude: 0.25,
+        windFrequency: 1.5,
+        scatterWidth: 0.3,
+        scatterHeight: 0.15,
+        pulseSpeed: 1.5,
+        pulseAmount: 0.25,
+    };
 
     // ── States ──
     let canvas: HTMLCanvasElement;
@@ -101,40 +33,58 @@
     let animationId: number;
     let errorMsg = $state("");
     let loading = $state(true);
-    let activeIndex = $state(0);
 
-    const activeVariant = $derived(DISTANCE_VARIANTS[activeIndex]);
+    // ── Blumen-Positionen (2 Gruppen: links & rechts) ──
+    // Links: aktuelle Implementierung (zufällige Richtung)
+    // Rechts: neue Idee (Richtung zum Player)
+    const PLAYER_POS = new THREE.Vector3(0, 2, 0);
 
-    // ── Feste Positionen (3 Blumen, immer gleich) ──
-    // Jede Blume bekommt eine feste "Saat"-Zahl, damit die Spur immer gleich aussieht.
-    const FLOWER_DATA = [
+    // 3 Blumen links (für "Zufällige Richtung")
+    const LEFT_FLOWERS = [
         {
-            pos: new THREE.Vector3(-2.5, 0.2, -0.5),
+            pos: new THREE.Vector3(-18, 0.2, -25),
             color: new THREE.Color(0xe87da0),
-            seed: 42,
+            seed: 10,
         },
         {
-            pos: new THREE.Vector3(0, 0.2, 0.8),
+            pos: new THREE.Vector3(-15, 0.2, -28),
             color: new THREE.Color(0xf5d742),
-            seed: 77,
+            seed: 20,
         },
         {
-            pos: new THREE.Vector3(2.5, 0.2, -0.3),
+            pos: new THREE.Vector3(-21, 0.2, -27),
             color: new THREE.Color(0xf0ece4),
-            seed: 123,
+            seed: 30,
         },
     ];
 
-    // Drei Ringe als Bodenmarkierung (Blumen-Positionen)
-    const RING_COLORS = [0xe87da0, 0xf5d742, 0xf0ece4];
+    // 3 Blumen rechts (für "Richtung Player")
+    const RIGHT_FLOWERS = [
+        {
+            pos: new THREE.Vector3(15, 0.2, -25),
+            color: new THREE.Color(0xe87da0),
+            seed: 40,
+        },
+        {
+            pos: new THREE.Vector3(18, 0.2, -28),
+            color: new THREE.Color(0xf5d742),
+            seed: 50,
+        },
+        {
+            pos: new THREE.Vector3(12, 0.2, -27),
+            color: new THREE.Color(0xf0ece4),
+            seed: 60,
+        },
+    ];
 
-    // ── Three.js-Objekte (werden in onMount gesetzt) ──
-    let spriteGroup: THREE.Group;
+    // ── Three.js-Objekte ──
+    let spriteGroupLeft: THREE.Group;
+    let spriteGroupRight: THREE.Group;
     let glowTexture: THREE.CanvasTexture;
-    let trailPhases: number[] = [];
+    let trailPhasesLeft: number[] = [];
+    let trailPhasesRight: number[] = [];
 
-    // ── Deterministischer Zufall (Seeded Random) ──
-    // Liefert zu einer "Saat" immer die gleiche Zahlen-Folge.
+    // ── Deterministischer Zufall ──
     function seededRandom(seed: number): number {
         const x = Math.sin(seed * 127.1 + 311.7) * 43758.5453;
         return x - Math.floor(x);
@@ -167,7 +117,6 @@
         return tex;
     }
 
-    // ── Farbe maximieren ──
     function maxSaturate(color: THREE.Color): THREE.Color {
         const hsl = { h: 0, s: 0, l: 0 };
         color.getHSL(hsl);
@@ -176,123 +125,198 @@
     }
 
     /**
-     * Baut die 3 Spuren für eine Variante.
-     * Nutzt seededRandom() mit der Blumen-Saat, damit jede Variante
-     * das GLEICHE Partikel-Muster hat – nur die Distanz ändert sich.
+     * Baut eine Spur mit ZUFÄLLIGER Richtung (aktuelle Implementierung).
+     * Der Startpunkt wird in einem zufälligen Winkel um die Blume gewählt.
      */
-    function buildTrails(v: PheromonVariant): void {
-        // Alte Sprites entfernen
-        while (spriteGroup.children.length > 0) {
-            const child = spriteGroup.children[0];
-            if (
-                child instanceof THREE.Sprite &&
-                child.material instanceof THREE.SpriteMaterial
-            ) {
-                child.material.dispose();
-            }
-            spriteGroup.remove(child);
+    function buildRandomDirectionTrail(
+        flowerPos: THREE.Vector3,
+        flowerColor: THREE.Color,
+        seed: number,
+        v: PheromonVariant,
+        group: THREE.Group,
+    ): number {
+        const count = v.particlesPerTrail;
+        const positions = new Float32Array(count * 3);
+        let rng = seed;
+
+        // ⚠️ Zufällige Richtung (aktuelle Implementierung)
+        const angle = seededRandom(rng++) * Math.PI * 2;
+        const dist =
+            v.trailLengthMin +
+            seededRandom(rng++) * (v.trailLengthMax - v.trailLengthMin);
+        const startX = flowerPos.x + Math.cos(angle) * dist;
+        const startZ = flowerPos.z + Math.sin(angle) * dist;
+        const startY = 0.2 + seededRandom(rng++) * 0.6;
+
+        // Kurve von Start → Blume
+        const steps = 80;
+        const curve: THREE.Vector3[] = [];
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            let x = startX * (1 - t) + flowerPos.x * t;
+            let z = startZ * (1 - t) + flowerPos.z * t;
+            let y = startY * (1 - t) + flowerPos.y * t;
+            const windPhase = angle + t * v.windFrequency;
+            const wind = v.windAmplitude * t * (1 - t) * 4;
+            x += Math.sin(windPhase) * wind;
+            z += Math.cos(windPhase * 0.8) * wind;
+            y += Math.sin(windPhase * 1.2) * wind * 0.3;
+            curve.push(new THREE.Vector3(x, y, z));
         }
-        trailPhases = [];
 
-        // Für jede der 3 Blumen eine Spur bauen
-        for (let fi = 0; fi < FLOWER_DATA.length; fi++) {
-            const { pos, color, seed } = FLOWER_DATA[fi];
-            const count = v.particlesPerTrail;
-            const positions = new Float32Array(count * 3);
-
-            // Zufallswert-Basis für diese Blume (immer gleich, egal welche Variante)
-            let rng = seed;
-
-            // Start-Richtung (Winkel) – fest pro Blume
-            const angle = seededRandom(rng++) * Math.PI * 2;
-            // Distanz – variiert pro Variante (das ist der zu testende Wert)
-            const dist =
-                v.trailLengthMin +
-                seededRandom(rng++) * (v.trailLengthMax - v.trailLengthMin);
-            const startX = pos.x + Math.cos(angle) * dist;
-            const startZ = pos.z + Math.sin(angle) * dist;
-            const startY = 0.2 + seededRandom(rng++) * 0.6;
-
-            // Kurve von Start → Blume
-            const steps = 80;
-            const curve: THREE.Vector3[] = [];
-            for (let i = 0; i <= steps; i++) {
-                const t = i / steps;
-                let x = startX * (1 - t) + pos.x * t;
-                let z = startZ * (1 - t) + pos.z * t;
-                let y = startY * (1 - t) + pos.y * t;
-                const windPhase = angle + t * v.windFrequency;
-                const wind = v.windAmplitude * t * (1 - t) * 4;
-                x += Math.sin(windPhase) * wind;
-                z += Math.cos(windPhase * 0.8) * wind;
-                y += Math.sin(windPhase * 1.2) * wind * 0.3;
-                curve.push(new THREE.Vector3(x, y, z));
-            }
-
-            // Partikel auf der Kurve – feste Zufallswerte pro Blume
-            for (let i = 0; i < count; i++) {
-                const t = seededRandom(rng++);
-                const idx = Math.floor(t * steps);
-                const frac = t * steps - idx;
-                const nextIdx = Math.min(idx + 1, steps);
-                const p = new THREE.Vector3().lerpVectors(
-                    curve[idx],
-                    curve[nextIdx],
-                    frac,
-                );
-                const dir = new THREE.Vector3()
-                    .subVectors(
-                        curve[Math.min(idx + 2, steps)],
-                        curve[Math.max(idx - 2, 0)],
-                    )
-                    .normalize();
-                const perp = new THREE.Vector3(-dir.z, 0, dir.x).normalize();
-                const scatterFactor = t * (1 - t) * 4;
-                const oh =
-                    (seededRandom(rng++) - 0.5) *
-                    v.scatterWidth *
-                    scatterFactor;
-                const ov =
-                    (seededRandom(rng++) - 0.5) *
-                    v.scatterHeight *
-                    scatterFactor;
-                positions[i * 3] = p.x + perp.x * oh;
-                positions[i * 3 + 1] = p.y + ov;
-                positions[i * 3 + 2] = p.z + perp.z * oh;
-            }
-
-            // Material
-            const material = new THREE.SpriteMaterial({
-                map: glowTexture,
-                color: maxSaturate(color),
-                transparent: true,
-                opacity: v.opacity,
-                blending: THREE.AdditiveBlending,
-                depthWrite: false,
-            });
-
-            // Sprites erzeugen
-            for (let i = 0; i < count; i++) {
-                const sprite = new THREE.Sprite(material);
-                sprite.position.set(
-                    positions[i * 3],
-                    positions[i * 3 + 1],
-                    positions[i * 3 + 2],
-                );
-                sprite.scale.set(v.particleSize, v.particleSize, 1);
-                spriteGroup.add(sprite);
-            }
-
-            trailPhases.push(seededRandom(rng) * Math.PI * 2);
+        // Partikel
+        for (let i = 0; i < count; i++) {
+            const t = seededRandom(rng++);
+            const idx = Math.floor(t * steps);
+            const frac = t * steps - idx;
+            const nextIdx = Math.min(idx + 1, steps);
+            const p = new THREE.Vector3().lerpVectors(
+                curve[idx],
+                curve[nextIdx],
+                frac,
+            );
+            const dir = new THREE.Vector3()
+                .subVectors(
+                    curve[Math.min(idx + 2, steps)],
+                    curve[Math.max(idx - 2, 0)],
+                )
+                .normalize();
+            const perp = new THREE.Vector3(-dir.z, 0, dir.x).normalize();
+            const scatterFactor = t * (1 - t) * 4;
+            const oh =
+                (seededRandom(rng++) - 0.5) * v.scatterWidth * scatterFactor;
+            const ov =
+                (seededRandom(rng++) - 0.5) * v.scatterHeight * scatterFactor;
+            positions[i * 3] = p.x + perp.x * oh;
+            positions[i * 3 + 1] = p.y + ov;
+            positions[i * 3 + 2] = p.z + perp.z * oh;
         }
+
+        // Material + Sprites
+        const material = new THREE.SpriteMaterial({
+            map: glowTexture,
+            color: maxSaturate(flowerColor),
+            transparent: true,
+            opacity: v.opacity,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        });
+        for (let i = 0; i < count; i++) {
+            const sprite = new THREE.Sprite(material);
+            sprite.position.set(
+                positions[i * 3],
+                positions[i * 3 + 1],
+                positions[i * 3 + 2],
+            );
+            sprite.scale.set(v.particleSize, v.particleSize, 1);
+            group.add(sprite);
+        }
+
+        return seededRandom(rng) * Math.PI * 2;
     }
 
-    // ── Umschalt-Funktion (wird vom Button gerufen) ──
-    function selectVariant(index: number): void {
-        activeIndex = index;
-        if (glowTexture && spriteGroup) {
-            buildTrails(DISTANCE_VARIANTS[index]);
+    /**
+     * Baut eine Spur mit Richtung ZUM PLAYER (neue Idee).
+     * Der Startpunkt wird entlang der Linie Player → Blume gewählt,
+     * sodass die Spur vom Player aus sichtbar ist und zur Blume führt.
+     */
+    function buildPlayerDirectionTrail(
+        flowerPos: THREE.Vector3,
+        flowerColor: THREE.Color,
+        seed: number,
+        v: PheromonVariant,
+        group: THREE.Group,
+    ): number {
+        const count = v.particlesPerTrail;
+        const positions = new Float32Array(count * 3);
+        let rng = seed;
+
+        // ✅ Richtung: Vom Player zur Blume
+        const dirToFlower = new THREE.Vector3().subVectors(
+            flowerPos,
+            PLAYER_POS,
+        );
+        const distToFlower = dirToFlower.length();
+        dirToFlower.normalize();
+
+        // Die Spur startet zwischen Player und Blume (nah am Player-Ende)
+        // trailLengthMin/Max ist der Abstand von der Blume aus gesehen
+        const trailDist =
+            v.trailLengthMin +
+            seededRandom(rng++) * (v.trailLengthMax - v.trailLengthMin);
+        // Startpunkt: von der Blume aus in Richtung Player (entgegengesetzt)
+        const startPos = new THREE.Vector3()
+            .copy(flowerPos)
+            .addScaledVector(dirToFlower.clone().negate(), trailDist);
+        const startY = 0.2 + seededRandom(rng++) * 0.6;
+        startPos.y = startY;
+
+        // Kurve von Start → Blume
+        const steps = 80;
+        const curve: THREE.Vector3[] = [];
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            let x = startPos.x * (1 - t) + flowerPos.x * t;
+            let z = startPos.z * (1 - t) + flowerPos.z * t;
+            let y = startPos.y * (1 - t) + flowerPos.y * t;
+            const windPhase =
+                seededRandom(rng++) * Math.PI * 2 + t * v.windFrequency;
+            const wind = v.windAmplitude * t * (1 - t) * 4;
+            x += Math.sin(windPhase) * wind;
+            z += Math.cos(windPhase * 0.8) * wind;
+            y += Math.sin(windPhase * 1.2) * wind * 0.3;
+            curve.push(new THREE.Vector3(x, y, z));
         }
+
+        // Partikel
+        for (let i = 0; i < count; i++) {
+            const t = seededRandom(rng++);
+            const idx = Math.floor(t * steps);
+            const frac = t * steps - idx;
+            const nextIdx = Math.min(idx + 1, steps);
+            const p = new THREE.Vector3().lerpVectors(
+                curve[idx],
+                curve[nextIdx],
+                frac,
+            );
+            const dir = new THREE.Vector3()
+                .subVectors(
+                    curve[Math.min(idx + 2, steps)],
+                    curve[Math.max(idx - 2, 0)],
+                )
+                .normalize();
+            const perp = new THREE.Vector3(-dir.z, 0, dir.x).normalize();
+            const scatterFactor = t * (1 - t) * 4;
+            const oh =
+                (seededRandom(rng++) - 0.5) * v.scatterWidth * scatterFactor;
+            const ov =
+                (seededRandom(rng++) - 0.5) * v.scatterHeight * scatterFactor;
+            positions[i * 3] = p.x + perp.x * oh;
+            positions[i * 3 + 1] = p.y + ov;
+            positions[i * 3 + 2] = p.z + perp.z * oh;
+        }
+
+        // Material + Sprites
+        const material = new THREE.SpriteMaterial({
+            map: glowTexture,
+            color: maxSaturate(flowerColor),
+            transparent: true,
+            opacity: v.opacity,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        });
+        for (let i = 0; i < count; i++) {
+            const sprite = new THREE.Sprite(material);
+            sprite.position.set(
+                positions[i * 3],
+                positions[i * 3 + 1],
+                positions[i * 3 + 2],
+            );
+            sprite.scale.set(v.particleSize, v.particleSize, 1);
+            group.add(sprite);
+        }
+
+        return seededRandom(rng) * Math.PI * 2;
     }
 
     onMount(async () => {
@@ -303,8 +327,10 @@
             const w = canvas.clientWidth;
             const h = canvas.clientHeight;
 
-            camera = new THREE.PerspectiveCamera(50, w / h, 0.1, 120);
-            camera.position.set(6, 5, 12);
+            camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 120);
+            // Kamera startet bei (0, 2, 0) – genau wie der Player im Spiel
+            camera.position.set(0, 2, 0);
+            camera.lookAt(0, 0.5, -20);
 
             renderer = new THREE.WebGPURenderer({ canvas, antialias: true });
             await renderer.init();
@@ -312,7 +338,7 @@
             renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 
             controls = new OrbitControls(camera, renderer.domElement);
-            controls.target.set(0, 0.5, 0);
+            controls.target.set(0, 0.5, -15);
             controls.update();
 
             // Licht
@@ -336,46 +362,89 @@
             ground.rotation.x = -Math.PI / 2;
             scene.add(ground);
 
-            // Raster (1 Kästchen = 1 Meter)
-            const grid = new THREE.GridHelper(60, 30, 0x444466, 0x333355);
+            // Raster
+            const grid = new THREE.GridHelper(80, 20, 0x444466, 0x333355);
             grid.position.y = 0.01;
             scene.add(grid);
 
-            // Blumen-Markierungen (Ringe)
-            for (let i = 0; i < 3; i++) {
-                const rg = new THREE.RingGeometry(0.2, 0.5, 16);
-                const rm = new THREE.MeshBasicMaterial({
-                    color: RING_COLORS[i],
-                    transparent: true,
-                    opacity: 0.5,
-                    side: THREE.DoubleSide,
-                });
-                const ring = new THREE.Mesh(rg, rm);
-                ring.position.copy(FLOWER_DATA[i].pos);
-                ring.position.y = 0.01;
-                ring.rotation.x = -Math.PI / 2;
-                scene.add(ring);
-            }
+            // Player-Markierung (kleiner roter Punkt)
+            const playerDot = new THREE.Mesh(
+                new THREE.SphereGeometry(0.3, 12, 12),
+                new THREE.MeshBasicMaterial({ color: 0xff4444 }),
+            );
+            playerDot.position.copy(PLAYER_POS);
+            scene.add(playerDot);
 
-            // Blumen-Kugeln (kleine 3D-Punkte als Blumen-Ersatz)
-            for (let i = 0; i < 3; i++) {
-                const sphere = new THREE.Mesh(
-                    new THREE.SphereGeometry(0.2, 8, 8),
-                    new THREE.MeshBasicMaterial({ color: RING_COLORS[i] }),
-                );
-                sphere.position.copy(FLOWER_DATA[i].pos);
-                scene.add(sphere);
-            }
+            // Player-Beschriftung (als 3D-Text-Ersatz: ein kleiner Kegel/Pfeil)
+            const arrowDir = new THREE.Vector3(0, 0, -1);
+            const arrowLen = 1.5;
+            const arrowEnd = new THREE.Vector3()
+                .copy(PLAYER_POS)
+                .addScaledVector(arrowDir, arrowLen);
+            const arrowMat = new THREE.MeshBasicMaterial({
+                color: 0xff6666,
+                transparent: true,
+                opacity: 0.6,
+            });
+            const arrowGeo = new THREE.CylinderGeometry(
+                0.05,
+                0.05,
+                arrowLen,
+                4,
+            );
+            const arrow = new THREE.Mesh(arrowGeo, arrowMat);
+            arrow.position
+                .copy(PLAYER_POS)
+                .add(new THREE.Vector3(0, 0.3, -arrowLen / 2));
+            arrow.rotation.x = Math.PI / 2;
+            scene.add(arrow);
 
             // Glow-Textur
             glowTexture = createGlowTexture();
 
-            // Sprite-Gruppe
-            spriteGroup = new THREE.Group();
-            scene.add(spriteGroup);
+            // ── Linke Gruppe: Zufällige Richtung ──
+            spriteGroupLeft = new THREE.Group();
+            scene.add(spriteGroupLeft);
+            trailPhasesLeft = [];
+            for (const f of LEFT_FLOWERS) {
+                const phase = buildRandomDirectionTrail(
+                    f.pos,
+                    f.color,
+                    f.seed,
+                    TRAIL_VARIANT,
+                    spriteGroupLeft,
+                );
+                trailPhasesLeft.push(phase);
+                // Blumen-Markierung
+                const sphere = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.25, 8, 8),
+                    new THREE.MeshBasicMaterial({ color: f.color }),
+                );
+                sphere.position.copy(f.pos);
+                scene.add(sphere);
+            }
 
-            // Erste Variante bauen
-            buildTrails(DISTANCE_VARIANTS[0]);
+            // ── Rechte Gruppe: Richtung Player ──
+            spriteGroupRight = new THREE.Group();
+            scene.add(spriteGroupRight);
+            trailPhasesRight = [];
+            for (const f of RIGHT_FLOWERS) {
+                const phase = buildPlayerDirectionTrail(
+                    f.pos,
+                    f.color,
+                    f.seed,
+                    TRAIL_VARIANT,
+                    spriteGroupRight,
+                );
+                trailPhasesRight.push(phase);
+                // Blumen-Markierung
+                const sphere = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.25, 8, 8),
+                    new THREE.MeshBasicMaterial({ color: f.color }),
+                );
+                sphere.position.copy(f.pos);
+                scene.add(sphere);
+            }
 
             loading = false;
 
@@ -383,21 +452,40 @@
             const clock = new THREE.Clock();
             function animate() {
                 const elapsed = clock.getElapsedTime();
-                const spriteChildren = spriteGroup.children;
-                for (let i = 0; i < spriteChildren.length; i++) {
-                    const sprite = spriteChildren[i];
+                // Linke Gruppe pulsen
+                const leftChildren = spriteGroupLeft.children;
+                for (let i = 0; i < leftChildren.length; i++) {
+                    const sprite = leftChildren[i];
                     if (
                         sprite instanceof THREE.Sprite &&
                         sprite.material instanceof THREE.SpriteMaterial
                     ) {
                         const trailIdx = Math.min(
                             Math.floor(i / 80),
-                            trailPhases.length - 1,
+                            trailPhasesLeft.length - 1,
                         );
-                        const phase = trailPhases[trailIdx] ?? 0;
-                        const pulse =
-                            0.75 + 0.25 * Math.sin(elapsed * 1.5 + phase);
-                        sprite.material.opacity = 0.85 * pulse;
+                        const phase = trailPhasesLeft[trailIdx] ?? 0;
+                        sprite.material.opacity =
+                            0.85 *
+                            (0.75 + 0.25 * Math.sin(elapsed * 1.5 + phase));
+                    }
+                }
+                // Rechte Gruppe pulsen
+                const rightChildren = spriteGroupRight.children;
+                for (let i = 0; i < rightChildren.length; i++) {
+                    const sprite = rightChildren[i];
+                    if (
+                        sprite instanceof THREE.Sprite &&
+                        sprite.material instanceof THREE.SpriteMaterial
+                    ) {
+                        const trailIdx = Math.min(
+                            Math.floor(i / 80),
+                            trailPhasesRight.length - 1,
+                        );
+                        const phase = trailPhasesRight[trailIdx] ?? 0;
+                        sprite.material.opacity =
+                            0.85 *
+                            (0.75 + 0.25 * Math.sin(elapsed * 1.5 + phase));
                     }
                 }
                 controls.update();
@@ -406,7 +494,7 @@
             }
             animationId = requestAnimationFrame(animate);
         } catch (e) {
-            console.error("[Pheromon] FEHLER:", e);
+            console.error("[Pheromon-Richtung] FEHLER:", e);
             errorMsg = e instanceof Error ? e.message : String(e);
             loading = false;
         }
@@ -420,45 +508,37 @@
     });
 </script>
 
-/** * Testseite: Pheromonspuren-Abstandsvergleich. * * Zeigt EINE Blumengruppe
-mit Pheromonspuren. * Per Knopfdruck schaltest du zwischen 5 verschiedenen
-Trail-Längen um * (Abstand Blume → Spur-Anfang). * * Wichtig: Die Zufallswerte
-sind "fest verdrahtet" (Seeded Random), * damit sich beim Umschalten NUR der
-Abstand ändert – nicht das Muster. * * Nutzt WebGPU (WebGPURenderer) laut
-Projekt-Vorgabe. */
+/** * Testseite: Pheromonspuren – Richtung. * * Zeigt den Unterschied zwischen:
+* - Links: Aktuelle Implementierung (zufällige Richtung) * - Rechts: Neue Idee –
+Spur zeigt IN RICHTUNG Player * * Der Player (Kamera) startet bei (0, 2, 0) und
+schaut nach vorne. * Die Blumen sind 30m entfernt. * * Bei "Richtung Player"
+wird die Spur entlang der Linie * Player → Blume platziert, sodass der Player
+sie sieht und * ihr zur Blume folgen kann. * * Nutzt WebGPU (WebGPURenderer)
+laut Projekt-Vorgabe. */
 
 <div class="container">
     <canvas bind:this={canvas}></canvas>
 
-    <!-- Oben: Info -->
     <div class="ui-overlay">
-        <h1>🧪 Pheromonspuren – Abstandsvergleich</h1>
+        <h1>🧪 Pheromonspuren – Richtungsvergleich</h1>
         {#if loading}<p class="loading">Lade …</p>{/if}
         {#if errorMsg}<p class="error">{errorMsg}</p>{/if}
     </div>
 
-    <!-- Unten: Steuerleiste -->
+    <!-- Links/Rechts-Beschriftung -->
+    <div class="label-left">
+        ⚠️ Zufällige Richtung<br /><span class="sub">(aktuell)</span>
+    </div>
+    <div class="label-right">
+        ✅ Richtung Player<br /><span class="sub">(NEU)</span>
+    </div>
+
     <div class="controls">
-        <div class="info">
-            <span class="badge" style="background: {activeVariant.color};"
-            ></span>
-            <span class="vname">{activeVariant.name}</span>
-            <span class="vdist">
-                🌼 ← {activeVariant.trailLengthMin}–{activeVariant.trailLengthMax}m
-            </span>
-        </div>
-        <p class="vdesc">{activeVariant.desc}</p>
-        <div class="buttons">
-            {#each DISTANCE_VARIANTS as v, i}
-                <button
-                    class="btn"
-                    class:active={activeIndex === i}
-                    style="--c: {v.color};"
-                    onclick={() => selectVariant(i)}>{v.name}</button
-                >
-            {/each}
-        </div>
-        <p class="hint">Ziehen zum Drehen • Scrollen zum Zoomen</p>
+        <p class="hint">
+            🔴 Player startet bei (0, 2, 0) • Blickrichtung nach vorne (⬆️
+            Pfeil)<br />
+            Blumen sind ~25–30m entfernt • Ziehen zum Drehen • Scrollen zum Zoomen
+        </p>
     </div>
 </div>
 
@@ -503,84 +583,47 @@ Projekt-Vorgabe. */
         border-radius: 4px;
     }
 
+    .label-left,
+    .label-right {
+        position: absolute;
+        top: 60px;
+        z-index: 10;
+        color: white;
+        font-size: 1rem;
+        font-weight: 700;
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+        text-align: center;
+        pointer-events: none;
+    }
+    .label-left {
+        left: 15%;
+    }
+    .label-right {
+        right: 15%;
+    }
+    .sub {
+        font-size: 0.75rem;
+        font-weight: 400;
+        opacity: 0.6;
+    }
+
     .controls {
         position: absolute;
         bottom: 28px;
         left: 50%;
         transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.75);
+        background: rgba(0, 0, 0, 0.7);
         backdrop-filter: blur(10px);
-        border-radius: 14px;
-        padding: 14px 24px 12px;
+        border-radius: 12px;
+        padding: 10px 20px;
         z-index: 10;
         text-align: center;
         border: 1px solid rgba(255, 255, 255, 0.08);
-        min-width: 300px;
-        max-width: 92vw;
     }
-
-    .info {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        margin-bottom: 2px;
-    }
-    .badge {
-        width: 14px;
-        height: 14px;
-        border-radius: 50%;
-        flex-shrink: 0;
-        box-shadow: 0 0 6px currentColor;
-    }
-    .vname {
-        color: white;
-        font-size: 1rem;
-        font-weight: 700;
-    }
-    .vdist {
-        color: rgba(255, 255, 255, 0.45);
-        font-size: 0.8rem;
-    }
-
-    .vdesc {
-        color: rgba(255, 255, 255, 0.45);
-        font-size: 0.72rem;
-        margin: 2px 0 10px;
-    }
-
-    .buttons {
-        display: flex;
-        gap: 5px;
-        justify-content: center;
-        flex-wrap: wrap;
-    }
-    .btn {
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        color: rgba(255, 255, 255, 0.65);
-        padding: 6px 14px;
-        border-radius: 7px;
-        font-size: 0.78rem;
-        cursor: pointer;
-        transition: all 0.15s;
-        font-family: inherit;
-    }
-    .btn:hover {
-        background: rgba(255, 255, 255, 0.12);
-        color: white;
-    }
-    .btn.active {
-        background: color-mix(in srgb, var(--c, gold) 35%, transparent);
-        border-color: var(--c, gold);
-        color: white;
-        font-weight: 600;
-        box-shadow: 0 0 10px color-mix(in srgb, var(--c, gold) 25%, transparent);
-    }
-
     .hint {
-        color: rgba(255, 255, 255, 0.25);
-        font-size: 0.62rem;
-        margin: 7px 0 0;
+        color: rgba(255, 255, 255, 0.4);
+        font-size: 0.7rem;
+        margin: 0;
+        line-height: 1.5;
     }
 </style>
