@@ -232,7 +232,7 @@ export class PheromoneSystem {
       v.trailLengthMin + Math.random() * (v.trailLengthMax - v.trailLengthMin);
     const startX = flower.position.x + dirToPlayer.x * dist;
     const startZ = flower.position.z + dirToPlayer.z * dist;
-    const startY = 0.2 + Math.random() * 0.6;
+    const startY = 0.5 + Math.random() * 0.6;
 
     const steps = 80;
     const curve: THREE.Vector3[] = [];
