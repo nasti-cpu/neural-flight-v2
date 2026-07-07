@@ -1,13 +1,13 @@
-/**
- * fishWorld.ts – Fisch-Integration für die Tiefsee-Unterwasserwelt
+﻿/**
+ * fishWorld.ts â€“ Fisch-Integration fÃ¼r die Tiefsee-Unterwasserwelt
  *
  * Importiert die reine Bewegungs-Mathematik aus animationen/fische/ und
- * kümmert sich um Three.js-Rendering, Exklusionszonen und Echoortung.
+ * kÃ¼mmert sich um Three.js-Rendering, Exklusionszonen und Echoortung.
  *
  * Modularer Aufbau:
- *   - orbitSwimming.ts  → Solo-Fisch-Animation (Carangiform + Burst)
- *   - schoolFormation.ts → Schwarm-Formation (V-Formation, Ellipsen-Bahn)
- *   - fishWorld.ts       → World-Management + Three.js-Integration
+ *   - orbitSwimming.ts  â†’ Solo-Fisch-Animation (Carangiform + Burst)
+ *   - schoolFormation.ts â†’ Schwarm-Formation (V-Formation, Ellipsen-Bahn)
+ *   - fishWorld.ts       â†’ World-Management + Three.js-Integration
  */
 
 import * as THREE from "three/webgpu";
@@ -35,8 +35,8 @@ import {
 } from "../animationen/fische/schoolFormation";
 
 /**
- * Lokaler Typ für eine Ausschlusszone (z. B. um eine Stadtkuppel).
- * Städte werden in diesen Zonen platziert – Fische sollen sie meiden.
+ * Lokaler Typ fÃ¼r eine Ausschlusszone (z.â€¯B. um eine Stadtkuppel).
+ * StÃ¤dte werden in diesen Zonen platziert â€“ Fische sollen sie meiden.
  */
 export interface ExclusionZone {
   centerX: number;
@@ -49,26 +49,26 @@ export interface ExclusionZone {
 // ---------------------------------------------------------------------------
 
 /**
- * Einstellungen für das Fisch-System in der Welt.
+ * Einstellungen fÃ¼r das Fisch-System in der Welt.
  * Alle Werte sind auf die Tiefsee-Unterwasserwelt abgestimmt.
  */
 export interface FishWorldConfig {
   /** Y-Bereich: Boden (Fische schwimmen oberhalb) */
   floorY: number;
-  /** Y-Bereich: Wasseroberfläche (Fische bleiben darunter) */
+  /** Y-Bereich: WasseroberflÃ¤che (Fische bleiben darunter) */
   waterY: number;
-  /** Welt-Größe (XZ-Bereich für zufällige Positionen) */
+  /** Welt-GrÃ¶ÃŸe (XZ-Bereich fÃ¼r zufÃ¤llige Positionen) */
   worldRadius: number;
   /** Anzahl Einzelfische, die dauerhaft herumschwimmen */
   soloCount: number;
-  /** Minimale Fisch-Größe in Einheiten */
+  /** Minimale Fisch-GrÃ¶ÃŸe in Einheiten */
   fishMinSize: number;
-  /** Maximale Fisch-Größe in Einheiten */
+  /** Maximale Fisch-GrÃ¶ÃŸe in Einheiten */
   fishMaxSize: number;
-  /** Schwarm erscheint alle … Sekunden (Intervall, zufällig) */
+  /** Schwarm erscheint alle â€¦ Sekunden (Intervall, zufÃ¤llig) */
   schoolIntervalMin: number;
   schoolIntervalMax: number;
-  /** Schwarm bleibt … Sekunden sichtbar */
+  /** Schwarm bleibt â€¦ Sekunden sichtbar */
   schoolDurationMin: number;
   schoolDurationMax: number;
   /** Anzahl Fische pro Schwarm */
@@ -79,7 +79,7 @@ export interface FishWorldConfig {
   echolocationConfig?: Partial<EcholocationConfig>;
 }
 
-/** Standard-Werte – passend zur Tiefsee-Welt */
+/** Standard-Werte â€“ passend zur Tiefsee-Welt */
 const DEFAULT_FISH_CONFIG: FishWorldConfig = {
   floorY: -4,
   waterY: 15,
@@ -100,7 +100,7 @@ const DEFAULT_FISH_CONFIG: FishWorldConfig = {
 // ---------------------------------------------------------------------------
 
 /**
- * Nur die Orbit-spezifischen Felder – die Schwimm-Animation (Yaw/Pitch/Roll
+ * Nur die Orbit-spezifischen Felder â€“ die Schwimm-Animation (Yaw/Pitch/Roll
  * etc.) ist in SwimParams (orbitSwimming.ts) ausgelagert.
  */
 interface SoloFishParams {
@@ -135,7 +135,7 @@ function createSoloParams(config: FishWorldConfig): SoloFishParams {
 interface SoloFish {
   mesh: THREE.Group;
   params: SoloFishParams;
-  /** Animations-Zustand (Yaw, Pitch, Roll, curY, Burst-Glättung) */
+  /** Animations-Zustand (Yaw, Pitch, Roll, curY, Burst-GlÃ¤ttung) */
   state: SwimState;
 
   // --- Glow (Echoortung) ---
@@ -148,7 +148,7 @@ interface SoloFish {
 }
 
 // ---------------------------------------------------------------------------
-// FischSchwarm – Vergänglicher Formations-Schwarm
+// FischSchwarm â€“ VergÃ¤nglicher Formations-Schwarm
 // ---------------------------------------------------------------------------
 
 interface FishSchool {
@@ -191,11 +191,18 @@ export class FishWorld {
   private fishModelTemplate: THREE.Group | null = null;
   private soloScale: number = 1.0;
 
-  // --- Schwärme ---
+  // --- SchwÃ¤rme ---
   private activeSchools: FishSchool[] = [];
   private nextSchoolTime: number = 0;
   private schoolFishMesh: THREE.Mesh | null = null;
   private schoolFishScale: number = 1.0;
+
+  /**
+   * School-Pool: 2 vorab erstellte InstancedMeshes, die wiederverwendet werden.
+   * spawnSchool() nimmt ein Pool-Mesh, setzt die Matrizen neu und macht es
+   * sichtbar. Kein new InstancedMesh mehr im Tick!
+   */
+  private _schoolPool: THREE.InstancedMesh[] = [];
 
   // --- Exklusionszonen (Kuppeln, die Fische meiden) ---
   private _exclusionZones: ExclusionZone[] = [];
@@ -235,18 +242,20 @@ export class FishWorld {
   }
 
   // -----------------------------------------------------------------------
-  // Initialisierung (async – lädt das Fisch-Modell)
+  // Initialisierung (async â€“ lÃ¤dt das Fisch-Modell)
   // -----------------------------------------------------------------------
 
   async init(cameraPos?: THREE.Vector3): Promise<void> {
-    console.log("🐟 FishWorld: Lade Fisch-Modell...");
+    console.log("ðŸŸ FishWorld: Lade Fisch-Modell...");
 
     this.fishModelTemplate = await this._loadFishModel(
       "/3D Modelle/fish/Fish(3).glb",
     );
 
     if (!this.fishModelTemplate) {
-      console.warn("⚠️ FishWorld: Fisch-Modell konnte nicht geladen werden!");
+      console.warn(
+        "âš ï¸ FishWorld: Fisch-Modell konnte nicht geladen werden!",
+      );
       return;
     }
 
@@ -267,7 +276,7 @@ export class FishWorld {
       this.soloFishes.push(fish);
     }
 
-    // Schwarm-Mesh für InstancedMesh extrahieren
+    // Schwarm-Mesh fÃ¼r InstancedMesh extrahieren
     const clone = this.fishModelTemplate.clone(true);
     this.scene.add(clone);
     let foundMesh: THREE.Mesh | null = null;
@@ -280,20 +289,42 @@ export class FishWorld {
       this.schoolFishMesh = foundMesh;
     }
 
+    // School-Pool vorbereiten: 2 InstancedMeshes, die wiederverwendet werden
+    if (this.schoolFishMesh) {
+      const mat = (
+        this.schoolFishMesh.material as THREE.MeshStandardMaterial
+      ).clone();
+      mat.transparent = true;
+      mat.opacity = 0;
+      for (let i = 0; i < 2; i++) {
+        const poolMesh = new THREE.InstancedMesh(
+          this.schoolFishMesh.geometry,
+          mat.clone(),
+          this.config.schoolSize,
+        );
+        poolMesh.castShadow = true;
+        poolMesh.receiveShadow = true;
+        poolMesh.frustumCulled = false;
+        poolMesh.visible = false;
+        this.scene.add(poolMesh);
+        this._schoolPool.push(poolMesh);
+      }
+    }
+
     this._scheduleNextSchool();
 
     console.log(
-      `🐟 FishWorld bereit: ${this.config.soloCount} Einzelfische, ` +
-        `Schwärme alle ${this.config.schoolIntervalMin}–${this.config.schoolIntervalMax}s`,
+      `ðŸŸ FishWorld bereit: ${this.config.soloCount} Einzelfische, ` +
+        `SchwÃ¤rme alle ${this.config.schoolIntervalMin}â€“${this.config.schoolIntervalMax}s`,
     );
   }
 
   // -----------------------------------------------------------------------
-  // Update – jeden Frame von der Render-Loop aufrufen
+  // Update â€“ jeden Frame von der Render-Loop aufrufen
   // -----------------------------------------------------------------------
 
   /**
-   * @param additionalTargets – Optionale zusätzliche Echo-Ziele (z. B. von Quallen)
+   * @param additionalTargets â€“ Optionale zusÃ¤tzliche Echo-Ziele (z.â€¯B. von Quallen)
    */
   update(
     delta: number,
@@ -379,7 +410,7 @@ export class FishWorld {
   }
 
   // -----------------------------------------------------------------------
-  // Aufräumen
+  // AufrÃ¤umen
   // -----------------------------------------------------------------------
 
   dispose(): void {
@@ -425,7 +456,7 @@ export class FishWorld {
         (gltf) => resolve(gltf.scene),
         undefined,
         (err) => {
-          console.error("❌ FishWorld: Fehler beim Laden:", err);
+          console.error("âŒ FishWorld: Fehler beim Laden:", err);
           resolve(null);
         },
       );
@@ -475,8 +506,8 @@ export class FishWorld {
   }
 
   /**
-   * Positioniert einen Fisch in Kameranähe (25-40m) auf einer neuen Ellipse,
-   * die garantiert außerhalb aller Kuppeln liegt.
+   * Positioniert einen Fisch in KameranÃ¤he (25-40m) auf einer neuen Ellipse,
+   * die garantiert auÃŸerhalb aller Kuppeln liegt.
    */
   private _positionFishAt(
     fish: SoloFish,
@@ -485,8 +516,8 @@ export class FishWorld {
     maxDist?: number,
   ): void {
     const p = fish.params;
-    const mind = minDist ?? 25;
-    const maxd = maxDist ?? 40;
+    const mind = minDist ?? 50; // ✅ WEITER WEG spawnen (50m statt 25m)
+    const maxd = maxDist ?? 65; //    der Fisch schwimmt dann von selbst näher
 
     const { x: validX, z: validZ } = this._findValidPosition(
       cameraPos.x,
@@ -519,7 +550,7 @@ export class FishWorld {
       p.centerZ + Math.sin(finalAngle) * p.radiusZ,
     );
 
-    // State zurücksetzen
+    // State zurÃ¼cksetzen
     fish.state.curY = p.baseY;
     fish.state.yaw = 0;
     fish.state.pitch = 0;
@@ -557,9 +588,10 @@ export class FishWorld {
       for (const zone of this._exclusionZones) {
         const dx2 = p.centerX - zone.centerX;
         const dz2 = p.centerZ - zone.centerZ;
-        const dist = Math.sqrt(dx2 * dx2 + dz2 * dz2) || 0.001;
+        const distSq = dx2 * dx2 + dz2 * dz2;
         const minDist = zone.radius + 7;
-        if (dist < minDist) {
+        if (distSq < minDist * minDist) {
+          const dist = Math.sqrt(distSq) || 0.001;
           const overlap = minDist - dist;
           const pushPerFrame = Math.min(overlap, 1.0) * 0.3 * dt;
           p.centerX += (dx2 / dist) * pushPerFrame;
@@ -575,8 +607,10 @@ export class FishWorld {
       for (const zone of this._exclusionZones) {
         const dx3 = finalX - zone.centerX;
         const dz3 = finalZ - zone.centerZ;
-        const dist3 = Math.sqrt(dx3 * dx3 + dz3 * dz3) || 0.001;
-        if (dist3 < zone.radius) {
+        const distSq3 = dx3 * dx3 + dz3 * dz3;
+        const radiusSq = zone.radius * zone.radius;
+        if (distSq3 < radiusSq) {
+          const dist3 = Math.sqrt(distSq3) || 0.001;
           const pushOut = zone.radius - dist3 + 0.5;
           finalX += (dx3 / dist3) * pushOut;
           finalZ += (dz3 / dist3) * pushOut;
@@ -620,8 +654,8 @@ export class FishWorld {
 
   private _manageVisibility(cameraPos: THREE.Vector3): void {
     const maxDistSq = 80 * 80;
-    const minSpawnDist = 15;
-    const maxSpawnDist = 35;
+    const minSpawnDist = 50; // ✅ WEITER WEG: 50-65m statt 15-35m
+    const maxSpawnDist = 65;
     const targetVisible = Math.max(1, this.config.soloCount);
 
     let visibleCount = 0;
@@ -648,7 +682,7 @@ export class FishWorld {
   }
 
   // -----------------------------------------------------------------------
-  // Private: Schwärme verwalten
+  // Private: SchwÃ¤rme verwalten
   // -----------------------------------------------------------------------
 
   private _scheduleNextSchool(): void {
@@ -660,7 +694,7 @@ export class FishWorld {
   }
 
   private _spawnSchool(cameraPos: THREE.Vector3): void {
-    if (!this.schoolFishMesh) return;
+    if (!this.schoolFishMesh || this._schoolPool.length === 0) return;
 
     const { schoolSize } = this.config;
     const rand = Math.random;
@@ -676,32 +710,14 @@ export class FishWorld {
       20,
     );
 
-    // Material klonen (jeder Schwarm braucht eigene Instanz für Glow)
-    const schoolMat = (
-      this.schoolFishMesh.material as THREE.MeshStandardMaterial
-    ).clone();
-    schoolMat.transparent = true;
-    schoolMat.opacity = 0;
+    // ✅ Performance: Pool-Mesh nehmen statt new InstancedMesh
+    const instances = this._schoolPool.pop()!;
+    instances.visible = true;
+    // Material zurücksetzen (opacity = 0, frischer Glow)
+    const mat = instances.material as THREE.MeshStandardMaterial;
+    mat.opacity = 0;
 
-    // InstancedMesh erstellen
-    const instances = new THREE.InstancedMesh(
-      this.schoolFishMesh.geometry,
-      schoolMat,
-      schoolSize,
-    );
-    instances.castShadow = true;
-    instances.receiveShadow = true;
-    // Frustum-Culling deaktivieren – die Instanzen werden über die Matrizen
-    // einzeln positioniert, aber der Bounding-Sphere der Geometrie ist winzig.
-    // Ohne diese Zeile verschwindet der ganze Schwarm sobald dieser winzige
-    // Sphere außerhalb des Kamera-Frustums liegt (Winkel-abhängiges Flackern).
-    instances.frustumCulled = false;
-
-    this.scene.add(instances);
-
-    const origEmissive =
-      (schoolMat as THREE.MeshStandardMaterial).emissive?.clone() ??
-      new THREE.Color(0x000000);
+    const origEmissive = mat.emissive?.clone() ?? new THREE.Color(0x000000);
 
     const fadeMs = 2000;
 
@@ -713,9 +729,7 @@ export class FishWorld {
       fishScale: this.schoolFishScale,
       glowIntensity: 0,
       originalEmissive: origEmissive,
-      // Formation aus dem Modul
       formation,
-      // Ellipsenbahn
       centerX: validX,
       centerZ: validZ,
       baseY:
@@ -750,7 +764,7 @@ export class FishWorld {
       const school = this.activeSchools[i];
       const mat = school.instances.material as THREE.MeshStandardMaterial;
 
-      // Distanz zur Kamera prüfen
+      // Distanz zur Kamera prÃ¼fen
       const dx = school.centerX - cameraPos.x;
       const dz = school.centerZ - cameraPos.z;
       const distSq = dx * dx + dz * dz;
@@ -767,8 +781,9 @@ export class FishWorld {
         }
         const fadeElapsed = now - school.fadeStartedAt;
         if (fadeElapsed >= school.fadeDuration) {
-          this.scene.remove(school.instances);
-          school.instances.dispose();
+          // ✅ Performance: Pool-Mesh zurückgeben statt dispose()
+          school.instances.visible = false;
+          this._schoolPool.push(school.instances);
           this.activeSchools.splice(i, 1);
           continue;
         }
@@ -795,13 +810,13 @@ export class FishWorld {
         this.config.floorY,
       );
 
-      // Matrizen für jeden Fisch setzen
+      // Matrizen fÃ¼r jeden Fisch setzen
       for (let j = 0; j < frame.fish.length; j++) {
         const f = frame.fish[j];
 
         this._tmpVec3.set(f.fx, f.fy, f.fz);
 
-        // Quaternion: Yaw → Pitch → Roll
+        // Quaternion: Yaw â†’ Pitch â†’ Roll
         this._tmpQuat.identity();
         this._tmpQuatA.setFromAxisAngle(
           this._up,
@@ -822,7 +837,7 @@ export class FishWorld {
   }
 
   // -----------------------------------------------------------------------
-  // Private: Echoortung – Ringe aussenden + Glow-Effekt
+  // Private: Echoortung â€“ Ringe aussenden + Glow-Effekt
   // -----------------------------------------------------------------------
 
   private _updateEcholocation(
@@ -833,10 +848,12 @@ export class FishWorld {
   ): void {
     if (!this.echolocation) return;
 
-    // Echo-Targets aus Einzelfischen sammeln
+    // Echo-Targets aus sichtbaren Einzelfischen sammeln
+    // Performance: Nur sichtbare Fische als Targets – unsichtbare (>80m)
+    // können nicht getroffen werden. Spart ~50% der Targets.
     this._echoTargets.length = 0;
     for (const fish of this.soloFishes) {
-      if (!fish.fishMesh) continue;
+      if (!fish.fishMesh || !fish.mesh.visible) continue;
       this._echoTargets.push({
         position: fish.mesh.position,
         onHit: () => {
@@ -845,7 +862,8 @@ export class FishWorld {
       });
     }
 
-    // Echo-Targets aus Schwärmen (wiederverwendeter Vector3 – kein GC!)
+    // Echo-Targets aus Schwärmen
+    // Performance: Nur den Schwarm-Mittelpunkt als Target (nicht 20 Einzelfische)
     for (const school of this.activeSchools) {
       this._echoTargets.push({
         position: this._tmpSchoolCenter.set(
@@ -859,7 +877,7 @@ export class FishWorld {
       });
     }
 
-    // Zusätzliche Echo-Targets (z. B. Quallen von JellyWorld)
+    // ZusÃ¤tzliche Echo-Targets (z.â€¯B. Quallen von JellyWorld)
     if (additionalTargets) {
       for (const t of additionalTargets) {
         this._echoTargets.push(t);
@@ -896,7 +914,7 @@ export class FishWorld {
       }
     }
 
-    // Glow bei Schwärmen
+    // Glow bei SchwÃ¤rmen
     for (const school of this.activeSchools) {
       school.glowIntensity *= decay;
 

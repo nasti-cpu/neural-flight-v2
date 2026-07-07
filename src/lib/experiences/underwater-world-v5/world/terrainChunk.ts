@@ -1,19 +1,21 @@
-/**
- * terrainChunk.ts – Erzeugt einen einzelnen Terrain-Chunk.
+﻿/**
+ * terrainChunk.ts - Erzeugt einen einzelnen Terrain-Chunk.
  *
- * Ein Chunk enthält nur noch Seegras-Dekoration.
+ * Ein Chunk enthalt nur noch Seegras-Dekoration.
  * Der Boden wird als EIN Mesh im ChunkManager verwaltet.
+ *
+ * PERFORMANCE: Alle Seegras-Halme teilen sich EIN Material.
+ * Statt fur jeden Halm ein eigenes MeshBasicNodeMaterial (TSL) zu erzeugen,
+ * nutzen wir genau EINES. Das spart hunderte Shader-Node-Graphen und damit
+ * massiv GPU-Overhead.
  */
 
 import * as THREE from "three/webgpu";
 import {
-  createSeegrassBlade,
-  createRibbonBlade,
+  createSeegrassBladeGeometry,
+  createRibbonGeometry,
+  createSeegrassMaterial,
 } from "../shader/seegrass/seegrassShader";
-
-// ---------------------------------------------------------------------------
-// Typen
-// ---------------------------------------------------------------------------
 
 export interface ExclusionZone {
   centerX: number;
@@ -34,9 +36,12 @@ export interface TerrainChunk {
   coordZ: number;
 }
 
-// ---------------------------------------------------------------------------
-// Chunk-Erstellung (nur Seegras)
-// ---------------------------------------------------------------------------
+const _sharedSeegrassMat = createSeegrassMaterial({
+  colorBottom: new THREE.Color("#0a1a0a"),
+  colorTop: new THREE.Color("#1a4a1a"),
+  swayAmount: 0.2,
+  swaySpeed: 1.3,
+});
 
 export function createTerrainChunk(
   coordX: number,
@@ -50,34 +55,24 @@ export function createTerrainChunk(
   const worldOffsetX = coordX * config.chunkSize;
   const worldOffsetZ = coordZ * config.chunkSize;
 
-  // --- Seegras ---
   const rand = createSeededRandom(seed);
 
   for (let i = 0; i < config.seegrassCount; i++) {
     const lx = (rand() - 0.5) * config.chunkSize;
     const lz = (rand() - 0.5) * config.chunkSize;
 
-    // Welt-Koordinaten für Exklusionszonen-Check
     const wx = worldOffsetX + lx;
     const wz = worldOffsetZ + lz;
     if (exclusionZones && _isInAnyZone(wx, wz, exclusionZones)) {
-      continue; // Kein Seegras unter/neben Kuppeln
+      continue;
     }
 
     const isRibbon = rand() > 0.6;
 
-    // Tiefsee-Seegras: dunkle, gedämpfte Farben statt Giftgrün
-    const darkOptions = {
-      colorBottom: new THREE.Color("#0a1a0a"),
-      colorTop: new THREE.Color("#1a4a1a"),
-    };
-    const blade = isRibbon
-      ? createRibbonBlade(darkOptions, 0.3 + rand() * 0.3, 1.5 + rand() * 2.0)
-      : createSeegrassBlade(
-          darkOptions,
-          0.1 + rand() * 0.15,
-          1.0 + rand() * 1.5,
-        );
+    const geo = isRibbon
+      ? createRibbonGeometry(0.3 + rand() * 0.3, 1.5 + rand() * 2.0)
+      : createSeegrassBladeGeometry(0.1 + rand() * 0.15, 1.0 + rand() * 1.5);
+    const blade = new THREE.Mesh(geo, _sharedSeegrassMat);
 
     blade.position.set(lx, config.floorY + 0.1, lz);
     blade.rotation.y = rand() * Math.PI * 2;
@@ -90,10 +85,6 @@ export function createTerrainChunk(
   return { group, coordX, coordZ };
 }
 
-// ---------------------------------------------------------------------------
-// Hilfsfunktionen
-// ---------------------------------------------------------------------------
-
 function createSeededRandom(seed: number): () => number {
   let s = seed | 0;
   return (): number => {
@@ -104,12 +95,6 @@ function createSeededRandom(seed: number): () => number {
   };
 }
 
-// Kein disposeChunkCache mehr nötig – Material wird im ChunkManager gecacht
-
-/**
- * Prüft, ob ein Welt-Punkt (wx, wz) innerhalb einer Exklusionszone liegt.
- * Wird von createTerrainChunk verwendet, um Seegras unter Kuppeln zu vermeiden.
- */
 function _isInAnyZone(wx: number, wz: number, zones: ExclusionZone[]): boolean {
   for (const zone of zones) {
     const dx = wx - zone.centerX;

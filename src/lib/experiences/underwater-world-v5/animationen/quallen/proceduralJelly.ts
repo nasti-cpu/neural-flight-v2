@@ -64,8 +64,8 @@ function createJellyPatternTexture(): THREE.CanvasTexture {
   }
 
   // === Vier Gonaden – gleichmäßig über U verteilt, im oberen Viertel (V 0.15–0.35) ===
-  const gonadVStart = h * 0.15;   // V=0.15
-  const gonadVEnd = h * 0.35;     // V=0.35
+  const gonadVStart = h * 0.15; // V=0.15
+  const gonadVEnd = h * 0.35; // V=0.35
   const gonadH = gonadVEnd - gonadVStart;
   const gonadW = w * 0.06;
   const gonads = 4;
@@ -135,13 +135,60 @@ function createJellyPatternTexture(): THREE.CanvasTexture {
 export interface ProceduralJelly {
   group: THREE.Group;
   bell: THREE.Mesh;
-  tentacleRoots: THREE.Object3D[];  // Eltern-Objekte der Tentakeln (für Schwenk)
-  oralArms: THREE.Object3D[];       // Mundarme
+  tentacleRoots: THREE.Object3D[]; // Eltern-Objekte der Tentakeln (für Schwenk)
+  oralArms: THREE.Object3D[]; // Mundarme
   animState: {
     phase: number;
     pulseSpeed: number;
     liftStrength: number;
     driftSpeed: number;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Klon-Funktion für den Quallen-Pool
+// ---------------------------------------------------------------------------
+
+/**
+ * Klont eine ProceduralJelly – viel günstiger als buildMoonJelly(),
+ * weil Geometrien und Materialien NICHT neu erstellt, sondern referenziert werden.
+ * Nur die Group-Struktur wird geklont.
+ */
+export function cloneJelly(template: ProceduralJelly): ProceduralJelly {
+  const group = template.group.clone(false); // Nur die Group, keine Kinder
+
+  // Bell (Mesh) klonen – das Mesh referenziert die gleiche Geometrie + Material
+  const bell = template.bell.clone() as THREE.Mesh;
+  group.add(bell);
+  bell.position.copy(template.bell.position);
+
+  // Tentakel-Roots klonen
+  const tentacleRoots: THREE.Object3D[] = [];
+  for (const root of template.tentacleRoots) {
+    const clone = root.clone(true); // Mit Kindern (den TubeMeshes)
+    group.add(clone);
+    tentacleRoots.push(clone);
+  }
+
+  // Mundarme klonen
+  const oralArms: THREE.Object3D[] = [];
+  for (const arm of template.oralArms) {
+    const clone = arm.clone(true);
+    group.add(clone);
+    oralArms.push(clone);
+  }
+
+  return {
+    group,
+    bell,
+    tentacleRoots,
+    oralArms,
+    animState: {
+      phase: Math.random() * Math.PI * 2,
+      pulseSpeed: template.animState.pulseSpeed,
+      liftStrength: template.animState.liftStrength,
+      driftSpeed: template.animState.driftSpeed,
+    },
   };
 }
 
@@ -162,14 +209,22 @@ function createTentacle(
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
     // Mehrere überlagerte Wellen für natürliche, unregelmäßige Form
-    const wave1 = Math.sin(t * Math.PI * 2.5 + Math.random() * 6) * spread * 0.4;
-    const wave2 = Math.cos(t * Math.PI * 1.3 + Math.random() * 6) * spread * 0.3;
+    const wave1 =
+      Math.sin(t * Math.PI * 2.5 + Math.random() * 6) * spread * 0.4;
+    const wave2 =
+      Math.cos(t * Math.PI * 1.3 + Math.random() * 6) * spread * 0.3;
     const x = wave1 + wave2;
     const z = Math.sin(t * Math.PI * 1.8 + Math.random() * 6) * spread * 0.35;
     points.push(new THREE.Vector3(x, -t * length, z));
   }
   const curve = new THREE.CatmullRomCurve3(points);
-  const tubeGeo = new THREE.TubeGeometry(curve, segments, radius * 0.5, 4, false);
+  const tubeGeo = new THREE.TubeGeometry(
+    curve,
+    segments,
+    radius * 0.5,
+    4,
+    false,
+  );
   const tubeMat = new THREE.MeshPhysicalMaterial({
     color: color,
     transparent: true,
@@ -197,11 +252,13 @@ function createOralArm(
   for (let i = 0; i <= segments; i++) {
     const t = i / segments;
     const spread = Math.sin(t * Math.PI) * 0.3; // Fransen-Effekt
-    points.push(new THREE.Vector3(
-      (Math.random() - 0.5) * spread,
-      -t * length,
-      (Math.random() - 0.5) * spread,
-    ));
+    points.push(
+      new THREE.Vector3(
+        (Math.random() - 0.5) * spread,
+        -t * length,
+        (Math.random() - 0.5) * spread,
+      ),
+    );
   }
   const curve = new THREE.CatmullRomCurve3(points);
   const tubeGeo = new THREE.TubeGeometry(curve, segments, radius, 5, false);
@@ -227,7 +284,15 @@ export function buildMoonJelly(): ProceduralJelly {
   // === Glocke: runde Kuppel, UNTEN OFFEN – wie eine echte Quallenglocke ===
   //     thetaLength < PI → die Kugel wird unten abgeschnitten,
   //     sodass die Glocke einen offenen Rand hat.
-  const bellGeo = new THREE.SphereGeometry(0.7, 32, 24, 0, Math.PI * 2, 0, Math.PI * 0.65);
+  const bellGeo = new THREE.SphereGeometry(
+    0.7,
+    32,
+    24,
+    0,
+    Math.PI * 2,
+    0,
+    Math.PI * 0.65,
+  );
   const pos = bellGeo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
     const y = pos.getY(i);
@@ -287,11 +352,7 @@ export function buildMoonJelly(): ProceduralJelly {
   for (let i = 0; i < 4; i++) {
     const angle = (i / 4) * Math.PI * 2 + Math.PI / 4;
     const armRoot = new THREE.Object3D();
-    armRoot.position.set(
-      Math.cos(angle) * 0.18,
-      -0.12,
-      Math.sin(angle) * 0.18,
-    );
+    armRoot.position.set(Math.cos(angle) * 0.18, -0.12, Math.sin(angle) * 0.18);
     group.add(armRoot);
 
     const arm = createOralArm(
@@ -333,7 +394,7 @@ export function buildHairJelly(): ProceduralJelly {
   for (let i = 0; i < pos.count; i++) {
     const y = pos.getY(i);
     if (y > 0) {
-      pos.setY(i, y * 0.7);  // Weniger Abflachung → runder
+      pos.setY(i, y * 0.7); // Weniger Abflachung → runder
     } else {
       pos.setY(i, y * 0.15); // Unterseite fast flach
     }
@@ -398,11 +459,7 @@ export function buildHairJelly(): ProceduralJelly {
   for (let i = 0; i < 4; i++) {
     const angle = (i / 4) * Math.PI * 2;
     const armRoot = new THREE.Object3D();
-    armRoot.position.set(
-      Math.cos(angle) * 0.2,
-      -0.18,
-      Math.sin(angle) * 0.2,
-    );
+    armRoot.position.set(Math.cos(angle) * 0.2, -0.18, Math.sin(angle) * 0.2);
     group.add(armRoot);
 
     for (let f = 0; f < 3; f++) {
@@ -464,20 +521,23 @@ export function animateProceduralJelly(
 
   // Verzerrung: negative Halbwelle (Relaxation) wird flacher
   const shaped = rawSin < 0 ? rawSin * 0.4 : rawSin;
-  const pulseNorm = (shaped + 0.4) / 1.4;   // 0 = entspannt, 1 = kontrahiert
+  const pulseNorm = (shaped + 0.4) / 1.4; // 0 = entspannt, 1 = kontrahiert
 
   // Glocken-Puls: asymmetrische Verformung
   // X und Z leicht unterschiedlich für organischeren Eindruck
   const xScale = 1 + pulseNorm * 0.05 + Math.sin(elapsed * 0.3 + phase) * 0.008;
   const yScale = 1 - pulseNorm * 0.14;
-  const zScale = 1 + pulseNorm * 0.05 + Math.cos(elapsed * 0.25 + phase * 0.7) * 0.008;
+  const zScale =
+    1 + pulseNorm * 0.05 + Math.cos(elapsed * 0.25 + phase * 0.7) * 0.008;
   bell.scale.set(xScale, yScale, zScale);
 
   // Glocke neigt sich sanft (wie eine echte Qualle, die nie perfekt
   // symmetrisch pulsiert)
   const bellTilt = pulseNorm * 0.03;
-  bell.rotation.x = Math.sin(elapsed * 0.18 + phase * 0.7) * 0.03 + bellTilt * 0.3;
-  bell.rotation.z = Math.cos(elapsed * 0.15 + phase * 0.4) * 0.03 + bellTilt * 0.2;
+  bell.rotation.x =
+    Math.sin(elapsed * 0.18 + phase * 0.7) * 0.03 + bellTilt * 0.3;
+  bell.rotation.z =
+    Math.cos(elapsed * 0.15 + phase * 0.4) * 0.03 + bellTilt * 0.2;
 
   // =========================================================================
   // 2. Vertikale Bewegung – sanftes Auf und Ab
@@ -494,12 +554,12 @@ export function animateProceduralJelly(
     // =======================================================================
 
     const d = driftSpeed;
-    const wanderX = Math.sin(elapsed * d * 0.10 + phase * 0.1) * 12;
+    const wanderX = Math.sin(elapsed * d * 0.1 + phase * 0.1) * 12;
     const wanderZ = Math.cos(elapsed * d * 0.08 + phase * 0.2) * 12;
-    const midX    = Math.sin(elapsed * d * 0.50 + phase * 0.3) * 4;
-    const midZ    = Math.cos(elapsed * d * 0.45 + phase * 0.4) * 4;
-    const localX  = Math.sin(elapsed * d * 1.20 + phase * 0.7) * 1.5;
-    const localZ  = Math.cos(elapsed * d * 1.10 + phase * 0.6) * 1.5;
+    const midX = Math.sin(elapsed * d * 0.5 + phase * 0.3) * 4;
+    const midZ = Math.cos(elapsed * d * 0.45 + phase * 0.4) * 4;
+    const localX = Math.sin(elapsed * d * 1.2 + phase * 0.7) * 1.5;
+    const localZ = Math.cos(elapsed * d * 1.1 + phase * 0.6) * 1.5;
 
     group.position.x = wanderX + midX + localX;
     group.position.z = wanderZ + midZ + localZ;
@@ -508,12 +568,14 @@ export function animateProceduralJelly(
     // 4. Yaw – der Bewegungsrichtung folgen
     // =======================================================================
 
-    const dvx = Math.cos(elapsed * d * 0.10 + phase * 0.1) * 12 * d * 0.10
-              + Math.cos(elapsed * d * 0.50 + phase * 0.3) * 4  * d * 0.50
-              + Math.cos(elapsed * d * 1.20 + phase * 0.7) * 1.5 * d * 1.20;
-    const dvz = -Math.sin(elapsed * d * 0.08 + phase * 0.2) * 12 * d * 0.08
-               -Math.sin(elapsed * d * 0.45 + phase * 0.4) * 4  * d * 0.45
-               -Math.sin(elapsed * d * 1.10 + phase * 0.6) * 1.5 * d * 1.10;
+    const dvx =
+      Math.cos(elapsed * d * 0.1 + phase * 0.1) * 12 * d * 0.1 +
+      Math.cos(elapsed * d * 0.5 + phase * 0.3) * 4 * d * 0.5 +
+      Math.cos(elapsed * d * 1.2 + phase * 0.7) * 1.5 * d * 1.2;
+    const dvz =
+      -Math.sin(elapsed * d * 0.08 + phase * 0.2) * 12 * d * 0.08 -
+      Math.sin(elapsed * d * 0.45 + phase * 0.4) * 4 * d * 0.45 -
+      Math.sin(elapsed * d * 1.1 + phase * 0.6) * 1.5 * d * 1.1;
     const moveDir = Math.atan2(dvx, dvz);
     const yawNoise = Math.sin(elapsed * 0.08 + phase * 0.2) * 0.15;
     group.rotation.y = moveDir + yawNoise;
@@ -560,6 +622,7 @@ export function animateProceduralJelly(
     const arm = oralArms[i];
     const freq = 0.3 + i * 0.08;
     arm.rotation.x = Math.sin(elapsed * freq + phase + i * 1.5) * 0.06;
-    arm.rotation.z = Math.cos(elapsed * freq * 0.8 + phase * 0.7 + i * 1.1) * 0.05;
+    arm.rotation.z =
+      Math.cos(elapsed * freq * 0.8 + phase * 0.7 + i * 1.1) * 0.05;
   }
 }

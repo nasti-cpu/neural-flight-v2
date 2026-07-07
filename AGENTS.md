@@ -45,7 +45,10 @@ Jede Datei beginnt mit einem kurzen Kommentar, der beschreibt, was die Datei mac
 - Kamera und Controls mit VR-Kompatibilität planen.
 - VR WebGPU
 - für den icaros Flugsimulator, bei dem dann VR genutzt wird
-- man fliegt also in der experience
+- https://www.icaros.com/de/produkte/icaros-health
+- man fliegt also in der experience durch seine Körper bewegung
+- alles muss an diesen Gefühl angepasst werden
+- es muss alles smooth laufen in der performance
 
 ## Datei-Konventionen
 - Experimente liegen als `.html`-Dateien in `src/`

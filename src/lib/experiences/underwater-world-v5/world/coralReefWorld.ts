@@ -146,25 +146,32 @@ export class CoralReefWorld {
       const reef = this._reefs[i];
       const dx = reef.worldX - cameraX;
       const dz = reef.worldZ - cameraZ;
-      const dist = Math.sqrt(dx * dx + dz * dz);
+      const distSq = dx * dx + dz * dz;
 
       switch (reef.state) {
         case "pending":
-          if (dist < 60) {
+          if (distSq < 70 * 70) {
+            // Bei ~70m: Riff-Gruppe vorbereiten (Korallen klonen, Platzieren)
+            // Das ist die schwere Arbeit – weit vor der Sichtbarkeit (60m)
+            this._prepareReef(reef);
+          }
+          if (distSq < 60 * 60 && reef.group) {
+            // Bei ~60m: Riff zur Szene hinzufügen (nur scene.add, kaum Arbeit)
             this._showReef(reef);
-          } else if (dist > 70) {
+          } else if (distSq > 80 * 80) {
             this._removeReefByIndex(i);
           }
           break;
 
         case "visible":
-          if (dist > 65) {
+          if (distSq > 65 * 65) {
             this._hideReef(reef);
           }
           break;
       }
 
-      if (reef.state === "visible") {
+      if (reef.state === "visible" && reef.group) {
+        const dist = Math.sqrt(distSq);
         const fullOpacityDist = 30;
         const hideDist = 65;
         let target = 1.0;
@@ -177,11 +184,45 @@ export class CoralReefWorld {
         reef.opacity += (target - reef.opacity) * Math.min(1, delta * 2.5);
         if (reef.opacity < 0.01 && target === 0) {
           this._hideReef(reef);
-        } else if (reef.group) {
+        } else {
           this._applyOpacity(reef.group, reef.opacity);
         }
       }
     }
+  }
+
+  /**
+   * Baut die Riff-Gruppe vorab, noch bevor sie zur Szene hinzugefügt wird.
+   * So blockiert der Klon-Vorgang (buildReefGroup) nicht den Frame,
+   * in dem das Riff sichtbar wird.
+   */
+  private _prepareReef(reef: ReefSlot): void {
+    if (reef.group) return; // Bereits gebaut
+    const group = buildReefGroup(
+      this._templates,
+      reef.worldX,
+      reef.worldZ,
+      this.floorY,
+    );
+    if (!group) return;
+
+    group.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material) {
+        const mats = Array.isArray(child.material)
+          ? child.material
+          : [child.material];
+        for (const m of mats) {
+          if (!m.transparent) m.transparent = true;
+          if (m.userData.baseOpacity === undefined) {
+            m.userData.baseOpacity = m.opacity;
+          }
+          m.opacity = 0;
+        }
+      }
+    });
+
+    reef.group = group;
+    reef.opacity = 0;
   }
 
   // -----------------------------------------------------------------------
@@ -238,32 +279,10 @@ export class CoralReefWorld {
   // -----------------------------------------------------------------------
 
   private _showReef(reef: ReefSlot): void {
-    const group = buildReefGroup(
-      this._templates,
-      reef.worldX,
-      reef.worldZ,
-      this.floorY,
-    );
-    if (!group) return;
-
-    group.traverse((child) => {
-      if (child instanceof THREE.Mesh && child.material) {
-        const mats = Array.isArray(child.material)
-          ? child.material
-          : [child.material];
-        for (const m of mats) {
-          if (!m.transparent) m.transparent = true;
-          if (m.userData.baseOpacity === undefined) {
-            m.userData.baseOpacity = m.opacity;
-          }
-          m.opacity = 0;
-        }
-      }
-    });
-
-    this.scene.add(group);
-    reef.group = group;
-    reef.opacity = 0;
+    if (!reef.group) {
+      this._prepareReef(reef);
+    }
+    this.scene.add(reef.group!);
     reef.state = "visible";
   }
 

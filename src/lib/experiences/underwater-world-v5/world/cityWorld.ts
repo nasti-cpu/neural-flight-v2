@@ -181,9 +181,8 @@ export class CityWorld {
       const dx = slot.worldX - cameraX;
       const dz = slot.worldZ - cameraZ;
       const distSq = dx * dx + dz * dz;
-      const dist = Math.sqrt(distSq);
 
-      this._updateSlotState(slot, dist, delta);
+      this._updateSlotState(slot, distSq, delta);
     }
   }
 
@@ -236,27 +235,33 @@ export class CityWorld {
   // Private: Slot-State verwalten
   // -----------------------------------------------------------------------
 
-  private _updateSlotState(slot: CitySlot, dist: number, delta: number): void {
+  private _updateSlotState(
+    slot: CitySlot,
+    distSq: number,
+    delta: number,
+  ): void {
     switch (slot.state) {
       case "pending":
-        if (dist < DIST_READY) {
+        if (distSq < DIST_READY * DIST_READY) {
           this._makeReady(slot);
         }
         break;
 
       case "ready":
-        if (dist < DIST_SHOW && !slot._loading) {
+        if (distSq < DIST_SHOW * DIST_SHOW && !slot._loading) {
           slot._loading = true;
           requestAnimationFrame(() => {
             this._showCity(slot);
             slot._loading = false;
           });
-        } else if (dist > DIST_UNLOAD) {
+        } else if (distSq > DIST_UNLOAD * DIST_UNLOAD) {
           this._backToPending(slot);
         }
         break;
 
       case "visible": {
+        // Echte Distanz nur im visible-Bereich berechnen (für Opazität)
+        const dist = Math.sqrt(distSq);
         let target = 1.0;
         if (dist > DIST_HIDE) {
           target = 0;
@@ -306,11 +311,21 @@ export class CityWorld {
 
     slot.domeRadius = data.domeRadius;
     slot.height = data.height;
+
+    // ✅ SCHWERE ARBEIT VORAB: Stadt-Gruppe jetzt bauen (bei ~65m),
+    //    nicht erst in _showCity (bei ~40m). So hat die GPU ~12 Sekunden
+    //    Zeit für den Klon, bevor die Stadt sichtbar wird.
+    this._buildCityGroup(slot);
+
     slot.state = "ready";
     this._rebuildExclusionZones();
   }
 
-  private _showCity(slot: CitySlot): void {
+  /**
+   * Baut die komplette Stadt-Gruppe (Klon, Kuppel, Lichter, Landschaft).
+   * Diese Arbeit läuft im "ready"-Zustand, weit vor der Sichtbarkeit.
+   */
+  private _buildCityGroup(slot: CitySlot): void {
     const template = this._templates.get(slot.type);
     const data = this._templateData.get(slot.type);
     if (!template || !data) return;
@@ -350,11 +365,24 @@ export class CityWorld {
     }
 
     this._applyOpacity(group, 0);
-    this.scene.add(group);
 
+    // Noch nicht zur Szene hinzufügen – das macht _showCity später
     slot.group = group;
     slot.lights = lights;
     slot.opacity = 0;
+  }
+
+  private _showCity(slot: CitySlot): void {
+    if (!slot.group) {
+      // Fallback: falls _makeReady es nicht geschafft hat
+      this._buildCityGroup(slot);
+    }
+
+    // ✅ LEICHTE ARBEIT: Nur noch zur Szene hinzufügen + sichtbar machen
+    // Der ganze schwere Klon-Bau ist bereits in _makeReady passiert.
+    this.scene.add(slot.group!);
+    this._applyOpacity(slot.group!, 0);
+
     slot.state = "visible";
     this._rebuildExclusionZones();
   }

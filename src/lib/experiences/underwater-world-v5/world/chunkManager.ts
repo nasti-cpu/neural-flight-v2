@@ -1,15 +1,15 @@
-/**
- * chunkManager.ts – Verwaltet das Be- und Entladen von Terrain-Chunks.
+﻿/**
+ * chunkManager.ts â€“ Verwaltet das Be- und Entladen von Terrain-Chunks.
  *
  * DIESE DATEI IST DER KERN DER WFC-INTEGRATION.
  *
  * Im Gegensatz zur V4-Version ist der ChunkManager hier mit dem WFC-System
- * verknüpft: Beim Laden eines neuen Chunks fragt er beim WFC-System an,
- * welcher Typ (Sand, Riff, Stadt, Qualle, Fisch) für diese Position kollabiert
- * wurde. Abhängig vom Typ werden dann die passenden 3D-Objekte geladen.
+ * verknÃ¼pft: Beim Laden eines neuen Chunks fragt er beim WFC-System an,
+ * welcher Typ (Sand, Riff, Stadt, Qualle, Fisch) fÃ¼r diese Position kollabiert
+ * wurde. AbhÃ¤ngig vom Typ werden dann die passenden 3D-Objekte geladen.
  *
  * Der Boden wird als EIN EINZIGES Mesh aufgebaut, das alle aktuell geladenen
- * Chunks abdeckt. Dadurch gibt es keine Kanten oder Lücken zwischen Chunks.
+ * Chunks abdeckt. Dadurch gibt es keine Kanten oder LÃ¼cken zwischen Chunks.
  */
 
 import * as THREE from "three/webgpu";
@@ -34,7 +34,7 @@ export interface ChunkManagerConfig {
 }
 
 // ---------------------------------------------------------------------------
-// ChunkManager – mit WFC-Integration
+// ChunkManager â€“ mit WFC-Integration
 // ---------------------------------------------------------------------------
 
 export class ChunkManager {
@@ -48,19 +48,26 @@ export class ChunkManager {
   /** Das EINE Boden-Mesh, das alle Chunks abdeckt */
   private floorMesh: THREE.Mesh | null = null;
 
-  /** Letzter Chunk, für den das Boden-Mesh gebaut wurde */
+  /** Letzter Chunk, fÃ¼r den das Boden-Mesh gebaut wurde */
   private _lastFloorChunkX: number = Number.NaN;
   private _lastFloorChunkZ: number = Number.NaN;
 
-  /** Exklusionszonen – hier wächst kein Seegras */
+  /** Exklusionszonen â€“ hier wÃ¤chst kein Seegras */
   private _exclusionZones: ExclusionZone[] = [];
-  /** Letzter Zonen-String zum Erkennen von Änderungen */
+  /** Letzter Zonen-String zum Erkennen von Ã„nderungen */
   private _lastZoneKey: string = "";
 
   /** WFC-Callbacks: Werden benachrichtigt, wenn ein Chunk-Typ kollabiert */
   private _wfcCallbacks: Array<
     (cx: number, cz: number, type: ChunkType) => void
   > = [];
+
+  /**
+   * Warteschlange fÃ¼r Chunks, die noch geladen werden mÃ¼ssen.
+   * Gestaffeltes Laden: max 2 Chunks pro Frame, damit der Haupt-Thread
+   * nicht blockiert wird und kein Ruckler entsteht.
+   */
+  private _pendingLoad: Array<{ cx: number; cz: number }> = [];
 
   constructor(scene: THREE.Scene, config: ChunkManagerConfig) {
     this.scene = scene;
@@ -70,7 +77,7 @@ export class ChunkManager {
 
   /**
    * Registriert einen Callback, der bei jedem WFC-Kollaps aufgerufen wird.
-   * CityWorld und CoralReefWorld nutzen das, um Städte/Riffe zu platzieren.
+   * CityWorld und CoralReefWorld nutzen das, um StÃ¤dte/Riffe zu platzieren.
    */
   public onChunkCollapsed(
     callback: (cx: number, cz: number, type: ChunkType) => void,
@@ -79,7 +86,7 @@ export class ChunkManager {
   }
 
   /**
-   * Gibt den WFC-Typ für eine Chunk-Koordinate zurück.
+   * Gibt den WFC-Typ fÃ¼r eine Chunk-Koordinate zurÃ¼ck.
    * Wird von CityWorld, CoralReefWorld, FishWorld und JellyWorld genutzt,
    * um zu entscheiden, ob sie an dieser Position aktiv werden sollen.
    */
@@ -88,7 +95,7 @@ export class ChunkManager {
   }
 
   /**
-   * Setzt Zonen, in denen kein Seegras wachsen soll (z. B. Stadt-Kuppeln).
+   * Setzt Zonen, in denen kein Seegras wachsen soll (z.â€¯B. Stadt-Kuppeln).
    */
   setExclusionZones(zones: ExclusionZone[]): void {
     const newKey = zones
@@ -110,7 +117,7 @@ export class ChunkManager {
   }
 
   /**
-   * Lädt Chunks neu, die in alten oder neuen ExclusionZonen liegen.
+   * LÃ¤dt Chunks neu, die in alten oder neuen ExclusionZonen liegen.
    */
   private _reloadChunksInZones(
     newZones: ExclusionZone[],
@@ -146,7 +153,7 @@ export class ChunkManager {
   }
 
   // -----------------------------------------------------------------------
-  // Öffentliche API
+  // Ã–ffentliche API
   // -----------------------------------------------------------------------
 
   update(playerWorldX: number, playerWorldZ: number): void {
@@ -168,22 +175,38 @@ export class ChunkManager {
       }
     }
 
-    // --- Lädt neue Chunks (inkl. WFC-Kollaps + Callback) ---
+    // --- Warteschlange fÃ¼llen: fehlende Chunks sammeln ---
+    // Performance: nicht alle Chunks in einem Frame laden, sondern
+    // gestaffelt (max 2 pro Frame). Das verhindert Ruckler beim
+    // Betreten neuer Chunk-Reihen.
+    this._pendingLoad.length = 0;
     for (const { cx, cz } of neededCoords) {
       const key = this._chunkKey(cx, cz);
       if (!this.chunks.has(key)) {
-        // WFC-Collapse passiert hier automatisch beim ersten Aufruf
-        const chunkType = this.wfc.getChunkType(cx, cz);
-        this._loadChunk(cx, cz);
-
-        // Benachrichtige alle registrierten Callbacks (CityWorld, CoralReefWorld, etc.)
-        for (const cb of this._wfcCallbacks) {
-          cb(cx, cz, chunkType);
-        }
+        this._pendingLoad.push({ cx, cz });
       }
     }
 
-    // --- Entlädt alte Chunks ---
+    // --- Gestaffelt laden: max 4 Chunks pro Frame ---
+    const MAX_LOADS_PER_FRAME = 4;
+    const toLoad = this._pendingLoad.slice(0, MAX_LOADS_PER_FRAME);
+    // Geladene aus Warteschlange entfernen, Rest bleibt für nächste Frames
+    this._pendingLoad = this._pendingLoad.slice(MAX_LOADS_PER_FRAME);
+    for (const { cx, cz } of toLoad) {
+      const key = this._chunkKey(cx, cz);
+      if (this.chunks.has(key)) continue; // Wurde inzwischen geladen?
+
+      // WFC-Collapse passiert hier automatisch beim ersten Aufruf
+      const chunkType = this.wfc.getChunkType(cx, cz);
+      this._loadChunk(cx, cz);
+
+      // Benachrichtige alle registrierten Callbacks (CityWorld, CoralReefWorld, etc.)
+      for (const cb of this._wfcCallbacks) {
+        cb(cx, cz, chunkType);
+      }
+    }
+
+    // --- EntlÃ¤dt alte Chunks ---
     for (const [key, chunk] of this.chunks) {
       if (!neededChunks.has(key)) {
         this._unloadChunk(chunk);
@@ -191,16 +214,18 @@ export class ChunkManager {
       }
     }
 
-    // --- Boden-Mesh: Einmal bauen, dann nur der Kamera folgen ---
-    // Der Nebel kaschiert das leichte Dünen-Wandern beim Verschieben.
+    // --- Boden-Mesh: Folgt dem Spieler, aber nur bei Chunk-Wechsel neu bauen ---
+    // Die Dünen-Höhen werden beim Bau in die Vertices eingebacken (Welt-Koordinaten).
+    // Einfaches Verschieben ist günstig und mit 100m Radius + Nebel unsichtbar.
+    // Nur bei Chunk-Wechsel wird neu gebaut, damit die Dünen zur Welt passen.
     if (!this.floorMesh) {
       this._buildFloorMesh(neededCoords);
+    } else {
+      const cs = this.config.chunkSize;
+      const centerX = (playerChunkX + 0.5) * cs;
+      const centerZ = (playerChunkZ + 0.5) * cs;
+      this.floorMesh.position.set(centerX, this.config.floorY, centerZ);
     }
-    if (!this.floorMesh) return;
-    const cs = this.config.chunkSize;
-    const centerX = (playerChunkX + 0.5) * cs;
-    const centerZ = (playerChunkZ + 0.5) * cs;
-    this.floorMesh.position.set(centerX, this.config.floorY, centerZ);
   }
 
   dispose(): void {
@@ -251,7 +276,9 @@ export class ChunkManager {
     const totalWidth = worldMaxX - worldMinX;
     const totalDepth = worldMaxZ - worldMinZ;
 
-    const radius = Math.max(totalWidth, totalDepth) * 0.6;
+    const radius = 100; // Fester, großer Radius – der Ring ist so groß,
+    // dass er das gesamte Chunk-Raster abdeckt, egal wo der Spieler steht.
+    // Mit Nebel (far=24m) sieht man den Rand nie.
     const thetaSegs = Math.max(96, Math.ceil(radius * 3));
     const radialSegs = Math.max(32, Math.ceil(radius * 0.8));
     const geo = new THREE.RingGeometry(0, radius, thetaSegs, radialSegs);
@@ -300,7 +327,7 @@ export class ChunkManager {
   }
 
   // -----------------------------------------------------------------------
-  // Dünen-Mathematik
+  // DÃ¼nen-Mathematik
   // -----------------------------------------------------------------------
 
   private _duneHeight(wx: number, wz: number): number {
@@ -373,16 +400,6 @@ export class ChunkManager {
     chunk.group.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         child.geometry?.dispose();
-        if (child.material) {
-          const mats = Array.isArray(child.material)
-            ? child.material
-            : [child.material];
-          for (const mat of mats) {
-            if (mat instanceof THREE.MeshBasicNodeMaterial) {
-              mat.dispose();
-            }
-          }
-        }
       }
     });
   }

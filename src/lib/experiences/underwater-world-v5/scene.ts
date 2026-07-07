@@ -87,7 +87,7 @@ const WORLD_CONFIG = {
   floorY: -4,
   duneHeight: 0.3,
   chunkSize: 16,
-  renderDistance: 2,
+  renderDistance: 1, // ✅ Reduziert: 3×3=9 Chunks statt 5×5=25
   seegrassCount: 10,
 
   waterY: 22,

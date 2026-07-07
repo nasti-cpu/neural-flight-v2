@@ -1,17 +1,18 @@
-/**
- * jellyWorld.ts – Mondquallen in der Unterwasserwelt.
+﻿/**
+ * jellyWorld.ts â€“ Mondquallen in der Unterwasserwelt.
  *
- * Verhält sich wie die Fische: Quallen tauchen in Kameranähe auf
+ * VerhÃ¤lt sich wie die Fische: Quallen tauchen in KameranÃ¤he auf
  * und verschwinden, wenn man sich entfernt. Sie erscheinen entweder
- * allein oder in Gruppen von 3–5 Tieren.
+ * allein oder in Gruppen von 3â€“5 Tieren.
  *
- * In Gruppen behalten die Quallen Abstand zueinander – sie schwimmen
+ * In Gruppen behalten die Quallen Abstand zueinander â€“ sie schwimmen
  * auf individuellen Mini-Orbits um das Gruppen-Zentrum.
  */
 
 import * as THREE from "three/webgpu";
 import {
   buildMoonJelly,
+  cloneJelly,
   animateProceduralJelly,
   type ProceduralJelly,
 } from "../animationen/quallen/proceduralJelly";
@@ -39,8 +40,8 @@ const DEFAULT_CONFIG: JellyWorldConfig = {
   floorY: -4,
   waterY: 15,
   maxGroups: 1,
-  spawnMinDist: 15,
-  spawnMaxDist: 25,
+  spawnMinDist: 50, // ✅ Weiter weg spawnen (50m statt 15m)
+  spawnMaxDist: 65, //    Quallen schwimmen dann gemächlich näher
   respawnDist: 30,
 };
 
@@ -54,7 +55,7 @@ interface JellyGroupMember {
   orbitRadius: number;
   yOffset: number;
   animPhase: number;
-  /** Echoortungs-Glow (0–1) */
+  /** Echoortungs-Glow (0â€“1) */
   glowIntensity: number;
   /** Original-Emissive der Glocke vor dem Glow */
   originalEmissive: THREE.Color | null;
@@ -71,7 +72,7 @@ interface JellyGroup {
   radius: number;
   /** Start-Winkel auf der Gruppen-Bahn */
   startAngle: number;
-  /** Unsichtbar (zu weit von Kamera entfernt) – wird ohne Teleport neu positioniert */
+  /** Unsichtbar (zu weit von Kamera entfernt) â€“ wird ohne Teleport neu positioniert */
   hidden: boolean;
 }
 
@@ -96,25 +97,32 @@ export class JellyWorld {
   /** Merkt sich, ob überhaupt Glow aktiv ist (Performance-Optimierung) */
   private _hasActiveGlow: boolean = false;
 
+  /**
+   * Quallen-Pool: Einmal gebaute Quallen werden wiederverwendet.
+   * buildMoonJelly() erzeugt SphereGeometry + Tentakel + Mundarme – das ist
+   * teuer und blockiert den Frame. Mit dem Pool wird nur geklont.
+   */
+  private _jellyPool: ProceduralJelly[] = [];
+
   constructor(scene: THREE.Scene, config?: Partial<JellyWorldConfig>) {
     this.scene = scene;
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
   // -----------------------------------------------------------------------
-  // Exklusionszonen (Stadt-Kuppeln) – Quallen meiden diese Bereiche
+  // Exklusionszonen (Stadt-Kuppeln) â€“ Quallen meiden diese Bereiche
   // -----------------------------------------------------------------------
 
   /**
-   * Setzt die Zonen, die Quallen meiden sollen (z. B. Stadt-Kuppeln).
-   * Die Quallen weichen sanft über die graduelle Lenkung in _updateGroup aus.
+   * Setzt die Zonen, die Quallen meiden sollen (z.â€¯B. Stadt-Kuppeln).
+   * Die Quallen weichen sanft Ã¼ber die graduelle Lenkung in _updateGroup aus.
    */
   setExclusionZones(zones: ExclusionZone[], cameraPos?: THREE.Vector3): void {
     this._exclusionZones = zones;
   }
 
   /**
-   * Gibt Echoortungs-Ziele für alle sichtbaren Quallen zurück.
+   * Gibt Echoortungs-Ziele fÃ¼r alle sichtbaren Quallen zurÃ¼ck.
    * Wird von FishWorld._updateEcholocation verwendet.
    */
   getEchoTargets(): EchoTarget[] {
@@ -134,8 +142,8 @@ export class JellyWorld {
   }
 
   /**
-   * Prüft, ob eine (x, z)-Position innerhalb einer Exklusionszone liegt.
-   * @param margin – Zusätzlicher Sicherheitsabstand
+   * PrÃ¼ft, ob eine (x, z)-Position innerhalb einer Exklusionszone liegt.
+   * @param margin â€“ ZusÃ¤tzlicher Sicherheitsabstand
    */
   private _isInExclusionZone(
     x: number,
@@ -154,18 +162,25 @@ export class JellyWorld {
   }
 
   // -----------------------------------------------------------------------
-  // Initialisierung – erzeugt die ersten Gruppen
+  // Initialisierung â€“ erzeugt die ersten Gruppen
   // -----------------------------------------------------------------------
 
   async init(cameraPos?: THREE.Vector3): Promise<void> {
     const pos = cameraPos ?? new THREE.Vector3(0, 0, 0);
+
+    // Quallen-Pool vorab befüllen (max 3 Gruppen × 3 Quallen = 9)
+    const poolSize = this.config.maxGroups * 3;
+    for (let i = 0; i < poolSize; i++) {
+      this._jellyPool.push(buildMoonJelly());
+    }
+
     for (let i = 0; i < this.config.maxGroups; i++) {
       this._spawnGroup(pos);
     }
   }
 
   // -----------------------------------------------------------------------
-  // Update – jeden Frame von underwaterWorld aufgerufen
+  // Update â€“ jeden Frame von underwaterWorld aufgerufen
   // -----------------------------------------------------------------------
 
   update(delta: number, elapsed: number, cameraPos: THREE.Vector3): void {
@@ -178,37 +193,32 @@ export class JellyWorld {
       }
     }
 
-    // --- Sichtbarkeit verwalten: Gruppen > 60 m verstecken, unsichtbare neu platzieren ---
+    // --- Sichtbarkeit verwalten: Gruppen > 60â€¯m verstecken, unsichtbare neu platzieren ---
     this._manageVisibility(cameraPos);
 
     // --- Echoortungs-Glow: exponentieller Abfall ---
-    // Performance: nur weitermachen, wenn überhaupt Glow aktiv ist
-    if (this._hasActiveGlow) {
-      const decay = Math.exp(-3.0 * delta);
-      this._hasActiveGlow = false;
-      for (const group of this.groups) {
-        for (const member of group.members) {
-          if (member.glowIntensity < 0.01) continue;
-          member.glowIntensity *= decay;
-          if (member.glowIntensity > 0.01) {
-            this._hasActiveGlow = true;
-            const mat = member.jelly.bell
-              .material as THREE.MeshPhysicalMaterial;
-            this._tmpColor
-              .copy(member.originalEmissive ?? this._tmpColor.set(0x000000))
-              .lerp(this._glowColor, member.glowIntensity);
-            mat.emissive.copy(this._tmpColor);
-            mat.emissiveIntensity = 0.2 + member.glowIntensity * 1.8;
-          } else {
-            const mat = member.jelly.bell
-              .material as THREE.MeshPhysicalMaterial;
-            if (member.originalEmissive)
-              mat.emissive.copy(member.originalEmissive);
-            mat.emissiveIntensity = 0;
-          }
+    let hasActiveGlow = false;
+    for (const group of this.groups) {
+      for (const member of group.members) {
+        if (member.glowIntensity < 0.01) continue;
+        hasActiveGlow = true;
+        member.glowIntensity *= Math.exp(-3.0 * delta);
+        if (member.glowIntensity > 0.01) {
+          const mat = member.jelly.bell.material as THREE.MeshPhysicalMaterial;
+          this._tmpColor
+            .copy(member.originalEmissive ?? this._tmpColor.set(0x000000))
+            .lerp(this._glowColor, member.glowIntensity);
+          mat.emissive.copy(this._tmpColor);
+          mat.emissiveIntensity = 0.2 + member.glowIntensity * 1.8;
+        } else {
+          const mat = member.jelly.bell.material as THREE.MeshPhysicalMaterial;
+          if (member.originalEmissive)
+            mat.emissive.copy(member.originalEmissive);
+          mat.emissiveIntensity = 0;
         }
       }
     }
+    this._hasActiveGlow = hasActiveGlow;
 
     // --- Neue Gruppe spawnen, wenn Platz ist ---
     while (this.groups.length < cfg.maxGroups) {
@@ -217,7 +227,7 @@ export class JellyWorld {
   }
 
   // -----------------------------------------------------------------------
-  // Aufräumen
+  // AufrÃ¤umen
   // -----------------------------------------------------------------------
 
   dispose(): void {
@@ -261,7 +271,9 @@ export class JellyWorld {
     const members: JellyGroupMember[] = [];
 
     for (let i = 0; i < groupSize; i++) {
-      const jelly = buildMoonJelly();
+      // ✅ Performance: Qualle aus dem Pool klonen statt neu bauen
+      const template = this._jellyPool[i % this._jellyPool.length];
+      const jelly = cloneJelly(template);
 
       // Gleichmäßig ums Zentrum verteilt + minimale Distanz
       const memberAngle = (i / groupSize) * Math.PI * 2 + Math.random() * 0.5;
@@ -309,12 +321,6 @@ export class JellyWorld {
     };
 
     this.groups.push(group);
-
-    const sizeNames = ["einsam", "klein"];
-    const sizeName = groupSize === 1 ? "einsam" : "klein";
-    console.log(
-      `🌊 Quallen-Gruppe erschienen (${sizeName}, ${groupSize} Tiere)`,
-    );
   }
 
   // -----------------------------------------------------------------------
@@ -325,18 +331,7 @@ export class JellyWorld {
     const group = this.groups[index];
     for (const member of group.members) {
       this.scene.remove(member.jelly.group);
-      // Geometrien + Materialien disposen
-      member.jelly.group.traverse((ch) => {
-        if (ch instanceof THREE.Mesh) {
-          ch.geometry?.dispose();
-          if (ch.material) {
-            const mats = Array.isArray(ch.material)
-              ? ch.material
-              : [ch.material];
-            for (const m of mats) m.dispose();
-          }
-        }
-      });
+      member.jelly.group.visible = false;
     }
     this.groups.splice(index, 1);
   }
@@ -355,9 +350,10 @@ export class JellyWorld {
       for (const zone of this._exclusionZones) {
         const dx = group.centerX - zone.centerX;
         const dz = group.centerZ - zone.centerZ;
-        const dist = Math.sqrt(dx * dx + dz * dz) || 0.001;
+        const distSq = dx * dx + dz * dz;
         const minDist = zone.radius + group.radius + 2; // + Gruppen-Orbit-Radius + Puffer
-        if (dist < minDist) {
+        if (distSq < minDist * minDist) {
+          const dist = Math.sqrt(distSq) || 0.001;
           const overlap = minDist - dist;
           const pushPerFrame = Math.min(overlap, 1.0) * 0.25 * delta;
           group.centerX += (dx / dist) * pushPerFrame;
@@ -397,7 +393,7 @@ export class JellyWorld {
       );
 
       // Y-Position setzen: animateProceduralJelly setzt group.position.y auf
-      // lift + depthWave (relativ) – wir addieren baseY + yOffset für die Welt-Position
+      // lift + depthWave (relativ) â€“ wir addieren baseY + yOffset fÃ¼r die Welt-Position
       member.jelly.group.position.y += oy;
     }
   }
@@ -407,15 +403,15 @@ export class JellyWorld {
   // -----------------------------------------------------------------------
 
   /**
-   * Versteckt Gruppen, die weiter als 60 m von der Kamera entfernt sind,
-   * und positioniert unsichtbare Gruppen in Kameranähe neu.
+   * Versteckt Gruppen, die weiter als 60â€¯m von der Kamera entfernt sind,
+   * und positioniert unsichtbare Gruppen in KameranÃ¤he neu.
    * So bleiben Quallen auf festen Welt-Orbits, ohne zu teleportieren.
    */
   private _manageVisibility(cameraPos: THREE.Vector3): void {
     const maxDistSq = 60 * 60;
     const targetVisible = this.config.maxGroups;
 
-    // 1) Sichtbare Gruppen zählen, zu weit entfernte verstecken
+    // 1) Sichtbare Gruppen zÃ¤hlen, zu weit entfernte verstecken
     let visibleCount = 0;
     for (const group of this.groups) {
       const dx = group.centerX - cameraPos.x;
@@ -434,7 +430,7 @@ export class JellyWorld {
       }
     }
 
-    // 2) Nicht genug sichtbare Gruppen? → unsichtbare neu positionieren
+    // 2) Nicht genug sichtbare Gruppen? â†’ unsichtbare neu positionieren
     if (visibleCount < targetVisible) {
       for (const group of this.groups) {
         if (group.hidden) {
@@ -457,7 +453,7 @@ export class JellyWorld {
   private _repositionGroup(group: JellyGroup, cameraPos: THREE.Vector3): void {
     const cfg = this.config;
 
-    // Neue Position außerhalb aller Exklusionszonen suchen
+    // Neue Position auÃŸerhalb aller Exklusionszonen suchen
     let cx: number, cz: number;
     let attempts = 0;
     const margin = 5;
