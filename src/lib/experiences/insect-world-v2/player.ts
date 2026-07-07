@@ -7,6 +7,7 @@
  */
 import * as THREE from "three/webgpu";
 import type { ExperienceState } from "../types";
+import { getWorldHeight } from "./Biome/Wiese/grass-manager";
 
 const DEFAULT_BASE_SPEED = 2;
 const PITCH_SPEED_FACTOR = 0.03;
@@ -43,7 +44,9 @@ export function updatePlayer(
 
   camera.position.addScaledVector(forward, moveSpeed * delta);
 
-  // Höhe über Grund halten (~2m = Insekten-Perspektive)
-  camera.position.y += (2 - camera.position.y) * 0.5 * delta;
-  if (camera.position.y < 0.5) camera.position.y = 0.5;
+  // Höhe über Grund halten (~2m über dem Boden = Insekten-Perspektive)
+  const groundY = getWorldHeight(camera.position.x, camera.position.z);
+  const targetY = groundY + 2;
+  camera.position.y += (targetY - camera.position.y) * 0.5 * delta;
+  if (camera.position.y < groundY + 0.5) camera.position.y = groundY + 0.5;
 }
