@@ -18,7 +18,7 @@
 	import { createFlowers } from "$lib/experiences/insect-world-v2/Objekte/Blumen/blumen";
 	import { createBees } from "$lib/experiences/insect-world-v2/Objekte/Bienen/bienen";
 	import { createButterflies } from "$lib/experiences/insect-world-v2/Objekte/Schmetterlinge/schmetterlinge";
-	import { CITY } from "$lib/experiences/insect-world-v2/Objekte/Stadt/city";
+	import { CITY_CONFIG as CITY } from "$lib/experiences/insect-world-v2/Objekte/Stadt/city";
 
 	import beeGlbUrl from "$lib/experiences/insect-world-v2/Objekte/Bienen/Bee.glb?url";
 	import butterflyGlbUrl from "$lib/experiences/insect-world-v2/Objekte/Schmetterlinge/Beautiful Butterfly.glb?url";
@@ -91,52 +91,56 @@
 				}
 			}
 
-			// Stadt laden
+			// Stadt laden (mehrere Instanzen mit CityManager-Stil)
 			try {
 				const cityScene = await new Promise<THREE.Group>((resolve, reject) => {
 					new GLTFLoader().load(CITY.MODEL, (gltf) => resolve(gltf.scene), undefined, reject);
 				});
-				cityScene.scale.setScalar(CITY.SCALE);
-				cityScene.position.set(CITY.POSITION.x, CITY.POSITION.y, CITY.POSITION.z);
-				cityScene.rotation.y = CITY.ROTATION_Y;
-				scene.add(cityScene);
-				console.log("[Stadt] Stadt geladen");
 
-				// Gras im Stadt-Bereich entfernen
-				meadow.clearRotatedRect(CITY.CLEAR.CENTER.x, CITY.CLEAR.CENTER.z,
-					CITY.CLEAR.RECT.hw, CITY.CLEAR.RECT.hd, CITY.CLEAR.RECT.angle, CITY.CLEAR.RECT.border);
+				// Drei Städte in verschiedenen Richtungen platzieren
+				const cityPositions = [
+					{ x: 18, z: 0 },
+					{ x: -50, z: -40 },
+					{ x: 40, z: -60 },
+				];
 
-				// Blumen im Stadt-Bereich entfernen (auf y=-100 setzen)
-				const flowerMeshes: THREE.InstancedMesh[] = [];
-				flowers.group.children.forEach((child) => {
-					if (child instanceof THREE.InstancedMesh) {
-						flowerMeshes.push(child);
-					}
-				});
-				const sin = Math.sin(CITY.CLEAR.RECT.angle);
-				const cos = Math.cos(CITY.CLEAR.RECT.angle);
-				const bw = CITY.CLEAR.RECT.hw + CITY.CLEAR.RECT.border;
-				const bd = CITY.CLEAR.RECT.hd + CITY.CLEAR.RECT.border;
-				const d = new THREE.Object3D();
-				const p = new THREE.Vector3();
-				for (const mesh of flowerMeshes) {
-					for (let i = 0; i < mesh.count; i++) {
-						mesh.getMatrixAt(i, d.matrix);
-						p.setFromMatrixPosition(d.matrix);
-						const dx = p.x - CITY.CLEAR.CENTER.x;
-						const dz = p.z - CITY.CLEAR.CENTER.z;
-						const localX = dx * cos - dz * sin;
-						const localZ = dx * sin + dz * cos;
-						if (Math.abs(localX) < bw && Math.abs(localZ) < bd) {
-							d.position.set(p.x, -100, p.z);
-							d.scale.setScalar(1);
-							d.rotation.set(0, 0, 0);
-							d.updateMatrix();
-							mesh.setMatrixAt(i, d.matrix);
+				for (const pos of cityPositions) {
+					const clone = cityScene.clone(true);
+					clone.scale.setScalar(CITY.SCALE);
+					clone.position.set(pos.x, 0, pos.z);
+					clone.rotation.y = Math.random() * Math.PI * 2;
+					scene.add(clone);
+
+					// Gras + Blumen im Kreis um die Stadt entfernen
+					const radius = CITY.CLEAR_RADIUS;
+					meadow.clearCircle(pos.x, pos.z, radius);
+					// Blumen im Kreis entfernen
+					const flowerMeshes: THREE.InstancedMesh[] = [];
+					flowers.group.children.forEach((child) => {
+						if (child instanceof THREE.InstancedMesh) {
+							flowerMeshes.push(child);
 						}
+					});
+					const d = new THREE.Object3D();
+					const p = new THREE.Vector3();
+					for (const mesh of flowerMeshes) {
+						for (let i = 0; i < mesh.count; i++) {
+							mesh.getMatrixAt(i, d.matrix);
+							p.setFromMatrixPosition(d.matrix);
+							const dx = p.x - pos.x;
+							const dz = p.z - pos.z;
+							if (Math.sqrt(dx * dx + dz * dz) < radius) {
+								d.position.set(p.x, -100, p.z);
+								d.scale.setScalar(1);
+								d.rotation.set(0, 0, 0);
+								d.updateMatrix();
+								mesh.setMatrixAt(i, d.matrix);
+							}
+						}
+						mesh.instanceMatrix.needsUpdate = true;
 					}
-					mesh.instanceMatrix.needsUpdate = true;
 				}
+				console.log("[Stadt] Städte geladen:", cityPositions.length);
 			} catch (e) {
 				console.warn("[Stadt] Stadt-Fehler:", e);
 			}

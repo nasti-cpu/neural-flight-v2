@@ -66,7 +66,13 @@ export const manifest: ExperienceManifest = {
   author: "ICAROS Lab",
 
   parameters,
-  outputs: [],
+  outputs: [
+    {
+      id: "citiesDiscovered",
+      label: "Städte entdeckt",
+      type: "number",
+    },
+  ],
   interfaces: { orientation: true, speed: false },
 
   camera: { fov: 70, near: 0.1, far: 800 },

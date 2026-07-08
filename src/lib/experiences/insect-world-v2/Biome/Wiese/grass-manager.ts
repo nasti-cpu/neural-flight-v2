@@ -50,12 +50,19 @@ function worldGroundHeight(x: number, z: number): number {
 
 // ── ClearRegion (intern) ──
 
-interface ClearRegion {
+interface RectClearRegion {
   cx: number;
   cz: number;
   hw: number;
   hd: number;
   angle: number;
+  border: number;
+}
+
+interface CircleClearRegion {
+  cx: number;
+  cz: number;
+  radius: number;
   border: number;
 }
 
@@ -95,8 +102,10 @@ export class GrassManager {
   /** Globale Liste aller Blumen-Farben (parallel zu flowerTargets, für Pheromon-Spuren) */
   public readonly flowerColors: THREE.Color[] = [];
 
-  /** Registrierte Clear-Regionen (z.B. Stadt) */
-  private clearRegions: ClearRegion[] = [];
+  /** Registrierte Clear-Regionen (z.B. Stadt) – Rechtecke */
+  private clearRegions: RectClearRegion[] = [];
+  /** Registrierte kreisförmige Clear-Regionen (z.B. Stadt) */
+  private circleClearRegions: CircleClearRegion[] = [];
 
   // Einmal erzeugte, gemeinsame Ressourcen (wiederverwendet)
   private bladeGeo: THREE.ConeGeometry;
@@ -189,7 +198,7 @@ export class GrassManager {
   }
 
   /**
-   * Registriert einen Bereich, in dem kein Gras und keine Blumen wachsen sollen (z. B. Stadt).
+   * Registriert einen rechteckigen Bereich, in dem kein Gras und keine Blumen wachsen sollen (z. B. Stadt).
    * Neue Chunks beachten das automatisch. Existierende Chunks werden nachträglich bereinigt.
    */
   addClearRegion(
@@ -206,9 +215,24 @@ export class GrassManager {
   }
 
   /**
+   * Registriert einen kreisförmigen Bereich, in dem kein Gras und keine Blumen wachsen sollen.
+   */
+  addCircleClearRegion(
+    cx: number,
+    cz: number,
+    radius: number,
+    border: number = 0.5,
+  ): void {
+    this.circleClearRegions.push({ cx, cz, radius, border });
+    // Bereits existierende Chunks nachträglich bereinigen
+    this.clearCircle(cx, cz, radius, border);
+  }
+
+  /**
    * Prüft, ob eine Position in einer der registrierten Clear-Regionen liegt.
    */
   private isPositionCleared(x: number, z: number): boolean {
+    // Rechtecke prüfen
     for (const reg of this.clearRegions) {
       const dx = x - reg.cx;
       const dz = z - reg.cz;
@@ -219,6 +243,15 @@ export class GrassManager {
       const bw = reg.hw + reg.border;
       const bd = reg.hd + reg.border;
       if (Math.abs(localX) < bw && Math.abs(localZ) < bd) {
+        return true;
+      }
+    }
+    // Kreise prüfen
+    for (const reg of this.circleClearRegions) {
+      const dx = x - reg.cx;
+      const dz = z - reg.cz;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < reg.radius + reg.border) {
         return true;
       }
     }
@@ -258,6 +291,42 @@ export class GrassManager {
         const localZ = dx * sinVal + dz * cosVal;
 
         if (Math.abs(localX) < bw && Math.abs(localZ) < bd) {
+          dummy.position.set(pos.x, -100, pos.z);
+          dummy.scale.setScalar(0);
+          dummy.rotation.set(0, 0, 0);
+          dummy.updateMatrix();
+          mesh.setMatrixAt(i, dummy.matrix);
+        }
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  /**
+   * Entfernt alle Grashalme in einem Kreis (z. B. für Stadt).
+   */
+  clearCircle(
+    cx: number,
+    cz: number,
+    radius: number,
+    border: number = 0.5,
+  ): void {
+    const r = radius + border;
+    const dummy = new THREE.Object3D();
+    const pos = new THREE.Vector3();
+
+    for (const chunk of this.active.values()) {
+      const mesh = chunk.mesh;
+      const count = mesh.count;
+
+      for (let i = 0; i < count; i++) {
+        mesh.getMatrixAt(i, dummy.matrix);
+        pos.setFromMatrixPosition(dummy.matrix);
+        const dx = pos.x - cx;
+        const dz = pos.z - cz;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+
+        if (dist < r) {
           dummy.position.set(pos.x, -100, pos.z);
           dummy.scale.setScalar(0);
           dummy.rotation.set(0, 0, 0);

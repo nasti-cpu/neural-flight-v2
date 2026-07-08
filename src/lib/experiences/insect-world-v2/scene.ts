@@ -1,7 +1,8 @@
 /**
  * insect-world-v2 — Scene Lifecycle.
  * setup, tick, dispose — baut die vollständige Szene auf:
- * Himmel, Wiese (WFC-basiert), Blumen (dynamisch), Bienen, Schmetterlinge und Stadt.
+ * Himmel, Wiese (WFC-basiert), Blumen (dynamisch), Bienen, Schmetterlinge,
+ * mehrere Städte (prozedural) und ein leuchtender Führungspfad zur nächsten Stadt.
  *
  * WebGPU + TSL (siehe AGENTS.md).
  */
@@ -16,7 +17,8 @@ import {
   createButterflies,
   type ButterflySwarm,
 } from "./Objekte/Schmetterlinge/schmetterlinge";
-import { CITY } from "./Objekte/Stadt/city";
+import { CityManager } from "./Objekte/Stadt/city-manager";
+import { CityGuidePath } from "./Objekte/Stadt/city-guide-path";
 import { PheromoneSystem } from "./Sinne/Pheromonspuren/pheromonspuren";
 import beeGlbUrl from "./Objekte/Bienen/Bee.glb?url";
 import butterflyGlbUrl from "./Objekte/Schmetterlinge/Beautiful Butterfly.glb?url";
@@ -29,18 +31,8 @@ interface InsectWorldV2State extends ExperienceState {
   butterflies: ButterflySwarm;
   pheromones: PheromoneSystem;
   sky: THREE.Mesh;
-  city: THREE.Group | null;
-}
-
-function loadGLB(url: string): Promise<THREE.Group> {
-  return new Promise((resolve, reject) => {
-    new GLTFLoader().load(
-      url,
-      (gltf) => resolve(gltf.scene),
-      undefined,
-      reject,
-    );
-  });
+  cityManager: CityManager;
+  guidePath: CityGuidePath;
 }
 
 export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
@@ -68,38 +60,24 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   );
   ctx.scene.add(grassManager.group);
 
-  // 4. Stadt laden
-  let city: THREE.Group | null = null;
-  try {
-    const cityScene = await loadGLB(CITY.MODEL);
-    cityScene.scale.setScalar(CITY.SCALE);
-    cityScene.position.set(CITY.POSITION.x, CITY.POSITION.y, CITY.POSITION.z);
-    cityScene.rotation.y = CITY.ROTATION_Y;
-    ctx.scene.add(cityScene);
-    city = cityScene;
+  // 4. Städte prozedural spawnen
+  const cityManager = new CityManager();
 
-    // Stadt-Bereich im GrassManager registrieren (verhindert Gras/Blumen dort)
-    grassManager.addClearRegion(
-      CITY.CLEAR.CENTER.x,
-      CITY.CLEAR.CENTER.z,
-      CITY.CLEAR.RECT.hw,
-      CITY.CLEAR.RECT.hd,
-      CITY.CLEAR.RECT.angle,
-      CITY.CLEAR.RECT.border,
-    );
-  } catch (e) {
-    console.warn("[V2] Stadt konnte nicht geladen werden:", e);
-  }
+  // 4a. Zufällige Positionen generieren (8–12 Städte, 200–300m Abstand)
+  const cityPositions = cityManager.generatePositions(
+    10,
+    200,
+    300,
+  );
 
-  // 4b. Spawn-Chunk vorbereiten: Wir sagen der WFC-Engine,
+  // 4b. Städte laden und platzieren
+  await cityManager.loadCities(cityPositions, ctx.scene, grassManager);
+
+  // 4c. Spawn-Chunk vorbereiten: Wir sagen der WFC-Engine,
   // dass der Chunk an Position (0,0) auf jeden Fall FLOWERS_DENSE sein soll.
-  // Das garantiert, dass direkt beim Start Blumen zu sehen sind.
-  // Ohne diesen Aufruf wäre der Chunk-Typ zufällig (nur ~34% Chance auf Blumen).
   grassManager.preSeedSpawn();
 
-  // 4c. Ersten Chunk-Ladevorgang anstoßen.
-  // Der Spieler startet bei (0, 2, 0) → Chunk (0,0) wird geladen.
-  // Jetzt sind Gras, Boden und Blumen sofort sichtbar.
+  // 4d. Ersten Chunk-Ladevorgang anstoßen.
   grassManager.update(new THREE.Vector3(0, 2, 0));
 
   // 5. Bienen (fliegen von Blüte zu Blüte)
@@ -139,7 +117,6 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 
   // 7. Pheromon-Spuren (Glühwürmchen-Variante)
   const pheromones = new PheromoneSystem();
-  // Vector3[] + Color[] → FlowerTarget[] kombinieren (Pheromone brauchen .position und .color)
   const pheromoneTargets = grassManager.flowerTargets.map((pos, i) => ({
     position: pos,
     color: grassManager.flowerColors[i] ?? new THREE.Color(0xffffff),
@@ -147,11 +124,30 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   pheromones.addTrails(pheromoneTargets, ctx.camera.position);
   ctx.scene.add(pheromones.group);
 
+  // 8. City Guide Path (leuchtender Neon-Pfad zur nächsten Stadt)
+  const guidePath = new CityGuidePath();
+  ctx.scene.add(guidePath.group);
+
+  // Ersten Pfad zur nächsten unentdeckten Stadt setzen
+  const nearest = cityManager.getNearestUndiscovered(ctx.camera.position);
+  if (nearest) {
+    guidePath.setTarget(ctx.camera.position, nearest.position);
+  }
+
   // Kamera positionieren (Insektenperspektive ~2m)
   const camera = ctx.camera;
   camera.position.set(0, 2, 0);
 
-  return { camera, grassManager, bees, butterflies, pheromones, sky, city };
+  return {
+    camera,
+    grassManager,
+    bees,
+    butterflies,
+    pheromones,
+    sky,
+    cityManager,
+    guidePath,
+  };
 }
 
 export function tick(
@@ -167,10 +163,35 @@ export function tick(
   // Pheromon-Spuren-Animation
   s.pheromones.update(ctx.elapsed);
 
+  // City Guide Path animieren
+  s.guidePath.update(ctx.elapsed);
+
+  // Prüfen ob der Spieler die Ziel-Stadt erreicht hat (< 20m Distanz)
+  const playerPos = ctx.camera.position;
+  const target = s.cityManager.getNearestUndiscovered(playerPos);
+  if (target) {
+    const dist = playerPos.distanceTo(target.position);
+    if (dist < 20) {
+      s.cityManager.markVisited(target);
+      // Pfad zur nächsten Stadt aktualisieren
+      const next = s.cityManager.getNearestUndiscovered(playerPos);
+      if (next) {
+        s.guidePath.setTarget(playerPos, next.position);
+      } else {
+        s.guidePath.clear();
+      }
+    }
+  }
+
   // Wiese: Chunks um den Spieler laden/entladen
   s.grassManager.update(ctx.camera.position);
 
-  return { state: s };
+  return {
+    state: s,
+    outputs: {
+      citiesDiscovered: s.cityManager.discoveredCount,
+    },
+  };
 }
 
 export function dispose(state: ExperienceState, _scene: THREE.Scene): void {
@@ -180,25 +201,14 @@ export function dispose(state: ExperienceState, _scene: THREE.Scene): void {
   s.butterflies.dispose();
   s.pheromones.dispose();
   s.grassManager.dispose();
-  if (s.city) {
-    _scene.remove(s.city);
-    s.city.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
-        child.geometry.dispose();
-        if (Array.isArray(child.material)) {
-          child.material.forEach((m) => m.dispose());
-        } else {
-          child.material.dispose();
-        }
-      }
-    });
-  }
+  s.cityManager.dispose(_scene);
+  s.guidePath.dispose();
   _scene.remove(s.sky);
   (s.sky.geometry as THREE.BufferGeometry).dispose();
   (s.sky.material as THREE.Material).dispose();
-  // Alle Gruppen aus der Szene entfernen
   _scene.remove(s.grassManager.group);
   _scene.remove(s.bees.group);
   _scene.remove(s.butterflies.group);
   _scene.remove(s.pheromones.group);
+  _scene.remove(s.guidePath.group);
 }

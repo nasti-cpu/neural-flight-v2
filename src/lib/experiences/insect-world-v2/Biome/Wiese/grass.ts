@@ -130,6 +130,7 @@ export interface MeadowPatch {
 	dispose: () => void;
 	getHeightAt: (x: number, z: number) => number;
 	clearRotatedRect: (cx: number, cz: number, hw: number, hd: number, angle: number, border: number) => void;
+	clearCircle: (cx: number, cz: number, radius: number) => void;
 }
 
 export function createMeadow(
@@ -318,7 +319,30 @@ export function createMeadow(
 		mesh.instanceMatrix.needsUpdate = true;
 	}
 
-	return { group, config, tick, dispose, getHeightAt: groundHeight, clearRotatedRect };
+	/** Entfernt Grashalme in einem Kreis (y = -100) */
+	function clearCircle(
+		cx: number,
+		cz: number,
+		radius: number,
+	): void {
+		const d = new THREE.Object3D();
+		for (let i = 0; i < instanceData.length; i++) {
+			const inst = instanceData[i];
+			const dx = inst.x - cx;
+			const dz = inst.z - cz;
+			const dist = Math.sqrt(dx * dx + dz * dz);
+			if (dist < radius) {
+				d.position.set(inst.x, -100, inst.z);
+				d.scale.setScalar(1);
+				d.rotation.set(0, 0, 0);
+				d.updateMatrix();
+				mesh.setMatrixAt(i, d.matrix);
+			}
+		}
+		mesh.instanceMatrix.needsUpdate = true;
+	}
+
+	return { group, config, tick, dispose, getHeightAt: groundHeight, clearRotatedRect, clearCircle };
 }
 
 /**

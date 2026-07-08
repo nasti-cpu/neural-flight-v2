@@ -1,18 +1,14 @@
 /**
- * insect-world-v2 — Stadt (Ameisen-Perspektive).
- * Konfiguration des 3D-Stadtmodells und Clear-Zone.
+ * insect-world-v2 — Stadt-Konfiguration.
+ * Basis-Definition für das 3D-Stadtmodell und die kreisförmige Clear-Zone.
+ * Wird vom CityManager für mehrere prozedurale Instanzen verwendet.
  *
  * WebGPU-konform.
  */
-export const CITY = {
+export const CITY_CONFIG = {
 	MODEL: "/models/stadt/around_the_world_map_1.glb",
 	SCALE: 0.00025,
-	POSITION: { x: 18, y: 0, z: 0 },
-	ROTATION_Y: -Math.PI / 4,
 
-	CLEAR: {
-		CENTER: { x: 6, z: 12 },
-		RADIUS: 6.5,
-		RECT: { hw: 4.5, hd: 5, angle: Math.PI / 4, border: 0.5 },
-	},
+	/** Kreisförmiger Radius ohne Gras/Pflanzen um jede Stadt (in Metern) */
+	CLEAR_RADIUS: 8,
 } as const;
