@@ -63,11 +63,11 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   // 4. Städte prozedural spawnen
   const cityManager = new CityManager();
 
-  // 4a. Zufällige Positionen generieren (5 Städte, 200–300m Abstand)
+  // 4a. Eine Stadt ~1km entfernt platzieren
   const cityPositions = cityManager.generatePositions(
-    5,
-    200,
-    300,
+    1,
+    1000,
+    1000,
   );
 
   // 4b. Städte laden und platzieren

@@ -240,6 +240,6 @@
 {#if hasOutputs}
     <div class="score-overlay">
         <MapPin size={16} />
-        <span class="city-label">Städte: {citiesDiscovered} / 5</span>
+        <span class="city-label">Stadt: {citiesDiscovered} / 1</span>
     </div>
 {/if}
