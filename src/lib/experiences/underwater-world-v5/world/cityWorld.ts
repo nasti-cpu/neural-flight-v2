@@ -151,6 +151,17 @@ export class CityWorld {
 
     const worldX = cx * this.chunkSize + this.chunkSize / 2;
     const worldZ = cz * this.chunkSize + this.chunkSize / 2;
+
+    // Mindestabstand 48m (= 3 Chunks) zwischen Stadtzentren,
+    // damit sich die Kuppeln nicht überlappen.
+    const MIN_CITY_DIST_SQ = 48 * 48;
+    for (const existing of this._slots) {
+      const dx = existing.worldX - worldX;
+      const dz = existing.worldZ - worldZ;
+      if (dx * dx + dz * dz < MIN_CITY_DIST_SQ) {
+        return; // Zu nah an bestehender Stadt → überspringen
+      }
+    }
     const types = CITY_TYPES;
     const type = types[Math.floor(Math.random() * types.length)];
 
