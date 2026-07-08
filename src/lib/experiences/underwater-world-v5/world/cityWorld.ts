@@ -79,6 +79,13 @@ export class CityWorld {
   /** Map: chunkKey → Slot-Index für schnellen Lookup */
   private _slotByChunk: Map<string, number> = new Map();
 
+  /**
+   * Warteschlange für schwere Arbeit (_buildCityGroup).
+   * Max 1 pro Frame, damit der Haupt-Thread nicht blockiert.
+   * Analog zum gestaffelten Chunk-Laden im ChunkManager.
+   */
+  private _pendingReadyQueue: CitySlot[] = [];
+
   /** Gecachte Stadt-Positionen */
   private _cachedPositions: THREE.Vector3[] = [];
   /** Gecachte Exklusionszonen */
@@ -184,6 +191,9 @@ export class CityWorld {
 
       this._updateSlotState(slot, distSq, delta);
     }
+
+    // Gestaffelt: max 1 schwere _buildCityGroup pro Frame
+    this._processPendingReadyQueue(1);
   }
 
   // -----------------------------------------------------------------------
@@ -212,6 +222,7 @@ export class CityWorld {
     this._cachedZones.length = 0;
     this._templates.clear();
     this._templateData.clear();
+    this._pendingReadyQueue.length = 0;
   }
 
   // -----------------------------------------------------------------------
@@ -243,7 +254,9 @@ export class CityWorld {
     switch (slot.state) {
       case "pending":
         if (distSq < DIST_READY * DIST_READY) {
-          this._makeReady(slot);
+          // Nicht sofort bauen, sondern in die Warteschlange legen.
+          // _processPendingReadyQueue erledigt max 1 pro Frame.
+          this._enqueueReady(slot);
         }
         break;
 
@@ -304,6 +317,30 @@ export class CityWorld {
   // Private: Lebenszyklus
   // -----------------------------------------------------------------------
 
+  /**
+   * Legt einen Slot in die Warteschlange für _makeReady.
+   * Verhindert, dass mehrere _buildCityGroup im selben Frame laufen.
+   */
+  private _enqueueReady(slot: CitySlot): void {
+    // Prüfen, ob Slot bereits in der Queue ist
+    if (slot._loading) return;
+    slot._loading = true;
+    this._pendingReadyQueue.push(slot);
+  }
+
+  /**
+   * Verarbeitet max `maxCount` Slots aus der Warteschlange pro Frame.
+   * So wird die schwere Klon-Arbeit auf mehrere Frames verteilt.
+   */
+  private _processPendingReadyQueue(maxCount: number): void {
+    const count = Math.min(maxCount, this._pendingReadyQueue.length);
+    for (let i = 0; i < count; i++) {
+      const slot = this._pendingReadyQueue.shift();
+      if (!slot) continue;
+      this._makeReady(slot);
+    }
+  }
+
   private _makeReady(slot: CitySlot): void {
     const template = this._templates.get(slot.type);
     const data = this._templateData.get(slot.type);
@@ -318,6 +355,7 @@ export class CityWorld {
     this._buildCityGroup(slot);
 
     slot.state = "ready";
+    slot._loading = false;
     this._rebuildExclusionZones();
   }
 

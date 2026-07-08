@@ -1,5 +1,6 @@
 # Underwater World V5 – Performance-Plan
 das ganze ist als VR experience für den icaros Flugsimulator gedacht https://www.icaros.com/de/produkte/icaros-health man fliegt/schwimmt also durch die Unterwasser Welt. Man soll eine lebendige Unterwasser Welt mit Städten fischen, Quallen, korallen etc. erleben und dabei sich mit den sinnen der echo Ortung und des Städte Leitsystems zurecht finden in der welt. Es soll ein Szenario zeigen bei dem die menschen wegen Überbevölkerung sich neue Lebensräume wie das Meer erschließen und mit neuen sinnen sich in den neuen Lebensräumen zurecht finden, Performance ist dabei das aller wichtigste, keine Ruckler, alles smooth.
+größtes Problen aktuell: kleine ruckler in der experience
 ## Bereits umgesetzt
 
 ### 1. Geteiltes Seegras-Material (2026-07-08)

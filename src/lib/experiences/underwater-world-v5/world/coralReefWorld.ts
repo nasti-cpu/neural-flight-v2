@@ -39,6 +39,8 @@ interface ReefSlot {
   state: ReefState;
   group: THREE.Group | null;
   opacity: number;
+  /** Ob dieses Riff bereits in der Prepare-Queue ist */
+  _queued?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,6 +60,13 @@ export class CoralReefWorld {
   private _reefs: ReefSlot[] = [];
   /** Map: chunkKey → Riff-Index */
   private _reefByChunk: Map<string, number> = new Map();
+
+  /**
+   * Warteschlange für schwere Arbeit (_prepareReef).
+   * Max 1 pro Frame, damit der Haupt-Thread nicht blockiert.
+   * Analog zum gestaffelten Laden in CityWorld und ChunkManager.
+   */
+  private _pendingPrepareQueue: ReefSlot[] = [];
 
   /** Exklusionszonen (Stadt-Kuppeln) – keine Riffe darin */
   private _exclusionZones: ExclusionZone[] = [];
@@ -151,9 +160,10 @@ export class CoralReefWorld {
       switch (reef.state) {
         case "pending":
           if (distSq < 70 * 70) {
-            // Bei ~70m: Riff-Gruppe vorbereiten (Korallen klonen, Platzieren)
-            // Das ist die schwere Arbeit – weit vor der Sichtbarkeit (60m)
-            this._prepareReef(reef);
+            // Bei ~70m: Riff-Gruppe vorbereiten – aber nicht sofort!
+            // In die Warteschlange legen, damit nicht mehrere schwere
+            // Operationen im selben Frame passieren.
+            this._enqueuePrepare(reef);
           }
           if (distSq < 60 * 60 && reef.group) {
             // Bei ~60m: Riff zur Szene hinzufügen (nur scene.add, kaum Arbeit)
@@ -189,6 +199,9 @@ export class CoralReefWorld {
         }
       }
     }
+
+    // Gestaffelt: max 1 schwere _prepareReef pro Frame
+    this._processPendingPrepareQueue(1);
   }
 
   /**
@@ -196,6 +209,29 @@ export class CoralReefWorld {
    * So blockiert der Klon-Vorgang (buildReefGroup) nicht den Frame,
    * in dem das Riff sichtbar wird.
    */
+  /**
+   * Legt ein Riff in die Warteschlange für _prepareReef.
+   * Verhindert, dass mehrere Korallen-Klone im selben Frame laufen.
+   */
+  private _enqueuePrepare(reef: ReefSlot): void {
+    if (reef.group) return; // Bereits gebaut
+    if (reef._queued) return; // Bereits in der Queue
+    reef._queued = true;
+    this._pendingPrepareQueue.push(reef);
+  }
+
+  /**
+   * Verarbeitet max `maxCount` Riffe aus der Warteschlange pro Frame.
+   * So wird die schwere buildReefGroup-Arbeit auf mehrere Frames verteilt.
+   */
+  private _processPendingPrepareQueue(maxCount: number): void {
+    const count = Math.min(maxCount, this._pendingPrepareQueue.length);
+    for (let i = 0; i < count; i++) {
+      const reef = this._pendingPrepareQueue.shift();
+      if (!reef) continue;
+      this._prepareReef(reef);
+    }
+  }
   private _prepareReef(reef: ReefSlot): void {
     if (reef.group) return; // Bereits gebaut
     const group = buildReefGroup(
@@ -236,6 +272,7 @@ export class CoralReefWorld {
     this._reefs.length = 0;
     this._reefByChunk.clear();
     this._templates.clear();
+    this._pendingPrepareQueue.length = 0;
   }
 
   // -----------------------------------------------------------------------
