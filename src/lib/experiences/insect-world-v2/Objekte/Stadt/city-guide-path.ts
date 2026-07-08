@@ -17,8 +17,8 @@ const DASH_LENGTH = 1.2;
 const GAP_LENGTH = 0.6;
 const PATH_HEIGHT_MIN = 0.5;
 const PATH_HEIGHT_MAX = 1.8;
-const SPRITE_SIZE_MIN = 0.5;
-const SPRITE_SIZE_MAX = 1.0;
+const SPRITE_SIZE_MIN = 0.4;
+const SPRITE_SIZE_MAX = 0.8;
 const SPRITES_PER_DASH = 8;
 
 export class CityGuidePath {
