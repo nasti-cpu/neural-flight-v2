@@ -63,9 +63,9 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   // 4. Städte prozedural spawnen
   const cityManager = new CityManager();
 
-  // 4a. Zufällige Positionen generieren (8–12 Städte, 200–300m Abstand)
+  // 4a. Zufällige Positionen generieren (5 Städte, 200–300m Abstand)
   const cityPositions = cityManager.generatePositions(
-    10,
+    5,
     200,
     300,
   );
@@ -163,17 +163,22 @@ export function tick(
   // Pheromon-Spuren-Animation
   s.pheromones.update(ctx.elapsed);
 
-  // City Guide Path animieren
+  // City Guide Path animieren und bei Bewegung aktualisieren
   s.guidePath.update(ctx.elapsed);
 
-  // Prüfen ob der Spieler die Ziel-Stadt erreicht hat (< 20m Distanz)
+  // Nächste unbesuchte Stadt finden
   const playerPos = ctx.camera.position;
   const target = s.cityManager.getNearestUndiscovered(playerPos);
+
+  // Pfad zur Ziel-Stadt aktualisieren (folgt dem Spieler)
   if (target) {
+    s.guidePath.updateTarget(playerPos, target.position);
+
+    // Prüfen ob der Spieler die Stadt erreicht hat (< 20m Distanz)
     const dist = playerPos.distanceTo(target.position);
     if (dist < 20) {
       s.cityManager.markVisited(target);
-      // Pfad zur nächsten Stadt aktualisieren
+      // Pfad zur nächsten Stadt
       const next = s.cityManager.getNearestUndiscovered(playerPos);
       if (next) {
         s.guidePath.setTarget(playerPos, next.position);

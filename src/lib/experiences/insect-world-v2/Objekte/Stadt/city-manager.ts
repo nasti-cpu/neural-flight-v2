@@ -11,6 +11,7 @@
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { CITY_CONFIG } from "./city";
+import { getWorldHeight } from "../../Biome/Wiese/grass-manager";
 import type { GrassManager } from "../../Biome/Wiese/grass-manager";
 
 export interface CityInstance {
@@ -94,8 +95,9 @@ export class CityManager {
         group.add(clone);
       }
 
-      // Position setzen
-      group.position.copy(pos);
+      // Position auf Geländehöhe setzen (damit Stadt nicht in der Luft schwebt)
+      const groundY = getWorldHeight(pos.x, pos.z);
+      group.position.set(pos.x, groundY, pos.z);
 
       scene.add(group);
 
@@ -107,7 +109,7 @@ export class CityManager {
       );
 
       this.cities.push({
-        position: pos,
+        position: new THREE.Vector3(pos.x, groundY, pos.z),
         group,
         visited: false,
         index: i,

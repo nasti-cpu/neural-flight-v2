@@ -26,6 +26,8 @@ export class CityGuidePath {
   private active = false;
   private glowTexture: THREE.CanvasTexture;
   private phases: number[] = [];
+  private lastFrom = new THREE.Vector3();
+  private lastTo = new THREE.Vector3();
 
   constructor() {
     this.glowTexture = this.createGlowTexture();
@@ -34,15 +36,32 @@ export class CityGuidePath {
   /**
    * Baut einen Pfad vom Spieler zur Ziel-Stadt.
    * Entfernt vorherige Pfade automatisch.
+   * Der Pfad beginnt exakt an der Player-Position (Kamera-Höhe).
    */
   setTarget(from: THREE.Vector3, to: THREE.Vector3): void {
     this.clear();
+    this.lastFrom.copy(from);
+    this.lastTo.copy(to);
 
     const points = this.buildCurve(from, to);
     if (points.length < 2) return;
 
     this.buildGlowDashes(points);
     this.active = true;
+  }
+
+  /**
+   * Aktualisiert den Pfad, wenn der Spieler sich mehr als 5m bewegt hat.
+   * Dadurch beginnt der Pfad immer nah am Spieler.
+   */
+  updateTarget(from: THREE.Vector3, to: THREE.Vector3): void {
+    // Nur neu bauen, wenn eine andere Ziel-Stadt oder Player > 5m entfernt
+    const distToFrom = from.distanceTo(this.lastFrom);
+    const isNewTarget = !this.lastTo.equals(to);
+
+    if (distToFrom > 5 || isNewTarget) {
+      this.setTarget(from, to);
+    }
   }
 
   /** Entfernt den aktuellen Pfad. */
@@ -117,8 +136,10 @@ export class CityGuidePath {
         3 +
       (PATH_HEIGHT_MIN + PATH_HEIGHT_MAX) / 2;
 
+    // Erster Punkt: exakt an der Player-Position
+    // Letzter Punkt: nah am Boden bei der Stadt
     const ctrlPts = [
-      new THREE.Vector3(from.x, getWorldHeight(from.x, from.z) + 1.2, from.z),
+      new THREE.Vector3(from.x, from.y, from.z),
       new THREE.Vector3(midX, midY, midZ),
       new THREE.Vector3(to.x, getWorldHeight(to.x, to.z) + 0.8, to.z),
     ];
