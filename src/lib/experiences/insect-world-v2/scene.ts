@@ -124,19 +124,27 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   pheromones.addTrails(pheromoneTargets, ctx.camera.position);
   ctx.scene.add(pheromones.group);
 
+  // Kamera positionieren (Insektenperspektive ~2m)
+  const camera = ctx.camera;
+  camera.position.set(0, 2, 0);
+
   // 8. City Guide Path (leuchtender Neon-Pfad zur nächsten Stadt)
   const guidePath = new CityGuidePath();
   ctx.scene.add(guidePath.group);
 
-  // Ersten Pfad zur nächsten unentdeckten Stadt setzen
-  const nearest = cityManager.getNearestUndiscovered(ctx.camera.position);
+  // Ersten Pfad vom Startpunkt (0, 2, 0) zur Stadt setzen
+  const startPos = new THREE.Vector3(0, 2, 0);
+  const nearest = cityManager.getNearestUndiscovered(startPos);
   if (nearest) {
-    guidePath.setTarget(ctx.camera.position, nearest.position);
+    guidePath.setTarget(startPos, nearest.position);
+    // Kamera zur Stadt ausrichten
+    const lookTarget = new THREE.Vector3(
+      nearest.position.x,
+      2,
+      nearest.position.z,
+    );
+    camera.lookAt(lookTarget);
   }
-
-  // Kamera positionieren (Insektenperspektive ~2m)
-  const camera = ctx.camera;
-  camera.position.set(0, 2, 0);
 
   return {
     camera,
@@ -163,29 +171,15 @@ export function tick(
   // Pheromon-Spuren-Animation
   s.pheromones.update(ctx.elapsed);
 
-  // City Guide Path animieren und bei Bewegung aktualisieren
+  // City Guide Path animieren
   s.guidePath.update(ctx.elapsed);
 
-  // Nächste unbesuchte Stadt finden
+  // Prüfen ob der Spieler die Stadt erreicht hat (< 20m Distanz)
   const playerPos = ctx.camera.position;
   const target = s.cityManager.getNearestUndiscovered(playerPos);
-
-  // Pfad zur Ziel-Stadt aktualisieren (folgt dem Spieler)
-  if (target) {
-    s.guidePath.updateTarget(playerPos, target.position);
-
-    // Prüfen ob der Spieler die Stadt erreicht hat (< 20m Distanz)
-    const dist = playerPos.distanceTo(target.position);
-    if (dist < 20) {
-      s.cityManager.markVisited(target);
-      // Pfad zur nächsten Stadt
-      const next = s.cityManager.getNearestUndiscovered(playerPos);
-      if (next) {
-        s.guidePath.setTarget(playerPos, next.position);
-      } else {
-        s.guidePath.clear();
-      }
-    }
+  if (target && playerPos.distanceTo(target.position) < 20) {
+    s.cityManager.markVisited(target);
+    s.guidePath.clear();
   }
 
   // Wiese: Chunks um den Spieler laden/entladen
