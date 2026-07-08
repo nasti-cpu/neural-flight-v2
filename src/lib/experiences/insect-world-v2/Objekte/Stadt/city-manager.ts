@@ -68,6 +68,8 @@ export class CityManager {
   /**
    * Lädt das Stadt-Modell und platziert es an den generierten Positionen.
    * Registriert Clear-Regionen im GrassManager.
+   * Wenn das Modell nicht geladen werden kann, werden nur die Positionen
+   * und Clear-Regionen registriert (Guide-Path funktioniert trotzdem).
    */
   async loadCities(
     positions: THREE.Vector3[],
@@ -76,10 +78,6 @@ export class CityManager {
   ): Promise<void> {
     // Modell laden (einmalig, wiederverwendet)
     const model = await this.loadModel();
-    if (!model) {
-      console.warn("[CityManager] Stadt-Modell konnte nicht geladen werden");
-      return;
-    }
 
     for (let i = 0; i < positions.length; i++) {
       const pos = positions[i];
@@ -87,19 +85,21 @@ export class CityManager {
       // Gruppe für diese Stadt
       const group = new THREE.Group();
 
-      // Modell klonen
-      const clone = model.clone(true);
-      clone.scale.setScalar(CITY_CONFIG.SCALE);
-      clone.position.set(0, 0, 0);
-      clone.rotation.y = Math.random() * Math.PI * 2;
-      group.add(clone);
+      if (model) {
+        // Modell klonen
+        const clone = model.clone(true);
+        clone.scale.setScalar(CITY_CONFIG.SCALE);
+        clone.position.set(0, 0, 0);
+        clone.rotation.y = Math.random() * Math.PI * 2;
+        group.add(clone);
+      }
 
       // Position setzen
       group.position.copy(pos);
 
       scene.add(group);
 
-      // Clear-Region registrieren (Kreis)
+      // Clear-Region registrieren (Kreis) – auch ohne Modell
       grassManager.addCircleClearRegion(
         pos.x,
         pos.z,

@@ -12,14 +12,14 @@
 import * as THREE from "three/webgpu";
 import { getWorldHeight } from "../../Biome/Wiese/grass-manager";
 
-const NEON_COLOR = new THREE.Color(0x00ffff);
+const NEON_GLOW = new THREE.Color(0x44ffff);
 const DASH_LENGTH = 1.2;
 const GAP_LENGTH = 0.6;
 const PATH_HEIGHT_MIN = 0.5;
 const PATH_HEIGHT_MAX = 1.8;
-const SPRITE_SIZE_MIN = 0.3;
-const SPRITE_SIZE_MAX = 0.6;
-const SPRITES_PER_DASH = 6;
+const SPRITE_SIZE_MIN = 0.5;
+const SPRITE_SIZE_MAX = 1.0;
+const SPRITES_PER_DASH = 8;
 
 export class CityGuidePath {
   readonly group = new THREE.Group();
@@ -85,9 +85,9 @@ export class CityGuidePath {
       size / 2, size / 2, size / 2,
     );
     g.addColorStop(0, "rgba(255,255,255,1)");
-    g.addColorStop(0.08, "rgba(255,255,255,0.9)");
-    g.addColorStop(0.25, "rgba(255,255,255,0.5)");
-    g.addColorStop(0.5, "rgba(255,255,255,0.15)");
+    g.addColorStop(0.12, "rgba(255,255,255,0.95)");
+    g.addColorStop(0.3, "rgba(255,255,255,0.6)");
+    g.addColorStop(0.55, "rgba(255,255,255,0.2)");
     g.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, size, size);
@@ -140,11 +140,9 @@ export class CityGuidePath {
   private buildGlowDashes(points: THREE.Vector3[]): void {
     this.phases = [];
 
-    // Gesamtlänge berechnen
-    let totalLength = 0;
-    for (let i = 1; i < points.length; i++) {
-      totalLength += points[i].distanceTo(points[i - 1]);
-    }
+    // Kurve aus den Punkten bauen
+    const curve = new THREE.CatmullRomCurve3(points);
+    const totalLength = curve.getLength();
 
     const segmentLen = DASH_LENGTH + GAP_LENGTH;
     const numDashes = Math.max(1, Math.floor(totalLength / segmentLen));
@@ -152,58 +150,37 @@ export class CityGuidePath {
     // Material (einmal für alle Sprites)
     const mat = new THREE.SpriteMaterial({
       map: this.glowTexture,
-      color: NEON_COLOR,
+      color: NEON_GLOW,
       transparent: true,
-      opacity: 0.95,
+      opacity: 1.0,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
 
-    // Positionen entlang der Kurve sampeln für jeden Dash
-    let accumulated = 0;
-    let dashIdx = 0;
+    // Für jeden Dash: Position auf der Kurve sampeln, Sprites platzieren
+    for (let d = 0; d < numDashes; d++) {
+      const dashStart = d * segmentLen;
+      const dashMid = dashStart + DASH_LENGTH / 2;
+      const t = dashMid / totalLength;
 
-    for (let i = 1; i < points.length && dashIdx < numDashes; i++) {
-      const segLen = points[i].distanceTo(points[i - 1]);
-      const startAcc = accumulated;
-      accumulated += segLen;
+      const p = curve.getPoint(t);
+      const tangent = curve.getTangent(t);
 
-      const dashStart = dashIdx * segmentLen;
-      const dashEnd = dashStart + DASH_LENGTH;
-
-      const segStart = startAcc;
-      const segEnd = accumulated;
-
-      if (segEnd < dashStart) continue;
-      if (segStart > dashEnd) {
-        dashIdx++;
-        i--;
-        continue;
-      }
-
-      // Position im Dash berechnen
-      const localT = Math.max(segStart, dashStart) - dashStart;
-      const t = (Math.max(segStart, dashStart) - startAcc) / segLen;
-      const p = new THREE.Vector3().lerpVectors(
-        points[i - 1],
-        points[i],
-        Math.max(0, Math.min(1, t)),
-      );
-
-      // Richtung für Streuung
-      const dir = new THREE.Vector3().subVectors(points[i], points[i - 1]).normalize();
+      // Korrekte Geländehöhe an dieser Stelle
+      const groundY = getWorldHeight(p.x, p.z);
+      p.y = groundY + (PATH_HEIGHT_MIN + PATH_HEIGHT_MAX) / 2;
 
       // Mehrere Sprites pro Dash für dichten Glow
       for (let s = 0; s < SPRITES_PER_DASH; s++) {
-        const offset = (s / SPRITES_PER_DASH) * DASH_LENGTH * 0.8;
+        const offset = ((s / SPRITES_PER_DASH) - 0.5) * DASH_LENGTH * 0.8;
         const pos = new THREE.Vector3().copy(p);
 
-        // Entlang der Dash-Richtung verschieben
-        pos.addScaledVector(dir, offset);
+        // Entlang der Tangente verschieben
+        pos.addScaledVector(tangent, offset);
 
         // Leichte zufällige Streuung für organischen Look
-        pos.x += (Math.random() - 0.5) * 0.25;
-        pos.z += (Math.random() - 0.5) * 0.25;
+        pos.x += (Math.random() - 0.5) * 0.3;
+        pos.z += (Math.random() - 0.5) * 0.3;
         pos.y += (Math.random() - 0.5) * 0.15;
 
         const sprite = new THREE.Sprite(mat);
@@ -214,8 +191,6 @@ export class CityGuidePath {
         this.phases.push(Math.random() * Math.PI * 2);
         this.group.add(sprite);
       }
-
-      if (segEnd > dashEnd) dashIdx++;
     }
   }
 

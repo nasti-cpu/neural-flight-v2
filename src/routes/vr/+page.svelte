@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { Trophy } from "lucide-svelte";
+    import { MapPin, Trophy } from "lucide-svelte";
     import { onDestroy, onMount } from "svelte";
     import * as THREE from "three/webgpu";
     import { VRButton } from "three/examples/jsm/webxr/VRButton.js";
@@ -20,7 +20,7 @@
     let renderer: THREE.WebGPURenderer;
     let scene: THREE.Scene;
     let vrButton: HTMLElement;
-    let score = $state(0);
+    let citiesDiscovered = $state(0);
     let experienceName = $state("ICAROS VR");
     let hasOutputs = $state(false);
     let lastProcessedTimestamp = 0;
@@ -202,8 +202,8 @@
                                 activeCam.parent?.rotation ?? new THREE.Euler(),
                         });
                         exp.state = result.state;
-                        if (result.outputs?.score !== undefined) {
-                            score = result.outputs.score as number;
+                        if (result.outputs?.citiesDiscovered !== undefined) {
+                            citiesDiscovered = result.outputs.citiesDiscovered as number;
                         }
 
                         renderer.render(scene, activeCam);
@@ -239,7 +239,7 @@
 
 {#if hasOutputs}
     <div class="score-overlay">
-        <Trophy size={20} />
-        {score}
+        <MapPin size={16} />
+        <span class="city-label">Städte: {citiesDiscovered} / 10</span>
     </div>
 {/if}

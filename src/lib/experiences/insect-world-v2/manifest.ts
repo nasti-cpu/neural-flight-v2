@@ -79,7 +79,7 @@ export const manifest: ExperienceManifest = {
   scene: {
     background: "#4a90d9",
     fogNear: 30,
-    fogFar: 130,
+    fogFar: 400,
     fogColor: "#4a90d9",
     ambientIntensity: 0.4,
     sunIntensity: 1.5,
