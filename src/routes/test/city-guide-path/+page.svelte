@@ -18,7 +18,7 @@
 
 	import { createSky } from "$lib/experiences/insect-world-v2/Biome/blauerHimmel/sky";
 
-	type VariantKey = "A" | "B" | "C" | "D";
+	type VariantKey = "A" | "B" | "C" | "D" | "E";
 
 	interface Variant {
 		key: VariantKey;
@@ -27,10 +27,11 @@
 	}
 
 	const VARIANTS: Variant[] = [
-		{ key: "A", name: "Dünne Neonlinie", desc: "LineBasicMaterial, 1px, AdditiveBlending" },
-		{ key: "B", name: "Dicke Leuchtröhre", desc: "TubeGeometry, leuchtendes Mesh" },
-		{ key: "C", name: "Parallele Linien", desc: "3 nebeneinander, breiter Leuchtstreifen" },
-		{ key: "D", name: "Gestrichelt", desc: "LineDashedMaterial, diskreter Look" },
+		{ key: "A", name: "Dünne Neonlinie", desc: "LineBasicMaterial, additive" },
+		{ key: "B", name: "Dicke Leuchtröhre", desc: "TubeGeometry, leuchtend" },
+		{ key: "C", name: "Parallele Linien", desc: "3 nebeneinander" },
+		{ key: "D", name: "Gestrichelt (discret)", desc: "LineDashedMaterial" },
+		{ key: "E", name: "✨ Glowy-Dashed (NEON)", desc: "Sprite-Glow an Dash-Positionen wie Pheromonspuren" },
 	];
 
 	// ── Stadt-Positionen (prozedural, 200–300m Abstand simuliert) ──
@@ -162,6 +163,28 @@
 		return group;
 	}
 
+	// ── Glow-Textur (wie Pheromonspuren) ──
+	let glowTexture: THREE.CanvasTexture;
+
+	function createGlowTexture(): THREE.CanvasTexture {
+		const size = 64;
+		const canvas = document.createElement("canvas");
+		canvas.width = size;
+		canvas.height = size;
+		const ctx = canvas.getContext("2d")!;
+		const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+		g.addColorStop(0, "rgba(255,255,255,1)");
+		g.addColorStop(0.08, "rgba(255,255,255,0.9)");
+		g.addColorStop(0.25, "rgba(255,255,255,0.5)");
+		g.addColorStop(0.5, "rgba(255,255,255,0.15)");
+		g.addColorStop(1, "rgba(255,255,255,0)");
+		ctx.fillStyle = g;
+		ctx.fillRect(0, 0, size, size);
+		const tex = new THREE.CanvasTexture(canvas);
+		tex.needsUpdate = true;
+		return tex;
+	}
+
 	// ── Variante D: Gestrichelte Neonlinie ──
 	function buildVariantD(points: THREE.Vector3[]): THREE.Line {
 		const geo = new THREE.BufferGeometry().setFromPoints(points);
@@ -179,6 +202,85 @@
 		return line;
 	}
 
+	// ── Variante E: Glowy-Dashed (Sprite-Glow wie Pheromonspuren) ──
+	function buildVariantE(points: THREE.Vector3[]): THREE.Group {
+		const group = new THREE.Group();
+
+		const mat = new THREE.SpriteMaterial({
+			map: glowTexture,
+			color: NEON_COLOR,
+			transparent: true,
+			opacity: 0.95,
+			blending: THREE.AdditiveBlending,
+			depthWrite: false,
+		});
+
+		// Gesamtlänge der Kurve berechnen
+		let totalLength = 0;
+		for (let i = 1; i < points.length; i++) {
+			totalLength += points[i].distanceTo(points[i - 1]);
+		}
+
+		const dashLen = 1.2;
+		const gapLen = 0.6;
+		const segmentLen = dashLen + gapLen;
+		const numDashes = Math.floor(totalLength / segmentLen);
+
+		// Position entlang der Kurve sampeln
+		let accumulated = 0;
+		let dashIdx = 0;
+		for (let i = 1; i < points.length && dashIdx < numDashes; i++) {
+			const segLen = points[i].distanceTo(points[i - 1]);
+			const startAcc = accumulated;
+			accumulated += segLen;
+
+			const dashStart = dashIdx * segmentLen;
+			const dashEnd = dashStart + dashLen;
+
+			// Überschneidet dieses Segment den aktuellen Dash?
+			const segStart = startAcc;
+			const segEnd = accumulated;
+
+			if (segEnd < dashStart) continue;
+			if (segStart > dashEnd) { dashIdx++; i--; continue; }
+
+			// Position im Dash
+			const localT = (Math.max(segStart, dashStart) - dashStart) / dashLen;
+			const t = (Math.max(segStart, dashStart) - startAcc) / segLen;
+			const p = new THREE.Vector3().lerpVectors(points[i - 1], points[i], Math.max(0, Math.min(1, t)));
+
+			// Richtung für Rotation
+			const dir = new THREE.Vector3().subVectors(points[i], points[i - 1]).normalize();
+
+			// Mehrere Sprites pro Dash für dichten Glow
+			const spritesPerDash = 8;
+			for (let s = 0; s < spritesPerDash; s++) {
+				const offset = (s / spritesPerDash) * dashLen * 0.8;
+				const pos = new THREE.Vector3().copy(p);
+
+				// Entlang der Dash-Richtung verschieben
+				const forward = new THREE.Vector3().copy(dir).multiplyScalar(offset);
+				pos.add(forward);
+
+				// Leichte zufällige Streuung für organischen Look
+				pos.x += (Math.random() - 0.5) * 0.2;
+				pos.z += (Math.random() - 0.5) * 0.2;
+				pos.y += (Math.random() - 0.5) * 0.1;
+
+				const sprite = new THREE.Sprite(mat);
+				sprite.position.copy(pos);
+				const size = 0.35 + Math.random() * 0.25;
+				sprite.scale.set(size, size, 1);
+				sprite.userData.phase = Math.random() * Math.PI * 2;
+				group.add(sprite);
+			}
+
+			if (segEnd > dashEnd) dashIdx++;
+		}
+
+		return group;
+	}
+
 	// ── Pfad neu bauen zur nächsten unbesuchten Stadt ──
 	function buildPath() {
 		// Alten Pfad entfernen
@@ -194,11 +296,14 @@
 			}
 			if (child instanceof THREE.Group) {
 				child.traverse((c) => {
-					if (c instanceof THREE.Mesh || c instanceof THREE.Line) {
+					if (c instanceof THREE.Mesh || c instanceof THREE.Line || c instanceof THREE.Sprite) {
 						c.geometry?.dispose();
-						c.material?.dispose();
+						if (c.material) (c.material as THREE.Material).dispose();
 					}
 				});
+			}
+			if (child instanceof THREE.Sprite) {
+				child.material.dispose();
 			}
 			pathGroup.remove(child);
 		}
@@ -238,6 +343,9 @@
 				break;
 			case "D":
 				obj = buildVariantD(points);
+				break;
+			case "E":
+				obj = buildVariantE(points);
 				break;
 		}
 		pathGroup.add(obj);
@@ -407,6 +515,9 @@
 				scene.add(marker);
 			}
 
+			// Glow-Textur initialisieren (für Variante E)
+			glowTexture = createGlowTexture();
+
 			// Pfad-Gruppe zur Szene hinzufügen
 			scene.add(pathGroup);
 
@@ -434,11 +545,15 @@
 						}
 					}
 					if (child instanceof THREE.Group) {
-						// Variante C: mehrere Linien
+						// Variante C: mehrere Linien oder E: Sprites
 						child.children.forEach((c) => {
 							if (c instanceof THREE.Line) {
 								const mat = c.material as THREE.LineBasicMaterial;
 								mat.opacity = (0.5 + 0.3 * Math.sin(elapsed * 1.2 + Math.random())) as number;
+							}
+							if (c instanceof THREE.Sprite && c.material instanceof THREE.SpriteMaterial) {
+								const phase = (c.userData.phase as number) ?? 0;
+								c.material.opacity = 0.6 + 0.4 * Math.sin(elapsed * 1.8 + phase);
 							}
 						});
 					}
@@ -474,6 +589,7 @@
 	onDestroy(() => {
 		if (!browser) return;
 		cancelAnimationFrame(animationId);
+		glowTexture?.dispose();
 		renderer?.dispose();
 		controls?.dispose();
 	});
@@ -483,7 +599,7 @@
 	<canvas bind:this={canvas}></canvas>
 
 	<div class="ui-overlay">
-		<h1>🧪 City Guide Path – 4 Varianten</h1>
+		<h1>🧪 City Guide Path – 5 Varianten (E = Glowy-Dashed)</h1>
 		{#if loading}
 			<p class="loading">Lade …</p>
 		{/if}
