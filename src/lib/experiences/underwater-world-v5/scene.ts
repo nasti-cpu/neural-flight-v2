@@ -231,7 +231,6 @@ export async function setup(
   const fishWorld = new FishWorld(ctx.scene, {
     floorY: WORLD_CONFIG.floorY,
     waterY: WORLD_CONFIG.waterY,
-    worldRadius: WORLD_CONFIG.renderDistance * WORLD_CONFIG.chunkSize + 8,
   });
   await fishWorld.init(player.camera.position);
 
@@ -370,16 +369,11 @@ export function tick(
 
   // =========================================================================
   // Gestaffelte Queue: Max 1 schwere Operation pro Frame (gesamt).
-  // CityWorld, CoralReefWorld und FishWorld teilen sich dieses "Ticket".
-  // So werden Klon-Arbeiten (Stadt, Riff, Schul-Spawn) nie im selben
-  // Frame ausgeführt → keine Ruckler durch überlappende schwere Arbeit.
+  // CityWorld und CoralReefWorld teilen sich dieses "Ticket".
+  // FishWorld hat keine schweren Operationen mehr (Fische sind persistent).
   // =========================================================================
-  // Priorität: City → Korallen → Fisch-Schwarm
-  if (
-    !s.cityWorld.processNextHeavyOp() &&
-    !s.coralReefWorld.processNextHeavyOp()
-  ) {
-    s.fishWorld.processNextHeavyOp();
+  if (!s.cityWorld.processNextHeavyOp()) {
+    s.coralReefWorld.processNextHeavyOp();
   }
 
   // =========================================================================
@@ -406,7 +400,7 @@ export function tick(
   // Exklusionszonen für Kuppeln (Fische & Quallen & Seegras meiden Städte)
   // =========================================================================
   const exclusionZones = s.cityWorld.getExclusionZones();
-  s.fishWorld.setExclusionZones(exclusionZones, rigPos);
+  s.fishWorld.setExclusionZones(exclusionZones);
   s.jellyWorld.setExclusionZones(exclusionZones, rigPos);
   s.chunkManager.setExclusionZones(exclusionZones);
   s.coralReefWorld.setExclusionZones(exclusionZones);
