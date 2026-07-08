@@ -54,7 +54,7 @@ interface CitySlot {
   domeRadius: number;
   height: number;
   opacity: number;
-  lights: THREE.PointLight[];
+  lights: THREE.Object3D[];
   _loading?: boolean;
 }
 
@@ -468,6 +468,12 @@ export class CityWorld {
             ? child.material
             : [child.material];
           for (const m of mats) m.dispose();
+        }
+      }
+      if (child instanceof THREE.Sprite) {
+        child.material?.dispose();
+        if ((child.material as THREE.SpriteMaterial)?.map) {
+          (child.material as THREE.SpriteMaterial).map!.dispose();
         }
       }
     });

@@ -5,11 +5,12 @@
  * und zur nächstgelegenen Stadt führen. Der Spieler kann diesem Pfad
  * folgen, um die Stadt zu finden.
  *
- * Funktionsweise:
- * - Jeden Frame wird die nächstgelegene Stadt zur Kameraposition gesucht.
- * - Eine Linie aus Kugeln führt vom Spieler zur Stadt.
- * - Die Kugeln schweben sanft auf und ab und pulsieren.
- * - Bewegt sich der Spieler, wandert der Pfad dynamisch mit.
+ * Verbesserungen in V5:
+ * – Fließ-Animation statt Bobbing + Pulsieren: Kugeln schwingen
+ *   entlang der Pfadrichtung → zeigt die Flugrichtung an
+ * – Farbverlauf: Kugeln nahe Spieler = Blau, nahe Stadt = Türkis
+ * – Pfad maximal 100 m lang (auch wenn Stadt weiter weg ist) –
+ *   so bleiben die Kugeln immer dicht genug beieinander
  */
 
 import * as THREE from "three/webgpu";
@@ -25,16 +26,16 @@ const GUIDANCE_CONFIG = {
   orbHeight: 1.5,
   /** Größe jeder Kugel */
   orbRadius: 0.15,
-  /** Farbe der Kugeln (leuchtendes Blau-Grün) */
+  /** Basisfarbe (wird durch Farbverlauf überschrieben) */
   orbColor: 0x44ddff,
-  /** Geschwindigkeit der Auf-und-Ab-Bewegung */
-  bobSpeed: 0.8,
-  /** Maximale Höhenänderung durch Bobbing */
-  bobAmplitude: 0.3,
-  /** Pulsier-Geschwindigkeit (Skalierung) */
-  pulseSpeed: 1.2,
-  /** Maximale Skalierungs-Änderung durch Pulsieren */
-  pulseAmplitude: 0.2,
+  /** Geschwindigkeit der Fließ-Welle entlang des Pfads */
+  flowSpeed: 0.6,
+  /** Maximale Verschiebung der Kugel entlang der Pfadrichtung */
+  flowAmplitude: 0.25,
+  /** Kugeln anzeigen sobald die Stadt in dieser Distanz ist (groß = immer) */
+  showDistance: 500,
+  /** Maximale Pfad-Länge – verhindert zu dünn verteilte Kugeln bei fernen Städten */
+  maxGuideDistance: 100,
   /** Mindest-Abstand zum Pfad-Neubau (Spieler-Bewegung in Meter) */
   rebuildThreshold: 2.0,
 };
@@ -50,32 +51,33 @@ export class GuidanceSystem {
   /** Alle Pfad-Kugeln (einmal angelegt, werden nur verschoben) */
   private orbs: THREE.Mesh[] = [];
 
-  /** Geometrie und Material für alle Kugeln (wiederverwendet) */
+  /** Geometrie für alle Kugeln (wiederverwendet) */
   private orbGeom: THREE.SphereGeometry;
-  private orbMat: THREE.MeshBasicMaterial;
 
   /** Letzte bekannte Ziel-Stadt (für Änderungserkennung) */
   private lastTarget = new THREE.Vector3();
   /** Letzte bekannte Spieler-Position (für Threshold) */
   private lastPlayerPos = new THREE.Vector3();
-  /** Ob lastTarget jemals gesetzt wurde */
-  private _hasLastTarget = false;
+
+  /** Normalisierte Richtung vom Spieler zur Stadt (für Fließ-Animation) */
+  private _flowDir = new THREE.Vector3();
 
   constructor(scene: THREE.Scene, floorY: number = -4) {
     this.scene = scene;
     this.floorY = floorY;
 
-    // Geometrie und Material einmal anlegen (wiederverwendbar)
+    // Geometrie einmal anlegen (wiederverwendbar für alle Kugeln)
     this.orbGeom = new THREE.SphereGeometry(GUIDANCE_CONFIG.orbRadius, 8, 6);
-    this.orbMat = new THREE.MeshBasicMaterial({
-      color: GUIDANCE_CONFIG.orbColor,
-      transparent: true,
-      opacity: 0.8,
-    });
 
-    // Kugeln vorab erzeugen (Pool – werden nur ein-/ausgeblendet)
+    // Kugeln vorab erzeugen – jede mit eigener Material-Instanz,
+    // damit wir später unterschiedliche Farben setzen können (Farbverlauf).
     for (let i = 0; i < GUIDANCE_CONFIG.orbCount; i++) {
-      const orb = new THREE.Mesh(this.orbGeom, this.orbMat);
+      const mat = new THREE.MeshBasicMaterial({
+        color: GUIDANCE_CONFIG.orbColor,
+        transparent: true,
+        opacity: 0.8,
+      });
+      const orb = new THREE.Mesh(this.orbGeom, mat);
       orb.visible = false;
       this.scene.add(orb);
       this.orbs.push(orb);
@@ -104,9 +106,16 @@ export class GuidanceSystem {
     const target = this._findNearest(playerPos, cityPositions);
 
     if (!target) {
-      // Keine Stadt vorhanden → alle Kugeln ausblenden + Reset
       this._hideAllOrbs();
-      this._hasLastTarget = false;
+      return;
+    }
+
+    // ---------------------------------------------------------------
+    // ③ Distanz-Prüfung: Orbs nur zeigen, wenn die Stadt nah genug ist
+    // ---------------------------------------------------------------
+    const distSq = playerPos.distanceToSquared(target);
+    if (distSq > GUIDANCE_CONFIG.showDistance * GUIDANCE_CONFIG.showDistance) {
+      this._hideAllOrbs();
       return;
     }
 
@@ -115,30 +124,31 @@ export class GuidanceSystem {
     const targetChanged = this._targetChanged(target);
 
     if (playerMoved || targetChanged) {
+      // ④ Fließ-Richtung speichern (für Animation zwischen Rebuilds)
+      this._flowDir.copy(target).sub(playerPos).normalize();
+
       this._placeOrbsAlongPath(playerPos, target);
       this.lastTarget.copy(target);
       this.lastPlayerPos.copy(playerPos);
     }
 
-    // --- Kugeln animieren (sanftes Bobbing + Pulsieren) ---
+    // -----------------------------------------------------------------------
+    // ① Fließ-Animation (ersetzt Bobbing + Pulsieren – weniger sin-Aufrufe!)
+    // -----------------------------------------------------------------------
+    // Jede Kugel schwingt entlang der Pfadrichtung.
+    // Die Phase (i * 0.8) erzeugt eine Welle, die vom Spieler zur Stadt läuft.
     for (let i = 0; i < this.orbs.length; i++) {
       const orb = this.orbs[i];
       if (!orb.visible) continue;
 
-      const phase = i * 0.5;
+      const flow =
+        Math.sin(elapsed * GUIDANCE_CONFIG.flowSpeed + i * 0.8) *
+        GUIDANCE_CONFIG.flowAmplitude;
 
-      // Auf und Ab schweben
-      const bob =
-        Math.sin(elapsed * GUIDANCE_CONFIG.bobSpeed + phase) *
-        GUIDANCE_CONFIG.bobAmplitude;
-      orb.position.y = (orb.userData.baseY as number) + bob;
-
-      // Pulsieren (Skalierung)
-      const pulse =
-        1.0 +
-        Math.sin(elapsed * GUIDANCE_CONFIG.pulseSpeed + phase * 1.3) *
-          GUIDANCE_CONFIG.pulseAmplitude;
-      orb.scale.setScalar(pulse);
+      // Kugel schwingt entlang der Pfadrichtung → zeigt Flugrichtung
+      orb.position.x = (orb.userData.baseX as number) + this._flowDir.x * flow;
+      orb.position.y = (orb.userData.baseY as number) + this._flowDir.y * flow;
+      orb.position.z = (orb.userData.baseZ as number) + this._flowDir.z * flow;
     }
   }
 
@@ -147,8 +157,10 @@ export class GuidanceSystem {
   // -----------------------------------------------------------------------
 
   /**
-   * Platziert die Kugeln entlang der Linie von playerPos zu target.
-   * Die erste Kugel beginnt etwas vor dem Spieler, die letzte kurz vor der Stadt.
+   * Platziert die Kugeln entlang der Linie von playerPos Richtung target.
+   * Der Pfad ist maximal maxGuideDistance Meter lang – bei fernen Städten
+   * zeigen die letzten Kugeln in die richtige Richtung, ohne dünn verteilt zu sein.
+   * Setzt auch den ② Farbverlauf (Spieler-nah = Blau, Stadt-nah = Türkis).
    */
   private _placeOrbsAlongPath(
     playerPos: THREE.Vector3,
@@ -156,18 +168,43 @@ export class GuidanceSystem {
   ): void {
     const count = this.orbs.length;
     const baseY = this.floorY + GUIDANCE_CONFIG.orbHeight;
+    const maxDist = GUIDANCE_CONFIG.maxGuideDistance;
+
+    // Richtung + Distanz zur Stadt
+    const dx = target.x - playerPos.x;
+    const dz = target.z - playerPos.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+
+    // Pfad auf maxDist begrenzen, damit Kugeln nie zu weit auseinander sind
+    const ratio = dist > 0.001 ? Math.min(dist, maxDist) / dist : 1;
+    const endX = playerPos.x + dx * ratio;
+    const endZ = playerPos.z + dz * ratio;
 
     for (let i = 0; i < count; i++) {
-      // t läuft von 0.1 (nah am Spieler) bis 0.9 (nah an der Stadt)
+      // t läuft von 0.1 (nah am Spieler) bis 0.9 (nah am Endpunkt)
       const t = (i + 0.5) / (count + 0.5);
 
-      const x = playerPos.x + (target.x - playerPos.x) * t;
-      const z = playerPos.z + (target.z - playerPos.z) * t;
+      const x = playerPos.x + (endX - playerPos.x) * t;
+      const z = playerPos.z + (endZ - playerPos.z) * t;
 
       const orb = this.orbs[i];
-      orb.position.set(x, baseY, z);
+
+      // Basis-Position speichern (für Fließ-Animation in update)
+      orb.userData.baseX = x;
       orb.userData.baseY = baseY;
+      orb.userData.baseZ = z;
+      orb.position.set(x, baseY, z);
       orb.visible = true;
+
+      // ② Farbverlauf: Hue wandert von Blau (0.55) zu Türkis (0.65)
+      const hue = 0.55 + t * 0.1;
+      const saturation = 0.8;
+      const lightness = 0.5 + t * 0.3;
+      (orb.material as THREE.MeshBasicMaterial).color.setHSL(
+        hue,
+        saturation,
+        lightness,
+      );
     }
   }
 
@@ -177,6 +214,7 @@ export class GuidanceSystem {
 
   /**
    * Findet die nächstgelegene Stadt-Position zur playerPos.
+   * Nutzt distanceToSquared (kein sqrt) für maximale Performance.
    */
   private _findNearest(
     playerPos: THREE.Vector3,
@@ -233,9 +271,10 @@ export class GuidanceSystem {
   dispose(): void {
     for (const orb of this.orbs) {
       this.scene.remove(orb);
+      const mat = orb.material;
+      if (!Array.isArray(mat)) mat.dispose();
     }
     this.orbs.length = 0;
     this.orbGeom.dispose();
-    this.orbMat.dispose();
   }
 }

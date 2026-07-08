@@ -31,7 +31,8 @@ const WINDOW_COLORS: number[] = [
 
 /**
  * Färbt alle Meshes eines Stadt-Modells mit zufälligen Hausfarben.
- * ~60 % der Gebäude bekommen leuchtende Fenster (Emissive).
+ * ~75 % der Gebäude bekommen leuchtende Fenster (Emissive) – höhere
+ * Intensität, damit Städte im Dunkeln wie lebendige Metropolen wirken.
  */
 export function colorBuildings(model: THREE.Object3D): void {
   model.traverse((child) => {
@@ -39,14 +40,14 @@ export function colorBuildings(model: THREE.Object3D): void {
       const baseColor = new THREE.Color(
         BUILDING_COLORS[Math.floor(Math.random() * BUILDING_COLORS.length)],
       );
-      const hasLights = Math.random() < 0.6;
+      const hasLights = Math.random() < 0.75;
       let emissive = new THREE.Color(0x000000);
       let emissiveIntensity = 0;
       if (hasLights) {
         emissive = new THREE.Color(
           WINDOW_COLORS[Math.floor(Math.random() * WINDOW_COLORS.length)],
         );
-        emissiveIntensity = 0.15 + Math.random() * 0.4;
+        emissiveIntensity = 0.6 + Math.random() * 1.4;
       }
       child.material = new THREE.MeshStandardMaterial({
         color: baseColor,
@@ -79,11 +80,13 @@ export function createDome(radius: number, floorY: number): THREE.Group {
   const dome = new THREE.Mesh(
     domeGeom,
     new THREE.MeshPhysicalMaterial({
-      color: 0xccddff,
+      color: 0x88bbff,
       transparent: true,
-      opacity: 0.03,
+      opacity: 0.1,
       roughness: 0.0,
       metalness: 0.0,
+      emissive: 0x224488,
+      emissiveIntensity: 0.3,
       depthWrite: false,
       side: THREE.DoubleSide,
     }),
@@ -95,9 +98,11 @@ export function createDome(radius: number, floorY: number): THREE.Group {
   const ring = new THREE.Mesh(
     ringGeom,
     new THREE.MeshStandardMaterial({
-      color: 0x889999,
-      roughness: 0.3,
-      metalness: 0.8,
+      color: 0x66ddff,
+      emissive: 0x2288cc,
+      emissiveIntensity: 1.0,
+      roughness: 0.2,
+      metalness: 0.9,
     }),
   );
   ring.rotation.x = Math.PI / 2;
@@ -112,33 +117,101 @@ export function createDome(radius: number, floorY: number): THREE.Group {
 // ---------------------------------------------------------------------------
 
 /**
- * Erzeugt drei warme Punktlichter rund um die Stadt.
+ * Erzeugt ein Glühbirnen-Sprite (weicher Glow) als sichtbare Lichtquelle.
+ * Canvas-Textur mit radialem Gradient – einmalig erstellt, kein Per-Frame-Code.
+ * Additive Blending lässt den Glow im Dunkeln strahlen.
+ */
+function createGlowSprite(color: number, intensity: number): THREE.Sprite {
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d")!;
+  const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gradient.addColorStop(0, "rgba(255,255,255,1)");
+  gradient.addColorStop(0.3, "rgba(255,255,200,0.5)");
+  gradient.addColorStop(1, "rgba(255,200,100,0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 64, 64);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({
+    map: texture,
+    color: color,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    opacity: Math.min(1, intensity * 0.8),
+  });
+  return new THREE.Sprite(mat);
+}
+
+/**
+ * Erzeugt warme Punktlichter + sichtbare Glühbirnen-Glows rund um die Stadt.
+ * 5 Lichter mit höherer Intensität und Reichweite als zuvor,
+ * damit Städte von weitem als leuchtende Metropolen erkennbar sind.
  */
 export function createCityLights(
   groundY: number,
   domeRadius: number,
   height: number,
-): THREE.PointLight[] {
-  const lights: THREE.PointLight[] = [];
-  const positions = [
-    new THREE.Vector3(0, groundY + height * 0.3, 0),
-    new THREE.Vector3(
-      domeRadius * 0.3,
-      groundY + height * 0.2,
-      domeRadius * 0.3,
-    ),
-    new THREE.Vector3(
-      -domeRadius * 0.3,
-      groundY + height * 0.2,
-      -domeRadius * 0.3,
-    ),
+): THREE.Object3D[] {
+  const objects: THREE.Object3D[] = [];
+
+  // 5 Licht-Positionen: 1× zentral + 4× diagonal am Kuppelrand
+  const lightConfigs = [
+    { pos: new THREE.Vector3(0, groundY + height * 0.3, 0), intensity: 1.5 },
+    {
+      pos: new THREE.Vector3(
+        domeRadius * 0.3,
+        groundY + height * 0.2,
+        domeRadius * 0.3,
+      ),
+      intensity: 1.0,
+    },
+    {
+      pos: new THREE.Vector3(
+        -domeRadius * 0.3,
+        groundY + height * 0.2,
+        -domeRadius * 0.3,
+      ),
+      intensity: 1.0,
+    },
+    {
+      pos: new THREE.Vector3(
+        domeRadius * 0.3,
+        groundY + height * 0.1,
+        -domeRadius * 0.3,
+      ),
+      intensity: 0.8,
+    },
+    {
+      pos: new THREE.Vector3(
+        -domeRadius * 0.3,
+        groundY + height * 0.1,
+        domeRadius * 0.3,
+      ),
+      intensity: 0.8,
+    },
   ];
-  for (const lp of positions) {
-    const light = new THREE.PointLight(0xffaa44, 0.4, domeRadius * 1.5);
-    light.position.copy(lp);
-    lights.push(light);
+
+  for (const cfg of lightConfigs) {
+    // Warmes Punktlicht (höhere Intensität + größere Reichweite)
+    const light = new THREE.PointLight(
+      0xffaa44,
+      cfg.intensity,
+      domeRadius * 2,
+    );
+    light.position.copy(cfg.pos);
+    objects.push(light);
+
+    // Sichtbarer Glühbirnen-Glow (Billboard – immer zur Kamera)
+    const glow = createGlowSprite(0xffcc66, cfg.intensity);
+    glow.position.copy(cfg.pos);
+    glow.scale.setScalar(1.5 + cfg.intensity * 0.5);
+    objects.push(glow);
   }
-  return lights;
+
+  return objects;
 }
 
 // ---------------------------------------------------------------------------
