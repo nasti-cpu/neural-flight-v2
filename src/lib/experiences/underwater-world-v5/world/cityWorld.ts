@@ -191,9 +191,15 @@ export class CityWorld {
 
       this._updateSlotState(slot, distSq, delta);
     }
+  }
 
-    // Gestaffelt: max 1 schwere _buildCityGroup pro Frame
-    this._processPendingReadyQueue(1);
+  /**
+   * Verarbeitet genau 1 Stadt aus der Warteschlange.
+   * Wird von scene.ts aufgerufen (max 1 schwere Operation pro Frame GESAMT).
+   * @returns true wenn eine Operation ausgeführt wurde
+   */
+  public processNextHeavyOp(): boolean {
+    return this._processPendingReadyQueue(1) > 0;
   }
 
   // -----------------------------------------------------------------------
@@ -332,13 +338,14 @@ export class CityWorld {
    * Verarbeitet max `maxCount` Slots aus der Warteschlange pro Frame.
    * So wird die schwere Klon-Arbeit auf mehrere Frames verteilt.
    */
-  private _processPendingReadyQueue(maxCount: number): void {
+  private _processPendingReadyQueue(maxCount: number): number {
     const count = Math.min(maxCount, this._pendingReadyQueue.length);
     for (let i = 0; i < count; i++) {
       const slot = this._pendingReadyQueue.shift();
       if (!slot) continue;
       this._makeReady(slot);
     }
+    return count;
   }
 
   private _makeReady(slot: CitySlot): void {
@@ -440,6 +447,7 @@ export class CityWorld {
     slot.group = null;
     slot.lights = [];
     slot.opacity = 0;
+    slot._loading = false;
     this._rebuildExclusionZones();
   }
 

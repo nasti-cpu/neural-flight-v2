@@ -45,10 +45,16 @@ export class ChunkManager {
   /** Das WFC-System, das die Chunk-Typen bestimmt */
   private wfc: WFCSystem;
 
-  /** Das EINE Boden-Mesh, das alle Chunks abdeckt */
+  /** Das EINE Boden-Mesh (einmal gebaut, Vertex-Höhen werden live aktualisiert) */
   private floorMesh: THREE.Mesh | null = null;
 
-  /** Letzter Chunk, fÃ¼r den das Boden-Mesh gebaut wurde */
+  /** Aktuelle Position (smooth lerp) */
+  private _floorPosX: number = 0;
+  private _floorPosZ: number = 0;
+  /** Ziel = Chunk-Mittelpunkt */
+  private _floorTargetX: number = 0;
+  private _floorTargetZ: number = 0;
+  /** Letzter Chunk, für den die Höhen aktualisiert wurden */
   private _lastFloorChunkX: number = Number.NaN;
   private _lastFloorChunkZ: number = Number.NaN;
 
@@ -214,17 +220,44 @@ export class ChunkManager {
       }
     }
 
-    // --- Boden-Mesh: Folgt dem Spieler, aber nur bei Chunk-Wechsel neu bauen ---
-    // Die Dünen-Höhen werden beim Bau in die Vertices eingebacken (Welt-Koordinaten).
-    // Einfaches Verschieben ist günstig und mit 100m Radius + Nebel unsichtbar.
-    // Nur bei Chunk-Wechsel wird neu gebaut, damit die Dünen zur Welt passen.
+    // --- Boden-Mesh: smooth lerp + live Vertex-Höhen ---
+    // Das Mesh wird EINMAL gebaut. Die Position wird smooth zum
+    // Chunk-Mittelpunkt interpoliert (kein Snap). Die Vertex-Höhen
+    // werden jeden Frame an die aktuelle Position angepasst, sodass
+    // die Dünen immer zur Welt-Position passen – auch während des
+    // Lerps. Kein Neubau, kein Ruckeln, kein "Vorschnellen".
+    const cs = this.config.chunkSize;
+    const centerX = (playerChunkX + 0.5) * cs;
+    const centerZ = (playerChunkZ + 0.5) * cs;
+
     if (!this.floorMesh) {
-      this._buildFloorMesh(neededCoords);
-    } else {
-      const cs = this.config.chunkSize;
-      const centerX = (playerChunkX + 0.5) * cs;
-      const centerZ = (playerChunkZ + 0.5) * cs;
-      this.floorMesh.position.set(centerX, this.config.floorY, centerZ);
+      // Einmal bauen (flach, ohne Höhen)
+      this._buildFloorMesh();
+    }
+
+    // Ziel bei Chunk-Wechsel aktualisieren
+    if (
+      playerChunkX !== this._lastFloorChunkX ||
+      playerChunkZ !== this._lastFloorChunkZ
+    ) {
+      // Aktuelle Position als Start für den Lerp merken
+      this._floorPosX = this.floorMesh!.position.x;
+      this._floorPosZ = this.floorMesh!.position.z;
+      this._floorTargetX = centerX;
+      this._floorTargetZ = centerZ;
+      this._lastFloorChunkX = playerChunkX;
+      this._lastFloorChunkZ = playerChunkZ;
+    }
+
+    // Smooth lerp zur Ziel-Position
+    if (this.floorMesh) {
+      this._floorPosX += (this._floorTargetX - this._floorPosX) * 0.08;
+      this._floorPosZ += (this._floorTargetZ - this._floorPosZ) * 0.08;
+      this.floorMesh.position.x = this._floorPosX;
+      this.floorMesh.position.z = this._floorPosZ;
+
+      // Vertex-Höhen an aktuelle Position anpassen (live, kein Neubau)
+      this._updateFloorHeights();
     }
   }
 
@@ -252,65 +285,19 @@ export class ChunkManager {
   // Private: Boden-Mesh
   // -----------------------------------------------------------------------
 
-  private _buildFloorMesh(
-    neededCoords: Array<{ cx: number; cz: number }>,
-  ): void {
-    if (neededCoords.length === 0) return;
-
-    let minCX = Infinity,
-      maxCX = -Infinity;
-    let minCZ = Infinity,
-      maxCZ = -Infinity;
-    for (const { cx, cz } of neededCoords) {
-      if (cx < minCX) minCX = cx;
-      if (cx > maxCX) maxCX = cx;
-      if (cz < minCZ) minCZ = cz;
-      if (cz > maxCZ) maxCZ = cz;
-    }
-
-    const cs = this.config.chunkSize;
-    const worldMinX = minCX * cs;
-    const worldMinZ = minCZ * cs;
-    const worldMaxX = (maxCX + 1) * cs;
-    const worldMaxZ = (maxCZ + 1) * cs;
-    const totalWidth = worldMaxX - worldMinX;
-    const totalDepth = worldMaxZ - worldMinZ;
-
-    const radius = 100; // Fester, großer Radius – der Ring ist so groß,
-    // dass er das gesamte Chunk-Raster abdeckt, egal wo der Spieler steht.
-    // Mit Nebel (far=24m) sieht man den Rand nie.
+  /**
+   * Baut das Boden-Mesh EINMAL an Position (0, floorY, 0) mit flacher Geometrie.
+   * Die Vertex-Höhen werden live in _updateFloorHeights gesetzt.
+   */
+  private _buildFloorMesh(): void {
+    const radius = 100;
     const thetaSegs = Math.max(96, Math.ceil(radius * 3));
     const radialSegs = Math.max(32, Math.ceil(radius * 0.8));
     const geo = new THREE.RingGeometry(0, radius, thetaSegs, radialSegs);
 
-    const centerX = (worldMinX + worldMaxX) / 2;
-    const centerZ = (worldMinZ + worldMaxZ) / 2;
-    const pos = geo.getAttribute("position") as THREE.BufferAttribute;
-    const posArr = pos.array as Float32Array;
-
-    for (let i = 0; i < pos.count; i++) {
-      const lx = posArr[i * 3];
-      const ly = posArr[i * 3 + 1];
-      const wx = centerX + lx;
-      const wz = centerZ + ly;
-      const h = this._duneHeight(wx, wz);
-      posArr[i * 3 + 2] = h;
-    }
-    pos.needsUpdate = true;
-
-    // Normalen analytisch berechnen
-    const normals = new Float32Array(pos.count * 3);
-    for (let i = 0; i < pos.count; i++) {
-      const lx = posArr[i * 3];
-      const ly = posArr[i * 3 + 1];
-      const wx = centerX + lx;
-      const wz = centerZ + ly;
-      const [nx, ny, nz] = this._duneNormalLocal(wx, wz);
-      const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
-      normals[i * 3] = nx / len;
-      normals[i * 3 + 1] = ny / len;
-      normals[i * 3 + 2] = nz / len;
-    }
+    // Zusätzlichen Platz für Normalen (wird später befüllt)
+    const posCount = geo.getAttribute("position").count;
+    const normals = new Float32Array(posCount * 3);
     geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
 
     if (!cachedFloorMat) {
@@ -322,8 +309,68 @@ export class ChunkManager {
     }
 
     this.floorMesh = new THREE.Mesh(geo, cachedFloorMat);
+    this.floorMesh.position.set(0, this.config.floorY, 0);
     this.floorMesh.rotation.x = -Math.PI / 2;
     this.scene.add(this.floorMesh);
+
+    // Erste Höhen-Berechnung
+    this._updateFloorHeights();
+  }
+
+  /**
+   * Aktualisiert die Vertex-Höhen + Normalen des Boden-Meshes
+   * basierend auf der aktuellen Mesh-Position.
+   * Dadurch passen die Dünen immer zur Welt-Position – auch während Lerp.
+   */
+  private _updateFloorHeights(): void {
+    if (!this.floorMesh) return;
+
+    const meshX = this.floorMesh.position.x;
+    const meshZ = this.floorMesh.position.z;
+
+    const pos = this.floorMesh.geometry.getAttribute(
+      "position",
+    ) as THREE.BufferAttribute;
+    const posArr = pos.array as Float32Array;
+    const count = pos.count;
+
+    // --- Höhen aktualisieren ---
+    // Nach rotation.x = -PI/2:
+    //   world_x = mesh.position.x + local_x
+    //   world_z = mesh.position.z - local_y
+    //   local_z = duneHeight(world_x, world_z) → wird zum world_y
+    for (let i = 0; i < count; i++) {
+      const lx = posArr[i * 3];
+      const ly = posArr[i * 3 + 1];
+      const wx = meshX + lx;
+      const wz = meshZ - ly;
+      posArr[i * 3 + 2] = this._duneHeight(wx, wz);
+    }
+    pos.needsUpdate = true;
+
+    // --- Normalen aktualisieren ---
+    // dz/dx = dh/dwx * 1 = dhdx
+    // dz/dy = dh/dwz * (-1) = -dhdz
+    // Normal = (-dz/dx, -dz/dy, 1) = (-dhdx, +dhdz, 1)
+    const normal = this.floorMesh.geometry.getAttribute(
+      "normal",
+    ) as THREE.BufferAttribute;
+    const normalArr = normal.array as Float32Array;
+    for (let i = 0; i < count; i++) {
+      const lx = posArr[i * 3];
+      const ly = posArr[i * 3 + 1];
+      const wx = meshX + lx;
+      const wz = meshZ - ly;
+      const [dhdx, dhdz] = this._duneDerivatives(wx, wz);
+      let nx = -dhdx;
+      let ny = dhdz;
+      let nz = 1.0;
+      const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      normalArr[i * 3] = nx / len;
+      normalArr[i * 3 + 1] = ny / len;
+      normalArr[i * 3 + 2] = nz / len;
+    }
+    normal.needsUpdate = true;
   }
 
   // -----------------------------------------------------------------------
@@ -362,11 +409,6 @@ export class ChunkManager {
       C * b3 * Math.sin(wx * a3 - wz * b3);
 
     return [dhdx, dhdz];
-  }
-
-  private _duneNormalLocal(wx: number, wz: number): [number, number, number] {
-    const [dhdx, dhdz] = this._duneDerivatives(wx, wz);
-    return [-dhdx, -dhdz, 1.0];
   }
 
   // -----------------------------------------------------------------------

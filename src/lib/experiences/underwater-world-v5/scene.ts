@@ -87,7 +87,7 @@ const WORLD_CONFIG = {
   floorY: -4,
   duneHeight: 0.3,
   chunkSize: 16,
-  renderDistance: 1, // ✅ Reduziert: 3×3=9 Chunks statt 5×5=25
+  renderDistance: 2, // 5×5=25 Chunks – Städte werden früh registriert, sanftes Fade-In
   seegrassCount: 10,
 
   waterY: 22,
@@ -367,6 +367,17 @@ export function tick(
   // =========================================================================
   s.cityWorld.update(ctx.delta, rigPos.x, rigPos.z);
   s.coralReefWorld.update(ctx.delta, rigPos.x, rigPos.z);
+
+  // =========================================================================
+  // Gestaffelte Queue: Max 1 schwere Operation pro Frame (gesamt).
+  // CityWorld und CoralReefWorld teilen sich dieses eine "Ticket".
+  // So werden _buildCityGroup und _prepareReef nie im selben Frame
+  // ausgeführt → keine Ruckler durch überlappende Klon-Arbeit.
+  // =========================================================================
+  // Priorität: City zuerst (Städte sind aufwändiger), dann Korallen
+  if (!s.cityWorld.processNextHeavyOp()) {
+    s.coralReefWorld.processNextHeavyOp();
+  }
 
   // =========================================================================
   // Leitsystem (zeigt den Weg zur nächsten Stadt)

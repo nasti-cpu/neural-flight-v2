@@ -199,9 +199,15 @@ export class CoralReefWorld {
         }
       }
     }
+  }
 
-    // Gestaffelt: max 1 schwere _prepareReef pro Frame
-    this._processPendingPrepareQueue(1);
+  /**
+   * Verarbeitet genau 1 Riff aus der Vorbereitungs-Warteschlange.
+   * Wird von scene.ts aufgerufen (max 1 schwere Operation pro Frame GESAMT).
+   * @returns true wenn eine Operation ausgeführt wurde
+   */
+  public processNextHeavyOp(): boolean {
+    return this._processPendingPrepareQueue(1) > 0;
   }
 
   /**
@@ -224,13 +230,14 @@ export class CoralReefWorld {
    * Verarbeitet max `maxCount` Riffe aus der Warteschlange pro Frame.
    * So wird die schwere buildReefGroup-Arbeit auf mehrere Frames verteilt.
    */
-  private _processPendingPrepareQueue(maxCount: number): void {
+  private _processPendingPrepareQueue(maxCount: number): number {
     const count = Math.min(maxCount, this._pendingPrepareQueue.length);
     for (let i = 0; i < count; i++) {
       const reef = this._pendingPrepareQueue.shift();
       if (!reef) continue;
       this._prepareReef(reef);
     }
+    return count;
   }
   private _prepareReef(reef: ReefSlot): void {
     if (reef.group) return; // Bereits gebaut
@@ -316,10 +323,8 @@ export class CoralReefWorld {
   // -----------------------------------------------------------------------
 
   private _showReef(reef: ReefSlot): void {
-    if (!reef.group) {
-      this._prepareReef(reef);
-    }
-    this.scene.add(reef.group!);
+    if (!reef.group) return;
+    this.scene.add(reef.group);
     reef.state = "visible";
   }
 
@@ -327,6 +332,7 @@ export class CoralReefWorld {
     this._removeReefGroup(reef);
     reef.state = "pending";
     reef.group = null;
+    reef._queued = false;
   }
 
   private _removeReefGroup(reef: ReefSlot): void {
