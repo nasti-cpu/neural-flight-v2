@@ -41,13 +41,6 @@ export interface SchoolFrameFish {
   roll: number;
 }
 
-export interface SchoolFrameData {
-  /** Basis-Yaw des Schwarms (Tangentenrichtung der Ellipse) */
-  baseYaw: number;
-  /** Fisch-Daten für jedes Mitglied */
-  fish: SchoolFrameFish[];
-}
-
 // ---------------------------------------------------------------------------
 // V-förmige Formation erzeugen (2er-Reihen, nach hinten breiter)
 // ---------------------------------------------------------------------------
@@ -93,7 +86,7 @@ export function computeSchoolFrame(
   depthFreq: number,
   floorY: number,
   outFish: SchoolFrameFish[],
-): SchoolFrameData {
+): number {
   // Winkel des Schwarm-Zentrums auf der Ellipse
   const ang = elapsed * speed + startAngle;
 
@@ -136,5 +129,5 @@ export function computeSchoolFrame(
     out.roll = Math.cos(fishAng + f.phaseOffset * 0.3) * Math.sin(elapsed * 0.6) * 0.2 * f.ampFactor;
   }
 
-  return { baseYaw, fish: outFish };
+  return baseYaw;
 }

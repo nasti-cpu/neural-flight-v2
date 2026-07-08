@@ -32,7 +32,6 @@ import {
   type SchoolFrameFish,
   generateVFormation,
   computeSchoolFrame,
-  type SchoolFrameData,
 } from "../animationen/fische/schoolFormation";
 
 /**
@@ -136,7 +135,7 @@ function createSoloParams(config: FishWorldConfig): SoloFishParams {
 interface SoloFish {
   mesh: THREE.Group;
   params: SoloFishParams;
-  /** Animations-Zustand (Yaw, Pitch, Roll, curY, Burst-GlÃ¤ttung) */
+  /** Animations-Zustand (Yaw, Pitch, Roll, curY, Burst-Glättung) */
   state: SwimState;
 
   // --- Glow (Echoortung) ---
@@ -146,6 +145,9 @@ interface SoloFish {
 
   /** Cooldown in Sekunden: verhindert wiederholtes Wegschubsen an Kuppeln */
   repelCooldown: number;
+
+  /** Vorab erstelltes EchoTarget – vermeidet Closure+Object-Allokation pro Frame */
+  _echoTarget: EchoTarget;
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +178,9 @@ interface FishSchool {
   speed: number;
   depthAmp: number;
   depthFreq: number;
+
+  /** Vorab erstelltes EchoTarget – vermeidet Closure+Object-Allokation pro Frame */
+  _echoTarget: EchoTarget;
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +246,6 @@ export class FishWorld {
   private _glowColor = new THREE.Color(0xffaa00);
   private _echoOrigin = new THREE.Vector3();
   private _tmpDistVec = new THREE.Vector3();
-  private _tmpSchoolCenter = new THREE.Vector3();
 
   constructor(scene: THREE.Scene, config?: Partial<FishWorldConfig>) {
     this.scene = scene;
@@ -520,7 +524,8 @@ export class FishWorld {
 
     this.scene.add(mesh);
 
-    return {
+    // Fisch-Objekt anlegen
+    const fish: SoloFish = {
       mesh,
       params,
       state,
@@ -528,7 +533,18 @@ export class FishWorld {
       fishMesh,
       originalEmissive,
       repelCooldown: 0,
+      _echoTarget: {
+        position: new THREE.Vector3(),
+        onHit: () => {
+          // Wird unten überschrieben – Platzhalter
+        },
+      },
     };
+    // Echten Closure erstellen, der fish.glowIntensity setzt
+    fish._echoTarget.onHit = (intensity: number) => {
+      fish.glowIntensity = intensity;
+    };
+    return fish;
   }
 
   /**
@@ -768,7 +784,7 @@ export class FishWorld {
 
     const fadeMs = 2000;
 
-    this.activeSchools.push({
+    const school: FishSchool = {
       instances,
       fadeStartedAt: 0,
       spawnAt: performance.now(),
@@ -789,7 +805,14 @@ export class FishWorld {
       speed: 0.08 + rand() * 0.12,
       depthAmp: 0.5 + rand() * 1.0,
       depthFreq: 0.06 + rand() * 0.08,
-    });
+      _echoTarget: {
+        position: new THREE.Vector3(),
+        onHit: (intensity: number) => {
+          school.glowIntensity = intensity;
+        },
+      },
+    };
+    this.activeSchools.push(school);
   }
 
   private _updateSchools(
@@ -850,7 +873,7 @@ export class FishWorld {
         poolIdx >= 0 && poolIdx < this._schoolFrameBuffers.length
           ? this._schoolFrameBuffers[poolIdx]
           : this._schoolFrameBuffers[0];
-      const frame = computeSchoolFrame(
+      const baseYaw = computeSchoolFrame(
         school.formation,
         elapsed,
         school.centerX,
@@ -867,8 +890,8 @@ export class FishWorld {
       );
 
       // Matrizen fÃ¼r jeden Fisch setzen
-      for (let j = 0; j < frame.fish.length; j++) {
-        const f = frame.fish[j];
+      for (let j = 0; j < frameBuf.length; j++) {
+        const f = frameBuf[j];
 
         this._tmpVec3.set(f.fx, f.fy, f.fz);
 
@@ -876,7 +899,7 @@ export class FishWorld {
         this._tmpQuat.identity();
         this._tmpQuatA.setFromAxisAngle(
           this._up,
-          frame.baseYaw + f.yawVariation,
+          baseYaw + f.yawVariation,
         );
         this._tmpQuat.multiply(this._tmpQuatA);
         this._tmpQuatB.setFromAxisAngle(this._axisPitch, f.pitch);
@@ -910,27 +933,19 @@ export class FishWorld {
     this._echoTargets.length = 0;
     for (const fish of this.soloFishes) {
       if (!fish.fishMesh || !fish.mesh.visible) continue;
-      this._echoTargets.push({
-        position: fish.mesh.position,
-        onHit: () => {
-          fish.glowIntensity = 1.0;
-        },
-      });
+      fish._echoTarget.position.copy(fish.mesh.position);
+      this._echoTargets.push(fish._echoTarget);
     }
 
     // Echo-Targets aus Schwärmen
     // Performance: Nur den Schwarm-Mittelpunkt als Target (nicht 20 Einzelfische)
     for (const school of this.activeSchools) {
-      this._echoTargets.push({
-        position: this._tmpSchoolCenter.set(
-          school.centerX,
-          school.baseY,
-          school.centerZ,
-        ),
-        onHit: () => {
-          school.glowIntensity = 1.0;
-        },
-      });
+      school._echoTarget.position.set(
+        school.centerX,
+        school.baseY,
+        school.centerZ,
+      );
+      this._echoTargets.push(school._echoTarget);
     }
 
     // ZusÃ¤tzliche Echo-Targets (z.â€¯B. Quallen von JellyWorld)
