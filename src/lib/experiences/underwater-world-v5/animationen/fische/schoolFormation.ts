@@ -92,6 +92,7 @@ export function computeSchoolFrame(
   depthAmp: number,
   depthFreq: number,
   floorY: number,
+  outFish: SchoolFrameFish[],
 ): SchoolFrameData {
   // Winkel des Schwarm-Zentrums auf der Ellipse
   const ang = elapsed * speed + startAngle;
@@ -112,10 +113,10 @@ export function computeSchoolFrame(
   const rawCy = baseY + Math.sin(elapsed * depthFreq * Math.PI * 2) * depthAmp;
   const cy = Math.max(floorY + 2.0, rawCy);
 
-  const fish: SchoolFrameFish[] = [];
-
+  // outFish ist vorab alloziiert – keine new-Objekte im Loop!
   for (let i = 0; i < formation.length; i++) {
     const f = formation[i];
+    const out = outFish[i];
 
     // Individuelle Position auf der Ellipse (eigene Geschwindigkeit)
     const fishAng = elapsed * speed * f.speedFactor;
@@ -123,19 +124,17 @@ export function computeSchoolFrame(
     const fishPz = centerZ + Math.sin(fishAng) * swimRadiusZ;
 
     // V-Formation-Offset in Schwimmrichtung drehen
-    const fx = fishPx + f.offsetX * cosA - f.offsetZ * sinA;
-    const fz = fishPz + f.offsetX * sinA + f.offsetZ * cosA;
+    out.fx = fishPx + f.offsetX * cosA - f.offsetZ * sinA;
+    out.fz = fishPz + f.offsetX * sinA + f.offsetZ * cosA;
 
     // Vertikale Position: Schwarm-Tiefe + Offset + kleine Sinus-Welle
-    const fy = cy + f.offsetY + Math.sin(elapsed * 0.5 + f.phaseOffset) * 0.2;
+    out.fy = cy + f.offsetY + Math.sin(elapsed * 0.5 + f.phaseOffset) * 0.2;
 
     // Rotation: Yaw-Variation, Pitch, Roll
-    const yawVar = Math.sin(elapsed * 1.2 * Math.PI * 2 + f.phaseOffset) * 0.15 * f.ampFactor;
-    const pitch = Math.sin(elapsed * 0.9 * Math.PI * 2 + f.phaseOffset * 0.7) * 0.05 * f.ampFactor;
-    const roll = Math.cos(fishAng + f.phaseOffset * 0.3) * Math.sin(elapsed * 0.6) * 0.2 * f.ampFactor;
-
-    fish.push({ fx, fy, fz, yawVariation: yawVar, pitch, roll });
+    out.yawVariation = Math.sin(elapsed * 1.2 * Math.PI * 2 + f.phaseOffset) * 0.15 * f.ampFactor;
+    out.pitch = Math.sin(elapsed * 0.9 * Math.PI * 2 + f.phaseOffset * 0.7) * 0.05 * f.ampFactor;
+    out.roll = Math.cos(fishAng + f.phaseOffset * 0.3) * Math.sin(elapsed * 0.6) * 0.2 * f.ampFactor;
   }
 
-  return { baseYaw, fish };
+  return { baseYaw, fish: outFish };
 }

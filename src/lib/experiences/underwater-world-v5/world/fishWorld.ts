@@ -32,6 +32,7 @@ import {
   type SchoolFrameFish,
   generateVFormation,
   computeSchoolFrame,
+  type SchoolFrameData,
 } from "../animationen/fische/schoolFormation";
 
 /**
@@ -211,6 +212,21 @@ export class FishWorld {
   private echolocation: EcholocationRings | null = null;
   private _echoTargets: EchoTarget[] = [];
 
+  /** Gecachte V-Formation (einmal erzeugt, für alle Schwärme geteilt) */
+  private _defaultFormation: FormationOffset[] = [];
+
+  /**
+   * Wiederverwendbare SchoolFrameFish-Puffer (einer pro Pool-Mesh).
+   * Verhindert Array+Object-Allokationen in computeSchoolFrame.
+   */
+  private _schoolFrameBuffers: SchoolFrameFish[][] = [];
+
+  /**
+   * Warteschlange für School-Spawns (gestaffelt via processNextHeavyOp).
+   * scene.ts verarbeitet max 1 pro Frame.
+   */
+  private _pendingSpawnQueue: Array<{ cameraX: number; cameraZ: number }> = [];
+
   // --- Wiederverwendbare Objekte (Performance: kein "new" im Loop) ---
   private _tmpVec3 = new THREE.Vector3();
   private _tmpQuat = new THREE.Quaternion();
@@ -308,8 +324,18 @@ export class FishWorld {
         poolMesh.visible = false;
         this.scene.add(poolMesh);
         this._schoolPool.push(poolMesh);
+
+        // ✅ Frame-Puffer für dieses Pool-Mesh vorab allozieren
+        const buf: SchoolFrameFish[] = [];
+        for (let j = 0; j < this.config.schoolSize; j++) {
+          buf.push({ fx: 0, fy: 0, fz: 0, yawVariation: 0, pitch: 0, roll: 0 });
+        }
+        this._schoolFrameBuffers.push(buf);
       }
     }
+
+    // ✅ V-Formation einmal vorberechnen (wiederverwendet für alle Schwärme)
+    this._defaultFormation = generateVFormation(this.config.schoolSize);
 
     this._scheduleNextSchool();
 
@@ -693,14 +719,35 @@ export class FishWorld {
     this.nextSchoolTime = performance.now() + interval * 1000;
   }
 
+  /** Legt einen School-Spawn in die Warteschlange (gestaffelt) */
+  private _enqueueSchoolSpawn(cameraPos: THREE.Vector3): void {
+    this._pendingSpawnQueue.push({
+      cameraX: cameraPos.x,
+      cameraZ: cameraPos.z,
+    });
+  }
+
+  /**
+   * Verarbeitet genau 1 School-Spawn aus der Warteschlange.
+   * Wird von scene.ts aufgerufen (max 1 schwere Operation pro Frame).
+   * @returns true wenn ein Spawn ausgeführt wurde
+   */
+  public processNextHeavyOp(): boolean {
+    const pending = this._pendingSpawnQueue.shift();
+    if (!pending) return false;
+    const camPos = new THREE.Vector3(pending.cameraX, 0, pending.cameraZ);
+    this._spawnSchool(camPos);
+    return true;
+  }
+
   private _spawnSchool(cameraPos: THREE.Vector3): void {
     if (!this.schoolFishMesh || this._schoolPool.length === 0) return;
 
     const { schoolSize } = this.config;
     const rand = Math.random;
 
-    // V-Formation aus dem Modul erzeugen
-    const formation = generateVFormation(schoolSize);
+    // ✅ Gecachte V-Formation verwenden (kein new Array mehr)
+    const formation = this._defaultFormation;
 
     // Gültige Startposition außerhalb aller Kuppeln finden
     const { x: validX, z: validZ } = this._findValidPosition(
@@ -753,7 +800,9 @@ export class FishWorld {
     const now = performance.now();
 
     if (now >= this.nextSchoolTime && this.activeSchools.length < 2) {
-      this._spawnSchool(cameraPos);
+      // ✅ Nicht sofort spawnen, sondern in die Queue legen.
+      // scene.ts verarbeitet max 1 pro Frame über processNextHeavyOp().
+      this._enqueueSchoolSpawn(cameraPos);
       this._scheduleNextSchool();
     }
 
@@ -794,7 +843,13 @@ export class FishWorld {
 
       mat.opacity = opacity;
 
-      // Frame-Daten aus dem Modul berechnen
+      // ✅ Frame-Daten mit vorab alloziiertem Puffer berechnen (kein GC-Müll)
+      // Den richtigen Puffer anhand des Pool-Index finden
+      const poolIdx = this._schoolPool.indexOf(school.instances);
+      const frameBuf =
+        poolIdx >= 0 && poolIdx < this._schoolFrameBuffers.length
+          ? this._schoolFrameBuffers[poolIdx]
+          : this._schoolFrameBuffers[0];
       const frame = computeSchoolFrame(
         school.formation,
         elapsed,
@@ -808,6 +863,7 @@ export class FishWorld {
         school.depthAmp,
         school.depthFreq,
         this.config.floorY,
+        frameBuf,
       );
 
       // Matrizen fÃ¼r jeden Fisch setzen

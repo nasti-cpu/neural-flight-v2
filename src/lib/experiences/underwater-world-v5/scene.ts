@@ -370,13 +370,16 @@ export function tick(
 
   // =========================================================================
   // Gestaffelte Queue: Max 1 schwere Operation pro Frame (gesamt).
-  // CityWorld und CoralReefWorld teilen sich dieses eine "Ticket".
-  // So werden _buildCityGroup und _prepareReef nie im selben Frame
-  // ausgeführt → keine Ruckler durch überlappende Klon-Arbeit.
+  // CityWorld, CoralReefWorld und FishWorld teilen sich dieses "Ticket".
+  // So werden Klon-Arbeiten (Stadt, Riff, Schul-Spawn) nie im selben
+  // Frame ausgeführt → keine Ruckler durch überlappende schwere Arbeit.
   // =========================================================================
-  // Priorität: City zuerst (Städte sind aufwändiger), dann Korallen
-  if (!s.cityWorld.processNextHeavyOp()) {
-    s.coralReefWorld.processNextHeavyOp();
+  // Priorität: City → Korallen → Fisch-Schwarm
+  if (
+    !s.cityWorld.processNextHeavyOp() &&
+    !s.coralReefWorld.processNextHeavyOp()
+  ) {
+    s.fishWorld.processNextHeavyOp();
   }
 
   // =========================================================================
