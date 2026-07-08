@@ -327,11 +327,11 @@ export function tick(
 ): { state: ExperienceState } {
   const s = state as UnderwaterWorldV5State;
 
-  // Player bewegen (fliegt automatisch vorwärts)
-  s.player.tick(ctx.delta);
-
-  // Y-Begrenzung: nicht unter den Boden, nicht über die Wasseroberfläche
-  // Wichtig: player.rig.position ist die Welt-Position, camera.position ist lokal!
+  // Player-Bewegung wird NICHT hier gemacht – updatePlayer() steuert
+  // das Rig direkt über ICAROS-Controller/WASD. s.player.tick()
+  // würde den FlightPlayer-eigenen Zustand nutzen, der nie gesetzt
+  // wird, und damit die updatePlayer-Position überschreiben.
+  // Stattdessen machen wir hier nur die Y-Begrenzung als Sicherheitsnetz.
   const rigPos = s.player.rig.position;
   if (rigPos.y < WORLD_CONFIG.floorY + 0.5) {
     rigPos.y = WORLD_CONFIG.floorY + 0.5;
