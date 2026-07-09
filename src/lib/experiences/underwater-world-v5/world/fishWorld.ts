@@ -735,35 +735,42 @@ export class FishWorld {
       tZ += (homeDz / homeDist) * pull;
     }
 
-    // ═══ 4. Exklusionszonen: Ziel sanft wegdrücken ═══
+    // ═══ 4. Exklusionszonen: Sanfter Push auf die Velocity ═══
+    // Der Fisch wird kontinuierlich von der Kuppel weg gelenkt,
+    // sodass er einen natürlichen Bogen schwimmt (kein Instant-Ruck).
     let targetPushX = 0;
     let targetPushZ = 0;
     if (this._exclusionZones.length > 0) {
       for (const zone of this._exclusionZones) {
-        const zx = tX - zone.centerX;
-        const zz = tZ - zone.centerZ;
+        const zx = pos.x - zone.centerX;
+        const zz = pos.z - zone.centerZ;
         const zDistSq = zx * zx + zz * zz;
-        const effectRadius = zone.radius + 5.0;
+        // Früher und sanfter eingreifen: 12m Abstand zur Kuppel
+        const effectRadius = zone.radius + 12.0;
         if (zDistSq < effectRadius * effectRadius && zDistSq > 0.01) {
           const zDist = Math.sqrt(zDistSq);
+          // Sanfter Push: linear von 0 am Rand bis 4.0 nah an der Kuppel
           const overlap = 1 - zDist / effectRadius;
-          const push = overlap * 6.0;
+          const push = overlap * overlap * 8.0; // Quadratisch = sanfter Einstieg
           targetPushX += (zx / zDist) * push;
           targetPushZ += (zz / zDist) * push;
         }
       }
     }
-    const pushLerp = 1 - Math.exp(-3.0 * dt);
+    // Smooth Lerp für den Push (kein Instant-Switch)
+    const pushLerp = 1 - Math.exp(-2.0 * dt);
     fish.pushAccumX += (targetPushX - fish.pushAccumX) * pushLerp;
     fish.pushAccumZ += (targetPushZ - fish.pushAccumZ) * pushLerp;
     if (targetPushX === 0 && targetPushZ === 0) {
-      fish.pushAccumX *= Math.exp(-2.0 * dt);
-      fish.pushAccumZ *= Math.exp(-2.0 * dt);
+      fish.pushAccumX *= Math.exp(-1.5 * dt);
+      fish.pushAccumZ *= Math.exp(-1.5 * dt);
     }
-    tX += fish.pushAccumX;
-    tZ += fish.pushAccumZ;
+    // Push auf die Velocity (nicht auf die Position) –
+    // so macht der Fisch einen natürlichen Bogen statt zu springen
+    fish.vx += fish.pushAccumX * dt;
+    fish.vz += fish.pushAccumZ * dt;
 
-    // ═══ 5. Stadt-Orbit: Um die Kuppel kreisen (außerhalb) ═══
+    // ═══ 5. Stadt-Orbit: Um die Kuppel kreisen ═══
     if (this._exclusionZones.length > 0) {
       for (const zone of this._exclusionZones) {
         const dx = pos.x - zone.centerX;
@@ -771,31 +778,11 @@ export class FishWorld {
         const distSq = dx * dx + dz * dz;
         const attractionRadius = zone.radius + FishWorld.CITY_ATTRACTION_DIST;
         if (distSq < attractionRadius * attractionRadius) {
-          const orbitRadius = zone.radius + 22; // Weiter draußen, damit Fische nicht im Modell sind
+          const orbitRadius = zone.radius + 22;
           const orbitSpeed = 0.08 + ((fish.wanderPhase * 0.5) % 0.08);
           const orbitAngle = elapsed * orbitSpeed + fish.wanderPhase;
           tX = zone.centerX + Math.cos(orbitAngle) * orbitRadius;
           tZ = zone.centerZ + Math.sin(orbitAngle) * orbitRadius;
-          break;
-        }
-      }
-    }
-
-    // ═══ 5b. Hard Clamp: Fisch ist IN einer ExclusionZone → sofort raus ═══
-    if (this._exclusionZones.length > 0) {
-      for (const zone of this._exclusionZones) {
-        const dx = pos.x - zone.centerX;
-        const dz = pos.z - zone.centerZ;
-        const distSq = dx * dx + dz * dz;
-        const minDist = zone.radius + 4; // 4m Sicherheitsabstand zur Kuppel
-        if (distSq < minDist * minDist && distSq > 0.01) {
-          const dist = Math.sqrt(distSq);
-          const pushOut = (minDist - dist) * 0.5;
-          pos.x += (dx / dist) * pushOut;
-          pos.z += (dz / dist) * pushOut;
-          // Auch das Target anpassen, damit der Fisch nicht zurücksteuert
-          tX = pos.x + (dx / dist) * 5;
-          tZ = pos.z + (dz / dist) * 5;
           break;
         }
       }
@@ -907,35 +894,35 @@ export class FishWorld {
       school.centerZ += (targetZ - school.centerZ) * followRate;
     }
 
-    // ═══ 3. Exklusionszonen-Push auf das Zentrum ═══
+    // ═══ 3. Exklusionszonen: Sanfter, kontinuierlicher Push (nie über 0.5m/Frame) ═══
     if (this._exclusionZones.length > 0 && orbitTargetX === null) {
       for (const zone of this._exclusionZones) {
         const dx = school.centerX - zone.centerX;
         const dz = school.centerZ - zone.centerZ;
         const distSq = dx * dx + dz * dz;
-        const minDist = zone.radius + 14;
+        const minDist = zone.radius + 16;
         if (distSq < minDist * minDist && distSq > 0.01) {
           const dist = Math.sqrt(distSq);
-          const push = (minDist - dist) * 1.5 * dt;
+          const overlap = 1 - dist / minDist;
+          // Quadratischer Push: sanfter Einstieg, stark nah an der Kuppel
+          const push = overlap * overlap * 8.0 * dt;
           school.centerX += (dx / dist) * push;
           school.centerZ += (dz / dist) * push;
         }
       }
     }
-
-    // ═══ 3b. Hard Clamp: Schul-Zentrum ist IN einer ExclusionZone → sofort raus ═══
+    // Zusätzlicher Push AUCH bei Orbit (damit Schulen nicht in die Kuppel treiben)
     if (this._exclusionZones.length > 0) {
       for (const zone of this._exclusionZones) {
         const dx = school.centerX - zone.centerX;
         const dz = school.centerZ - zone.centerZ;
         const distSq = dx * dx + dz * dz;
-        const minDist = zone.radius + 8; // 8m Sicherheitsabstand
+        const minDist = zone.radius + 6;
         if (distSq < minDist * minDist && distSq > 0.01) {
           const dist = Math.sqrt(distSq);
-          const pushOut = (minDist - dist) * 0.3;
-          school.centerX += (dx / dist) * pushOut;
-          school.centerZ += (dz / dist) * pushOut;
-          break;
+          const push = (minDist - dist) * 0.15 * dt;
+          school.centerX += (dx / dist) * push;
+          school.centerZ += (dz / dist) * push;
         }
       }
     }
