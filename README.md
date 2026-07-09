@@ -80,8 +80,8 @@ brew install android-platform-tools    # Mac
 
 ```bash
 # Clone & install
-git clone https://github.com/dweigend/neural-flight-template.git
-cd neural-flight-template
+git clone https://github.com/dweigend/simple_flight.git
+cd simple_flight
 bun install
 
 # Generate HTTPS certificates (required for WebXR)

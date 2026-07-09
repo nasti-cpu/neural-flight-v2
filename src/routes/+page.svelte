@@ -14,7 +14,6 @@ import {
 	Palette,
 	Plane,
 	Play,
-	RadioTower,
 	Rocket,
 	Smartphone,
 	TreePine,
@@ -145,13 +144,6 @@ const routes = [
 		icon: Gamepad2,
 		title: "Desktop Controller",
 		description: "Manual pitch/roll input",
-		planned: false,
-	},
-	{
-		path: "/m5-controller",
-		icon: RadioTower,
-		title: "M5 Controller",
-		description: "Wireless M5Stick tuning",
 		planned: false,
 	},
 	{

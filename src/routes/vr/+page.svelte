@@ -34,31 +34,27 @@
     let removeResizeListener: (() => void) | null = null;
     let fpsCounter: FpsCounter | null = null;
 
-    /** Prüft, ob WebGPU im Browser verfügbar ist */
-    function hasWebGPU(): boolean {
-        return typeof navigator !== "undefined" && "gpu" in navigator;
-    }
-
     onMount(() => {
         scene = new THREE.Scene();
         const dummyCamera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
 
         (async () => {
             try {
-                // Renderer erstellen: WebGPU wenn verfügbar, sonst WebGL
-                if (hasWebGPU()) {
-                    console.log("✅ WebGPU erkannt – nutze WebGPURenderer");
-                    const { WebGPURenderer } = await import("three/webgpu");
-                    renderer = new WebGPURenderer({ canvas, antialias: true });
-                } else {
-                    console.log(
-                        "⚠️ Kein WebGPU – nutze WebGLRenderer als Fallback",
-                    );
-                    renderer = new THREE.WebGLRenderer({
-                        canvas,
-                        antialias: true,
-                    });
-                }
+                // WebGPURenderer wird für die TSL/NodeMaterial-Shader der
+                // Experiences benötigt. Three.js unterstützt WebXR aber nicht
+                // mit einem echten WebGPU-Backend (wirft in XRManager.js einen
+                // Fehler) – forceWebGL lässt den WebGPURenderer intern über
+                // WebGL2 laufen, das die WebXR-Pipeline unterstützt, während
+                // TSL-Shader weiterhin kompiliert werden.
+                console.log(
+                    "✅ Nutze WebGPURenderer (forceWebGL) für WebXR-Kompatibilität",
+                );
+                const { WebGPURenderer } = await import("three/webgpu");
+                renderer = new WebGPURenderer({
+                    canvas,
+                    antialias: true,
+                    forceWebGL: true,
+                });
 
                 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
                 renderer.setSize(window.innerWidth, window.innerHeight);

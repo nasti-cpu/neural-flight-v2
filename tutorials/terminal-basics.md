@@ -10,7 +10,7 @@
 
 | Command | What it does | Example |
 |---------|-------------|---------|
-| `pwd` | **Print Working Directory** — shows where you are | `pwd` → `/Users/you/neural-flight-template` |
+| `pwd` | **Print Working Directory** — shows where you are | `pwd` → `/Users/you/simple_flight` |
 | `ls` | **List** files and folders in current directory | `ls` |
 | `ls -la` | List **all** files (including hidden) with details | `ls -la` |
 | `cd folder` | **Change Directory** — go into a folder | `cd src` |
@@ -30,7 +30,7 @@ pwd
 cd ~
 
 # Go into the project
-cd neural-flight-template
+cd simple_flight
 
 # What's in here?
 ls
