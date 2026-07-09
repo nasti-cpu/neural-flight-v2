@@ -61,6 +61,8 @@ export class ChunkManager {
   /** Letzte Mesh-Position für Dünen-Updates (nur bei Bewegung neu berechnen) */
   private _lastDuneUpdateX: number = 0;
   private _lastDuneUpdateZ: number = 0;
+  /** Frame-Skip: Nur jeden 3. Frame die Dünen-Höhen updaten (spart ~66% CPU) */
+  private _floorFrameSkip: number = 0;
 
   /** Exklusionszonen â€“ hier wÃ¤chst kein Seegras */
   private _exclusionZones: ExclusionZone[] = [];
@@ -338,6 +340,13 @@ export class ChunkManager {
    */
   private _updateFloorHeights(): void {
     if (!this.floorMesh) return;
+
+    // ⚡ Performance: Nur jeden 3. Frame updaten.
+    // Die Dünen sind smooth und das Mesh lerpt sanft –
+    // ein Überspringen ist nicht sichtbar, spart aber ~66% CPU.
+    this._floorFrameSkip++;
+    if (this._floorFrameSkip < 3) return;
+    this._floorFrameSkip = 0;
 
     const meshX = this.floorMesh.position.x;
     const meshZ = this.floorMesh.position.z;

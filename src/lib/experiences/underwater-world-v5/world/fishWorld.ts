@@ -191,6 +191,9 @@ interface FishSchool {
 
   // EchoTarget
   _echoTarget: EchoTarget;
+
+  /** Toggle für Separation: nur jeden 2. Frame neu berechnen */
+  _sepToggle: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -304,18 +307,23 @@ export class FishWorld {
   ): void {
     this._manageTerritoryLifecycle(cameraPos);
 
+    // Glow-Decay einmal berechnen (wiederverwendet für alle Fische)
+    const glowDecay = Math.exp(-3.0 * delta);
+
     // Alle Fische in allen Territorien aktualisieren
     for (const [, territory] of this._territories) {
       for (const fish of territory.soloFishes) {
         this._updateSoloFish(fish, delta, elapsed, cameraPos);
+        this._applyGlowDecay(fish, glowDecay);
       }
       for (const school of territory.schools) {
         this._updateSchool(school, delta, elapsed, cameraPos);
+        this._applySchoolGlowDecay(school, glowDecay);
       }
     }
 
-    // Echoortung
-    this._updateEcholocation(delta, elapsed, cameraPos, additionalTargets);
+    // Echoortung (nur Targets sammeln + updaten, kein Glow-Decay mehr)
+    this._updateEcholocationTargets(delta, elapsed, cameraPos, additionalTargets);
   }
 
   // -----------------------------------------------------------------------
@@ -536,7 +544,7 @@ export class FishWorld {
   private _createSchool(
     homeX: number, homeZ: number, scale: number,
   ): FishSchool {
-    const schoolSize = 6 + Math.floor(Math.random() * 6); // 6–12 Fische
+    const schoolSize = 6 + Math.floor(Math.random() * 3); // 6–8 Fische (O(n²) = 64 vs 144)
 
     // InstancedMesh
     const mat = (
@@ -583,6 +591,7 @@ export class FishWorld {
       yFreq: 0.04 + Math.random() * 0.08,
       glowIntensity: 0,
       originalEmissive: mat.emissive?.clone() ?? new THREE.Color(0x000000),
+      _sepToggle: true,
       _echoTarget: {
         position: new THREE.Vector3(),
         onHit: (intensity: number) => {
@@ -909,16 +918,17 @@ export class FishWorld {
       Math.min(this.config.waterY - 0.5, schoolY),
     );
 
-    // ═══ 6. Separation ═══
+    // ═══ 6. Separation (nur jeden 2. Frame – spart 50% CPU bei O(n²))
     const offsets = school.fishOffsets;
     const len = offsets.length;
     const sepPushX = this._sepPushX;
     const sepPushZ = this._sepPushZ;
-    for (let j = 0; j < len; j++) {
-      sepPushX[j] = 0;
-      sepPushZ[j] = 0;
-    }
-    if (len <= 14) {
+    if (school._sepToggle) {
+      school._sepToggle = false;
+      for (let j = 0; j < len; j++) {
+        sepPushX[j] = 0;
+        sepPushZ[j] = 0;
+      }
       for (let a = 0; a < len; a++) {
         const oa = offsets[a];
         const ax = school.centerX + Math.cos(oa.angle) * oa.dist;
@@ -934,7 +944,6 @@ export class FishWorld {
             const dist = Math.sqrt(distSq);
             const push = (1.5 - dist) * 0.5 * delta;
             const nx = dx / dist;
-
             const nz = dz / dist;
             sepPushX[a] += nx * push;
             sepPushZ[a] += nz * push;
@@ -943,6 +952,9 @@ export class FishWorld {
           }
         }
       }
+    } else {
+      school._sepToggle = true;
+      // Vorherige Push-Werte beibehalten (kein Reset)
     }
 
     // ═══ 7. Jeden Fisch individuell positionieren ═══
@@ -985,10 +997,10 @@ export class FishWorld {
   }
 
   // -----------------------------------------------------------------------
-  // Private: Echoortung
+  // Private: Echoortung – nur Targets sammeln (Glow-Decay ist im Haupt-Update)
   // -----------------------------------------------------------------------
 
-  private _updateEcholocation(
+  private _updateEcholocationTargets(
     delta: number,
     elapsed: number,
     cameraPos: THREE.Vector3,
@@ -1024,39 +1036,48 @@ export class FishWorld {
     this.echolocation.update(
       elapsed, delta, this._echoOrigin, this._echoTargets,
     );
+  }
 
-    // Glow decay
-    const decay = Math.exp(-3.0 * delta);
-    for (const [, territory] of this._territories) {
-      for (const fish of territory.soloFishes) {
-        if (!fish.fishMesh || !fish.originalEmissive) continue;
-        fish.glowIntensity *= decay;
-        const mat = fish.fishMesh.material as THREE.MeshStandardMaterial;
-        if (fish.glowIntensity > 0.01) {
-          this._tmpColor
-            .copy(fish.originalEmissive)
-            .lerp(this._glowColor, fish.glowIntensity);
-          mat.emissive.copy(this._tmpColor);
-          mat.emissiveIntensity = 0.2 + fish.glowIntensity * 1.8;
-        } else {
-          mat.emissive.copy(fish.originalEmissive);
-          mat.emissiveIntensity = 0;
-        }
-      }
-      for (const school of territory.schools) {
-        school.glowIntensity *= decay;
-        const mat = school.instances.material as THREE.MeshStandardMaterial;
-        if (school.glowIntensity > 0.01) {
-          this._tmpColor
-            .copy(school.originalEmissive)
-            .lerp(this._glowColor, school.glowIntensity);
-          mat.emissive.copy(this._tmpColor);
-          mat.emissiveIntensity = 0.2 + school.glowIntensity * 1.8;
-        } else {
-          mat.emissive = school.originalEmissive;
-          mat.emissiveIntensity = 0;
-        }
-      }
+  // -----------------------------------------------------------------------
+  // Private: Glow-Decay für Einzelfische (inline im Haupt-Loop)
+  // -----------------------------------------------------------------------
+
+  /**
+   * Wendet Glow-Decay auf einen Einzelfisch an.
+   * Wird direkt im Haupt-Update-Loop aufgerufen – kein 2. Durchlauf nötig.
+   */
+  private _applyGlowDecay(fish: SoloFish, decay: number): void {
+    if (!fish.fishMesh || !fish.originalEmissive) return;
+    fish.glowIntensity *= decay;
+    const mat = fish.fishMesh.material as THREE.MeshStandardMaterial;
+    if (fish.glowIntensity > 0.01) {
+      this._tmpColor
+        .copy(fish.originalEmissive)
+        .lerp(this._glowColor, fish.glowIntensity);
+      mat.emissive.copy(this._tmpColor);
+      mat.emissiveIntensity = 0.2 + fish.glowIntensity * 1.8;
+    } else {
+      mat.emissive.copy(fish.originalEmissive);
+      mat.emissiveIntensity = 0;
+    }
+  }
+
+  /**
+   * Wendet Glow-Decay auf eine Schule an.
+   * Wird direkt im Haupt-Update-Loop aufgerufen – kein 2. Durchlauf nötig.
+   */
+  private _applySchoolGlowDecay(school: FishSchool, decay: number): void {
+    school.glowIntensity *= decay;
+    const mat = school.instances.material as THREE.MeshStandardMaterial;
+    if (school.glowIntensity > 0.01) {
+      this._tmpColor
+        .copy(school.originalEmissive)
+        .lerp(this._glowColor, school.glowIntensity);
+      mat.emissive.copy(this._tmpColor);
+      mat.emissiveIntensity = 0.2 + school.glowIntensity * 1.8;
+    } else {
+      mat.emissive = school.originalEmissive;
+      mat.emissiveIntensity = 0;
     }
   }
 }
