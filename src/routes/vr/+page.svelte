@@ -47,11 +47,11 @@
 
         (async () => {
             await renderer.init();
-            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.2));
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
-            renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            // renderer.shadowMap.enabled = true; // AUSKOMMENTIERT FÜR PERFORMANCE-TEST
+            // renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
             // XR-Session-Fehler abfangen (z.B. WebGPU+XR nicht unterstützt)
             renderer.xr.addEventListener("sessionstart", () => {

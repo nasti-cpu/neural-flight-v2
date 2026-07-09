@@ -17,13 +17,10 @@
  */
 import * as THREE from "three/webgpu";
 import {
-  attribute,
   clamp,
   float,
   mix,
   positionLocal,
-  sin,
-  time,
   uniform,
   vec3,
 } from "three/tsl";
@@ -35,9 +32,9 @@ import type { PreloadedFlower } from "../../Objekte/Blumen/blumen";
 // ── Konstanten ──
 
 const CHUNK_SIZE = 40; // Größe eines Chunks in Metern (80→40: halbe Kantenlänge = 4× dichteres Gras)
-const VIEW_RADIUS = 2; // Wie viele Chunks um den Spieler herum geladen werden (2 = 5×5 = 25 Chunks)
-// VIEW_RADIUS=2 lädt Chunks bis 80m Entfernung. Der Nebel (FogExp2, density 0.025)
-// verdeckt bei 80m bereits ~86% → Chunks erscheinen/verschwinden unsichtbar.
+const VIEW_RADIUS = 1; // Wie viele Chunks um den Spieler herum geladen werden (1 = 3×3 = 9 Chunks)
+// VIEW_RADIUS=1 lädt Chunks bis 40m Entfernung. Der Nebel (FogExp2, density 0.04)
+// verdeckt bei 40m bereits ~80% → Chunks erscheinen/verschwinden unsichtbar.
 
 // ── Hilfsfunktion: Welthöhe (sanfte Mulde um den Ursprung) ──
 
@@ -99,6 +96,9 @@ export class GrassManager {
   public readonly flowerTargets: THREE.Vector3[] = [];
   /** Globale Liste aller Blumen-Farben (parallel zu flowerTargets, für Pheromon-Spuren) */
   public readonly flowerColors: THREE.Color[] = [];
+
+  /** Zählt Updates für verzögertes WFC-Cleanup (nur alle 10 Frames) */
+  private cleanupCounter = 0;
 
   /** Registrierte Clear-Regionen (z.B. Stadt) – Rechtecke */
   private clearRegions: RectClearRegion[] = [];
@@ -181,8 +181,11 @@ export class GrassManager {
       }
     }
 
-    // WFC-Engine aufräumen, um Speicherplatz zu sparen
-    this.wfc.cleanup(cx, cz, VIEW_RADIUS + 2);
+    // WFC-Engine aufräumen, um Speicherplatz zu sparen (nur alle 10 Frames)
+    this.cleanupCounter++;
+    if (this.cleanupCounter % 10 === 0) {
+      this.wfc.cleanup(cx, cz, VIEW_RADIUS + 2);
+    }
   }
 
   /** Entfernt alle Chunks (z. B. beim Experience-Wechsel). */
@@ -486,12 +489,6 @@ export class GrassManager {
     const bladeGeoClone = this.bladeGeo.clone();
     const mesh = new THREE.InstancedMesh(bladeGeoClone, this.bladeMat, count);
 
-    // Per-Instance-Attribute für Wind-Animation
-    const phaseArr = new Float32Array(count);
-    const speedArr = new Float32Array(count);
-    const baseXArr = new Float32Array(count);
-    const baseZArr = new Float32Array(count);
-
     const dummy = new THREE.Object3D();
 
     for (let i = 0; i < count; i++) {
@@ -510,12 +507,6 @@ export class GrassManager {
       // Bodenniveau am Weltpunkt
       const baseY = worldGroundHeight(x, z);
 
-      // Wind-Daten
-      phaseArr[i] = Math.random() * Math.PI * 2;
-      speedArr[i] = 0.5 + Math.random() * 1.5;
-      baseXArr[i] = x;
-      baseZArr[i] = z;
-
       // Instanz-Matrix setzen (unter die Erde, wenn in Clear-Region)
       if (this.isPositionCleared(x, z)) {
         dummy.position.set(x, -100, z);
@@ -530,24 +521,6 @@ export class GrassManager {
     }
 
     mesh.instanceMatrix.needsUpdate = true;
-
-    // Instanz-Attribute für den TSL-Shader
-    mesh.geometry.setAttribute(
-      "aPhase",
-      new THREE.InstancedBufferAttribute(phaseArr, 1),
-    );
-    mesh.geometry.setAttribute(
-      "aSpeed",
-      new THREE.InstancedBufferAttribute(speedArr, 1),
-    );
-    mesh.geometry.setAttribute(
-      "aBaseX",
-      new THREE.InstancedBufferAttribute(baseXArr, 1),
-    );
-    mesh.geometry.setAttribute(
-      "aBaseZ",
-      new THREE.InstancedBufferAttribute(baseZArr, 1),
-    );
 
     return mesh;
   }
@@ -575,31 +548,10 @@ export class GrassManager {
 
   /** Erzeugt das TSL-Material für die Grashalme. */
   private createBladeMaterial(): THREE.MeshBasicNodeMaterial {
-    //── Uniforms ──
-    const uWindStrength = uniform(this.config.windStrength);
-    const uWindSpeed = uniform(this.config.windSpeedMultiplier);
     const uColor = uniform(new THREE.Color(this.config.color));
     const uGroundColor = uniform(new THREE.Color(this.config.groundColor));
     const uMinHeight = uniform(this.config.minHeight);
     const uMaxHeight = uniform(this.config.maxHeight);
-
-    //── Instanz-Attribute ──
-    const aPhase = attribute("aPhase", "float");
-    const aSpeed = attribute("aSpeed", "float");
-    const aBaseX = attribute("aBaseX", "float");
-    const aBaseZ = attribute("aBaseZ", "float");
-
-    //── positionNode: Wind ──
-    const timeFactor = time.mul(uWindSpeed);
-    const swayX = sin(timeFactor.mul(aSpeed).add(aPhase).add(aBaseX.mul(0.5)))
-      .mul(uWindStrength)
-      .mul(positionLocal.y);
-    const swayZ = sin(
-      timeFactor.mul(aSpeed).mul(0.7).add(aPhase).add(aBaseZ.mul(0.5)),
-    )
-      .mul(uWindStrength)
-      .mul(0.7)
-      .mul(positionLocal.y);
 
     //── colorNode: Höhenfärbung (keine Lichtberechnung – spart ~20% GPU) ──
     const heightT = clamp(
@@ -611,7 +563,6 @@ export class GrassManager {
     );
 
     const mat = new THREE.MeshBasicNodeMaterial();
-    mat.positionNode = positionLocal.add(vec3(swayX, float(0), swayZ));
     mat.colorNode = mix(uGroundColor, uColor, heightT);
     mat.fog = true;
 

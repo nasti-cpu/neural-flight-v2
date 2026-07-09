@@ -28,7 +28,7 @@ const parameters: ParameterDef[] = [
     group: "Atmosphere",
     min: 0.005,
     max: 0.06,
-    default: 0.025,
+    default: 0.04,
     step: 0.001,
     unit: "",
     icon: "Cloud",
