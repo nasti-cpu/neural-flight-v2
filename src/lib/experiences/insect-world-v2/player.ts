@@ -9,7 +9,7 @@ import * as THREE from "three/webgpu";
 import type { ExperienceState } from "../types";
 import { getWorldHeight } from "./Biome/Wiese/grass-manager";
 
-const DEFAULT_BASE_SPEED = 2;
+const DEFAULT_BASE_SPEED = 0.98;
 const PITCH_SPEED_FACTOR = 0.03;
 const YAW_FACTOR = 0.02;
 

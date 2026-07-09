@@ -16,7 +16,7 @@ const parameters: ParameterDef[] = [
     group: "Flight",
     min: 1,
     max: 30,
-    default: 2,
+    default: 0.30, // 30% langsamer als vorher (1.4 m/s)
     step: 0.5,
     unit: "m/s",
     icon: "Gauge",
