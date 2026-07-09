@@ -124,6 +124,14 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   pheromones.addTrails(pheromoneTargets, ctx.camera.position);
   ctx.scene.add(pheromones.group);
 
+  // ── Atmosphärischer Exponential-Nebel ──
+  // Statt linearem Nebel (THREE.Fog) verwenden wir FogExp2:
+  // Alles verschwindet sanft und gleichmäßig im Hintergrund,
+  // wie eine atmosphärische Unschärfe.
+  // Density 0.025 = Sichtweite ~50-80m, dann vollständig im Nebel.
+  const fogColor = new THREE.Color("#4a90d9");
+  ctx.scene.fog = new THREE.FogExp2(fogColor, 0.025);
+
   // Kamera positionieren (Insektenperspektive ~2m)
   const camera = ctx.camera;
   camera.position.set(0, 2, 0);

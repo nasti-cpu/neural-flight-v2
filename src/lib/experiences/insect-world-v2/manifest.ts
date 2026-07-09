@@ -21,27 +21,16 @@ const parameters: ParameterDef[] = [
     unit: "m/s",
     icon: "Gauge",
   },
-  // ── Atmosphere (Fog) ────────────────────────────────
+  // ── Atmosphere (FogExp2) ────────────────────────────
   {
-    id: "fogNear",
-    label: "Fog Near",
+    id: "fogDensity",
+    label: "Fog Density",
     group: "Atmosphere",
-    min: 5,
-    max: 100,
-    default: 30,
-    step: 1,
-    unit: "m",
-    icon: "Cloud",
-  },
-  {
-    id: "fogFar",
-    label: "Fog Far",
-    group: "Atmosphere",
-    min: 20,
-    max: 400,
-    default: 130,
-    step: 5,
-    unit: "m",
+    min: 0.005,
+    max: 0.06,
+    default: 0.025,
+    step: 0.001,
+    unit: "",
     icon: "Cloud",
   },
   {
@@ -78,8 +67,8 @@ export const manifest: ExperienceManifest = {
   camera: { fov: 70, near: 0.1, far: 800 },
   scene: {
     background: "#4a90d9",
-    fogNear: 30,
-    fogFar: 400,
+    fogNear: 0, // Nebel wird in scene.ts per FogExp2 gesetzt
+    fogFar: 0,
     fogColor: "#4a90d9",
     ambientIntensity: 0.4,
     sunIntensity: 1.5,

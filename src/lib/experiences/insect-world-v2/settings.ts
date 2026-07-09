@@ -25,21 +25,15 @@ export function applySettings(
       s.baseSpeed = value as number;
       break;
 
-    // ── Atmosphere (Fog) ──
-    case "fogNear":
-      if (scene.fog instanceof THREE.Fog) {
-        scene.fog.near = value as number;
-      }
-      break;
-
-    case "fogFar":
-      if (scene.fog instanceof THREE.Fog) {
-        scene.fog.far = value as number;
+    // ── Atmosphere (FogExp2) ──
+    case "fogDensity":
+      if (scene.fog instanceof THREE.FogExp2) {
+        scene.fog.density = value as number;
       }
       break;
 
     case "fogColor":
-      if (scene.fog instanceof THREE.Fog) {
+      if (scene.fog instanceof THREE.FogExp2) {
         scene.fog.color.set(value as string);
       }
       break;
