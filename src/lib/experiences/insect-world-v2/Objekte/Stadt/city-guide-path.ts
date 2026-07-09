@@ -1,10 +1,9 @@
 /**
  * insect-world-v2 — City Guide Path.
- * Ein leuchtender Neon-Pfad (gestrichelt, Glow-Sprites wie Pheromonspuren),
+ * Ein leuchtender Neon-Pfad (gestrichelt, Glow-Punkte),
  * der vom Startpunkt (0, 2, 0) zur Stadt führt und dem Gelände folgt.
  *
- * Es existiert immer nur ein Pfad gleichzeitig.
- * Sobald die Stadt erreicht ist, wird der Pfad gelöscht.
+ * Nutzt THREE.Points statt einzelner Sprites → nur 1 Draw Call.
  *
  * WebGPU-konform.
  */
@@ -16,29 +15,22 @@ const DASH_LENGTH = 1.2;
 const GAP_LENGTH = 0.6;
 const PATH_HEIGHT_MIN = 0.5;
 const PATH_HEIGHT_MAX = 1.8;
-const SPRITE_SIZE_MIN = 0.6;
-const SPRITE_SIZE_MAX = 1.2;
-const SPRITES_PER_DASH = 3; // 8→3: von ~4440 auf ~1660 Sprites (−63%), optisch kaum Unterschied
+const POINT_SIZE = 0.9;
 
 export class CityGuidePath {
   readonly group = new THREE.Group();
   private active = false;
   private glowTexture: THREE.CanvasTexture;
-  private phases: number[] = [];
+  private points: THREE.Points | null = null;
 
   constructor() {
     this.glowTexture = this.createGlowTexture();
   }
 
-  /**
-   * Baut einen Pfad vom Startpunkt zur Ziel-Stadt.
-   * Begrenzt die Länge auf 150m – alles dahinter ist im Nebel unsichtbar.
-   * Entfernt vorherige Pfade automatisch.
-   */
   setTarget(from: THREE.Vector3, to: THREE.Vector3): void {
     this.clear();
 
-    // Pfad auf 150m begrenzen (Nebel-Sichtweite ~80m, Puffer für Annäherung)
+    // Pfad auf 150m begrenzen (Nebel-Sichtweite ~80m)
     const _dir = new THREE.Vector3().copy(to).sub(from);
     const dist = _dir.length();
     const maxDist = 150;
@@ -47,34 +39,28 @@ export class CityGuidePath {
       to = new THREE.Vector3().copy(from).add(_dir);
     }
 
-    const points = this.buildCurve(from, to);
-    if (points.length < 2) return;
+    const pts = this.buildCurve(from, to);
+    if (pts.length < 2) return;
 
-    this.buildGlowDashes(points);
+    this.buildPoints(pts);
     this.active = true;
   }
 
-  /** Entfernt den aktuellen Pfad. */
   clear(): void {
-    this.disposeSprites();
+    if (this.points) {
+      this.group.remove(this.points);
+      this.points.geometry.dispose();
+      this.points = null;
+    }
     this.active = false;
   }
 
-  /** Pulsiert die Leuchtkraft der Sprites. */
   update(elapsed: number): void {
-    if (!this.active) return;
-
-    let idx = 0;
-    for (const child of this.group.children) {
-      if (child instanceof THREE.Sprite && child.material instanceof THREE.SpriteMaterial) {
-        const phase = this.phases[idx] ?? 0;
-        child.material.opacity = 0.55 + 0.45 * Math.sin(elapsed * 1.8 + phase);
-        idx++;
-      }
-    }
+    if (!this.active || !this.points) return;
+    const mat = this.points.material as THREE.PointsMaterial;
+    mat.opacity = 0.55 + 0.45 * Math.sin(elapsed * 1.8);
   }
 
-  /** Gibt alle Ressourcen frei. */
   dispose(): void {
     this.clear();
     this.glowTexture.dispose();
@@ -82,7 +68,6 @@ export class CityGuidePath {
 
   // ── Privat ──
 
-  /** Erzeugt die Radiale-Gradient-Glow-Textur (wie Pheromonspuren). */
   private createGlowTexture(): THREE.CanvasTexture {
     const size = 64;
     const canvas = document.createElement("canvas");
@@ -105,7 +90,6 @@ export class CityGuidePath {
     return tex;
   }
 
-  /** Baut eine CatmullRom-Kurve vom Player zur Stadt, die dem Gelände folgt. */
   private buildCurve(
     from: THREE.Vector3,
     to: THREE.Vector3,
@@ -116,7 +100,6 @@ export class CityGuidePath {
     const dz = to.z - from.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
 
-    // Mittelpunkt leicht versetzen für sanfte Kurve
     const midX = (from.x + to.x) / 2 + (Math.random() - 0.5) * dist * 0.15;
     const midZ = (from.z + to.z) / 2 + (Math.random() - 0.5) * dist * 0.15;
     const midY =
@@ -126,8 +109,6 @@ export class CityGuidePath {
         3 +
       (PATH_HEIGHT_MIN + PATH_HEIGHT_MAX) / 2;
 
-    // Erster Punkt: exakt am Startpunkt
-    // Letzter Punkt: nah am Boden bei der Stadt
     const ctrlPts = [
       new THREE.Vector3(from.x, from.y, from.z),
       new THREE.Vector3(midX, midY, midZ),
@@ -147,77 +128,49 @@ export class CityGuidePath {
     return pts;
   }
 
-  /** Baut gestrichelte Glow-Dashes aus Sprites entlang der Kurve. */
-  private buildGlowDashes(points: THREE.Vector3[]): void {
-    this.phases = [];
-
-    // Kurve aus den Punkten bauen
-    const curve = new THREE.CatmullRomCurve3(points);
+  private buildPoints(pts: THREE.Vector3[]): void {
+    const curve = new THREE.CatmullRomCurve3(pts);
     const totalLength = curve.getLength();
-
     const segmentLen = DASH_LENGTH + GAP_LENGTH;
     const numDashes = Math.max(1, Math.floor(totalLength / segmentLen));
 
-    // Material (einmal für alle Sprites)
-    const mat = new THREE.SpriteMaterial({
+    const positions: number[] = [];
+
+    for (let d = 0; d < numDashes; d++) {
+      const dashMid = d * segmentLen + DASH_LENGTH / 2;
+      const t = dashMid / totalLength;
+      if (t > 1) break;
+
+      const p = curve.getPoint(t);
+      const tangent = curve.getTangent(t);
+      const groundY = getWorldHeight(p.x, p.z);
+      p.y = groundY + (PATH_HEIGHT_MIN + PATH_HEIGHT_MAX) / 2;
+
+      // 3 Punkte pro Dash (einfach statt 3 Sprites)
+      for (let s = 0; s < 3; s++) {
+        const offset = ((s / 3) - 0.5) * DASH_LENGTH * 0.8;
+        p.x += tangent.x * offset;
+        p.y += tangent.y * offset;
+        p.z += tangent.z * offset;
+        positions.push(p.x, p.y, p.z);
+      }
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+
+    const mat = new THREE.PointsMaterial({
       map: this.glowTexture,
       color: NEON_GLOW,
       transparent: true,
       opacity: 1.0,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
+      size: POINT_SIZE,
+      sizeAttenuation: true,
     });
 
-    // Für jeden Dash: Position auf der Kurve sampeln, Sprites platzieren
-    for (let d = 0; d < numDashes; d++) {
-      const dashStart = d * segmentLen;
-      const dashMid = dashStart + DASH_LENGTH / 2;
-      const t = dashMid / totalLength;
-
-      const p = curve.getPoint(t);
-      const tangent = curve.getTangent(t);
-
-      // Korrekte Geländehöhe an dieser Stelle
-      const groundY = getWorldHeight(p.x, p.z);
-      p.y = groundY + (PATH_HEIGHT_MIN + PATH_HEIGHT_MAX) / 2;
-
-      // Mehrere Sprites pro Dash für dichten Glow
-      for (let s = 0; s < SPRITES_PER_DASH; s++) {
-        const offset = ((s / SPRITES_PER_DASH) - 0.5) * DASH_LENGTH * 0.8;
-        const pos = new THREE.Vector3().copy(p);
-
-        // Entlang der Tangente verschieben
-        pos.addScaledVector(tangent, offset);
-
-        // Leichte zufällige Streuung für organischen Look
-        pos.x += (Math.random() - 0.5) * 0.3;
-        pos.z += (Math.random() - 0.5) * 0.3;
-        pos.y += (Math.random() - 0.5) * 0.15;
-
-        const sprite = new THREE.Sprite(mat);
-        sprite.position.copy(pos);
-        const size = SPRITE_SIZE_MIN + Math.random() * (SPRITE_SIZE_MAX - SPRITE_SIZE_MIN);
-        sprite.scale.set(size, size, 1);
-
-        this.phases.push(Math.random() * Math.PI * 2);
-        this.group.add(sprite);
-      }
-    }
-  }
-
-  /** Entfernt alle Sprites aus der Gruppe. */
-  private disposeSprites(): void {
-    let disposed = false;
-    for (const child of this.group.children) {
-      if (child instanceof THREE.Sprite) {
-        if (!disposed) {
-          child.material.dispose();
-          disposed = true;
-        }
-        this.group.remove(child);
-      }
-    }
-    this.group.clear();
-    this.phases = [];
+    this.points = new THREE.Points(geo, mat);
+    this.group.add(this.points);
   }
 }

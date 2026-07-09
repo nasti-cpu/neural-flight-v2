@@ -120,7 +120,8 @@ export class GrassManager {
 
     // ── Gemeinsame Geometrie für Grashalme ──
     // Ein Kegel pro Halm — wird per Instancing millionenfach gezeichnet.
-    this.bladeGeo = new THREE.ConeGeometry(0.05, 1, 4);
+    // 3 statt 4 Segmente: 25% weniger Dreiecke, optisch kein Unterschied.
+    this.bladeGeo = new THREE.ConeGeometry(0.05, 1, 3);
     this.bladeGeo.translate(0, 0.5, 0); // Drehpunkt an die Basis
 
     // ── Gemeinsames TSL-Material für Grashalme ──
@@ -557,7 +558,7 @@ export class GrassManager {
 
   /** Erzeugt die Bodenplatte für einen Chunk mit leichter Wölbung. */
   private createGround(worldX: number, worldZ: number): THREE.Mesh {
-    const segs = 8;
+    const segs = 4; // 8→4: −75% Vertices, Wölbung bei 40m Chunk immer noch glatt
     const geo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, segs, segs);
     geo.rotateX(-Math.PI / 2);
 
