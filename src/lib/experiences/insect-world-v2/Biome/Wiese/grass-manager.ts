@@ -6,7 +6,7 @@
  * für eine abwechslungsreiche, aber konsistente Welt.
  *
  * Funktionsweise:
- * - Die Welt wird in ein 80×80-Raster eingeteilt (Chunks).
+ * - Die Welt wird in ein 40×40m-Raster eingeteilt (Chunks).
  * - Nur Chunks in Sichtweite (3×3-Raster) sind aktiv.
  * - Entfernte Chunks werden entfernt, neue werden erzeugt.
  * - Geometrie und Material werden einmal erzeugt und wiederverwendet.
@@ -38,10 +38,10 @@ import type { PreloadedFlower } from "../../Objekte/Blumen/blumen";
 
 // ── Konstanten ──
 
-const CHUNK_SIZE = 80; // Größe eines Chunks in Metern
+const CHUNK_SIZE = 40; // Größe eines Chunks in Metern (80→40: halbe Kantenlänge = 4× dichteres Gras)
 const VIEW_RADIUS = 3; // Wie viele Chunks um den Spieler herum geladen werden (3 = 7×7 = 49 Chunks)
-// VIEW_RADIUS=3 lädt Chunks bis 240m Entfernung. Der Nebel (FogExp2)
-// verdeckt alles ab ~80m, sodass man nie sieht, wie Chunks erscheinen/verschwinden.
+// VIEW_RADIUS=3 lädt Chunks bis 120m Entfernung. Der Nebel (FogExp2, density 0.025)
+// verdeckt bei 120m bereits ~95% → Chunks erscheinen/verschwinden unsichtbar.
 
 // ── Hilfsfunktion: Welthöhe (sanfte Mulde um den Ursprung) ──
 
@@ -140,7 +140,7 @@ export class GrassManager {
    *
    * Lösung:
    * - Wir sagen der WFC-Engine: "Chunk (0,0) = FLOWERS_DENSE"
-   * - Das sind 30 Blumen auf 80×80m, direkt beim Start sichtbar
+    * - Das sind 30 Blumen auf 40×40m, direkt beim Start sichtbar
    * - Die umliegenden Chunks passen sich automatisch an (WFC-Propagation)
    */
   preSeedSpawn(): void {
