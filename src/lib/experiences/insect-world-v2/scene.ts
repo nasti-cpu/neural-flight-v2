@@ -84,7 +84,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 
   // 5. Bienen (zufällige Sinus-Bahnen über die Wiese)
   const bees = await createBees(beeGlbUrl, {
-    count: 20,
+    count: 10,
     scale: 0.04,
     fieldRadius: 200,
     flyRadiusMin: 1,
@@ -99,7 +99,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 
   // 6. Schmetterlinge (zufällige Sinus-Bahnen über die Wiese)
   const butterflies = await createButterflies(butterflyGlbUrl, {
-    count: 12,
+    count: 6,
     scale: 0.036,
     fieldRadius: 200,
     flyRadiusMin: 1,

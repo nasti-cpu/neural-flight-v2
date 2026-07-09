@@ -19,12 +19,8 @@ import * as THREE from "three/webgpu";
 import {
   attribute,
   clamp,
-  dot,
   float,
-  max,
   mix,
-  normalize,
-  normalWorld,
   positionLocal,
   sin,
   time,
@@ -605,7 +601,7 @@ export class GrassManager {
       .mul(0.7)
       .mul(positionLocal.y);
 
-    //── colorNode: Höhenfärbung + Licht ──
+    //── colorNode: Höhenfärbung (keine Lichtberechnung – spart ~20% GPU) ──
     const heightT = clamp(
       positionLocal.y
         .sub(uMinHeight)
@@ -613,13 +609,10 @@ export class GrassManager {
       float(0),
       float(1),
     );
-    const lightDir = normalize(vec3(0.5, 0.8, 0.3));
-    const diff = max(dot(normalWorld, lightDir), float(0));
-    const lightFactor = float(0.35).add(diff.mul(0.65));
 
     const mat = new THREE.MeshBasicNodeMaterial();
     mat.positionNode = positionLocal.add(vec3(swayX, float(0), swayZ));
-    mat.colorNode = mix(uGroundColor, uColor, heightT).mul(lightFactor);
+    mat.colorNode = mix(uGroundColor, uColor, heightT);
     mat.fog = true;
 
     return mat;

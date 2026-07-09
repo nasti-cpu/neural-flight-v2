@@ -1,16 +1,39 @@
 /**
  * insect-world-v2 — Blumen.
- *
- * Erzeugt LowPoly-Blumen direkt im Code:
- * - Grüner Stiel (CylinderGeometry)
- * - 6 radiale Blütenblätter (PlaneGeometry) in der Blütenfarbe
- *
- * Zwei materialGroups pro Typ (Stiel + Blüte) wie das Original-GLB.
- * Spart GLB-Laden, mergeGeometries und GPU-Speicher.
- *
- * WebGPU-konform.
+ * Lädt die 3 Lowpoly-GLB-Blumen und verteilt sie in der Wiese.
+ * Jede GLB kann mehrere Sub-Meshes mit eigenen Materialien haben
+ * (z.B. grüner Stiel + bunte Blüte). Pro Material wird ein
+ * separater InstancedMesh erzeugt.
  */
+
 import * as THREE from "three/webgpu";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+
+import pinkUrl from "./Flower pink.glb?url";
+import whiteUrl from "./Flower white.glb?url";
+import yellowUrl from "./Flower yellow.glb?url";
+
+const FLOWER_FILES = [
+  { url: pinkUrl, scale: 0.42, label: "pink", color: 0xe87da0 },
+  { url: whiteUrl, scale: 0.462, label: "weiß", color: 0xf0ece4 },
+  { url: yellowUrl, scale: 0.42, label: "gelb", color: 0xf5d742 },
+];
+
+export interface FlowerConfig {
+  count: number;
+  fieldSize: number;
+}
+
+const DEFAULT_CONFIG: FlowerConfig = {
+  count: 400,
+  fieldSize: 120,
+};
+
+export interface FlowerTarget {
+  position: THREE.Vector3;
+  color: THREE.Color;
+}
 
 export interface PreloadedFlower {
   materialGroups: {
@@ -22,111 +45,195 @@ export interface PreloadedFlower {
   label: string;
 }
 
-const FLOWER_COLORS = [
-  { scale: 0.42, label: "pink", color: 0xe87da0 },
-  { scale: 0.462, label: "weiß", color: 0xf0ece4 },
-  { scale: 0.42, label: "gelb", color: 0xf5d742 },
-];
-
-/** Einmalig erzeugte Geometrien (wiederverwendet für alle Instanzen) */
-let _stemGeo: THREE.BufferGeometry | null = null;
-let _petalGeo: THREE.BufferGeometry | null = null;
-let _stemMat: THREE.MeshBasicMaterial | null = null;
-
-function getStemGeometry(): THREE.BufferGeometry {
-  if (!_stemGeo) {
-    _stemGeo = new THREE.CylinderGeometry(0.01, 0.014, 0.35, 5);
-    _stemGeo.translate(0, 0.175, 0);
-  }
-  return _stemGeo;
-}
-
-function getPetalGeometry(): THREE.BufferGeometry {
-  if (!_petalGeo) {
-    // 6 Blütenblätter radial angeordnet
-    const petals: THREE.BufferGeometry[] = [];
-    const numPetals = 6;
-    const pWidth = 0.05;
-    const pHeight = 0.12;
-
-    for (let i = 0; i < numPetals; i++) {
-      const angle = (i / numPetals) * Math.PI * 2;
-      const p = new THREE.PlaneGeometry(pWidth, pHeight);
-
-      // Blatt nach außen neigen (von der Senkrechten wegkippen)
-      p.rotateX(-0.35);
-      // Radial um die Y-Achse positionieren
-      p.rotateY(angle);
-      // Nach oben verschieben (an die Spitze des Stiels)
-      const r = 0.04; // kleiner Radius vom Zentrum
-      p.translate(Math.sin(angle) * r, 0.36, Math.cos(angle) * r);
-
-      petals.push(p);
-    }
-
-    _petalGeo = mergeGeometriesSafe(petals);
-  }
-  return _petalGeo;
-}
-
-function getStemMaterial(): THREE.MeshBasicMaterial {
-  if (!_stemMat) {
-    _stemMat = new THREE.MeshBasicMaterial({ color: 0x5a9e4a });
-  }
-  return _stemMat;
-}
-
-/** mergeGeometries, aber ohne Import des Utils (eigenbau für 2+ Geometrien) */
-function mergeGeometriesSafe(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
-  if (geos.length === 0) return new THREE.BufferGeometry();
-  if (geos.length === 1) return geos[0].clone();
-
-  // Einfaches Merging: Positionen + Indices konkatenieren
-  const positions: number[] = [];
-  const indices: number[] = [];
-  let vertexOffset = 0;
-
-  for (const g of geos) {
-    const pos = g.getAttribute("position");
-    if (!pos) continue;
-    const idx = g.getIndex();
-    if (!idx) continue;
-
-    for (let i = 0; i < pos.count * 3; i++) {
-      positions.push(pos.array[i]);
-    }
-    for (let i = 0; i < idx.count; i++) {
-      indices.push(idx.array[i] + vertexOffset);
-    }
-    vertexOffset += pos.count;
-  }
-
-  const merged = new THREE.BufferGeometry();
-  merged.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  merged.setIndex(indices);
-  merged.computeVertexNormals();
-  return merged;
-}
-
+/**
+ * Lädt alle 3 Blumenmodelle einmalig vor und bereitet ihre Geometrien und Materialien vor.
+ * Dies verhindert Performance-Einbrüche beim dynamischen Laden von Chunks.
+ */
 export async function preloadFlowers(): Promise<PreloadedFlower[]> {
-  const stemGeo = getStemGeometry();
-  const petalGeo = getPetalGeometry();
-  const stemMat = getStemMaterial();
+  const scenes = await Promise.all(FLOWER_FILES.map((f) => loadGLTF(f.url)));
 
-  return FLOWER_COLORS.map((f) => {
-    const petalMat = new THREE.MeshBasicMaterial({
-      color: f.color,
-      side: THREE.DoubleSide,
-    });
-
-    return {
-      materialGroups: [
-        { geometry: stemGeo, material: stemMat },
-        { geometry: petalGeo, material: petalMat },
-      ],
-      scale: f.scale,
-      color: new THREE.Color(f.color),
-      label: f.label,
-    };
+  // Höhe jeder Blumen-Art messen und Ziel-Höhe bestimmen (größte = pink)
+  const heights = scenes.map((scene) => {
+    const box = new THREE.Box3().setFromObject(scene);
+    return box.max.y - box.min.y;
   });
+  const targetHeight = Math.max(...heights);
+
+  return scenes.map((scene, typeIdx) => {
+    const materialGroups = groupMeshesByMaterial(scene);
+    const scale =
+      FLOWER_FILES[typeIdx].scale * (targetHeight / heights[typeIdx]);
+    const color = new THREE.Color(FLOWER_FILES[typeIdx].color);
+    const label = FLOWER_FILES[typeIdx].label;
+    return { materialGroups, scale, color, label };
+  });
+}
+
+export interface MeadowFlowers {
+  group: THREE.Group;
+  dispose: () => void;
+  targets: FlowerTarget[];
+}
+
+function loadGLTF(url: string): Promise<THREE.Group> {
+  return new Promise((resolve, reject) => {
+    const loader = new GLTFLoader();
+    loader.load(
+      url,
+      (gltf) => resolve(gltf.scene),
+      undefined,
+      (err) => {
+        console.error("Blumen GLB-Fehler:", url, err);
+        reject(err);
+      },
+    );
+  });
+}
+
+/**
+ * Sammelt alle Meshes aus einer GLB-Szene, gruppiert sie nach
+ * Material-Identität merged die Geometrien einer Gruppe.
+ * Gibt ein Array pro einzigartigem Material zurück.
+ */
+function groupMeshesByMaterial(
+  group: THREE.Group,
+): { geometry: THREE.BufferGeometry; material: THREE.Material }[] {
+  const materialGroups = new Map<THREE.Material, THREE.BufferGeometry[]>();
+
+  group.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    child.updateWorldMatrix(true, false);
+    const geo = child.geometry.clone();
+    geo.applyMatrix4(child.matrixWorld);
+
+    const mat = Array.isArray(child.material)
+      ? child.material[0]
+      : child.material;
+    const list = materialGroups.get(mat);
+    if (list) {
+      list.push(geo);
+    } else {
+      materialGroups.set(mat, [geo]);
+    }
+  });
+
+  const results: {
+    geometry: THREE.BufferGeometry;
+    material: THREE.Material;
+  }[] = [];
+  for (const [material, geos] of materialGroups) {
+    const merged = mergeGeometries(geos);
+    if (merged) {
+      const mat = material.clone();
+      mat.side = THREE.DoubleSide;
+      mat.depthWrite = true;
+      results.push({ geometry: merged, material: mat });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Lädt alle 3 Blumenmodelle und platziert sie als InstancedMesh
+ * in einem Feld um (cx, cz).
+ *
+ * Pro GLB können mehrere Sub-Meshes (z.B. Stiel + Blüte) mit
+ * eigenen Materialien entstehen – jedes bekommt einen eigenen
+ * InstancedMesh.
+ *
+ * @param getHeightAt Optionale Funktion für Bodenanpassung
+ */
+export async function createFlowers(
+  cx: number,
+  cz: number,
+  config: FlowerConfig = DEFAULT_CONFIG,
+  getHeightAt?: (x: number, z: number) => number,
+): Promise<MeadowFlowers> {
+  const group = new THREE.Group();
+  const dummy = new THREE.Object3D();
+  const targets: FlowerTarget[] = [];
+
+  const scenes = await Promise.all(FLOWER_FILES.map((f) => loadGLTF(f.url)));
+
+  // Höhe jeder Blumen-Art messen und Ziel-Höhe bestimmen (größte = pink)
+  const heights = scenes.map((scene) => {
+    const box = new THREE.Box3().setFromObject(scene);
+    return box.max.y - box.min.y;
+  });
+  const targetHeight = Math.max(...heights);
+  console.log("Blumen-Höhen:", heights, "Ziel:", targetHeight);
+
+  const perType = Math.max(1, Math.floor(config.count / scenes.length));
+
+  for (let typeIdx = 0; typeIdx < scenes.length; typeIdx++) {
+    const materialGroups = groupMeshesByMaterial(scenes[typeIdx]);
+    const scale =
+      FLOWER_FILES[typeIdx].scale * (targetHeight / heights[typeIdx]);
+    const flowerColor = new THREE.Color(FLOWER_FILES[typeIdx].color);
+
+    const name = FLOWER_FILES[typeIdx].label;
+    console.log(
+      `Blume ${name}: Höhe=${heights[typeIdx].toFixed(3)}, Skalierung=${scale.toFixed(3)}`,
+    );
+
+    // Positionen für alle Instanzen dieser Blumen-Art vorbereiten
+    const positions: {
+      x: number;
+      y: number;
+      z: number;
+      rotY: number;
+      s: number;
+    }[] = [];
+    for (let i = 0; i < perType; i++) {
+      const x = cx + (Math.random() - 0.5) * config.fieldSize;
+      const z = cz + (Math.random() - 0.5) * config.fieldSize;
+      const y = (getHeightAt ? getHeightAt(x, z) : 0) + Math.random() * 0.05;
+      const rotY = Math.random() * Math.PI * 2;
+      const s = scale * (0.8 + Math.random() * 0.7);
+      positions.push({ x, y, z, rotY, s });
+    }
+
+    for (const { geometry, material } of materialGroups) {
+      const mesh = new THREE.InstancedMesh(geometry, material, perType);
+
+      for (let i = 0; i < perType; i++) {
+        const p = positions[i];
+        dummy.position.set(p.x, p.y, p.z);
+        dummy.scale.setScalar(p.s);
+        dummy.rotation.set(0, p.rotY, 0);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      }
+
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      group.add(mesh);
+    }
+
+    // Targets pro Instanz speichern
+    for (const p of positions) {
+      targets.push({
+        position: new THREE.Vector3(p.x, p.y, p.z),
+        color: flowerColor.clone(),
+      });
+    }
+  }
+
+  function dispose() {
+    group.children.forEach((child) => {
+      if (child instanceof THREE.InstancedMesh) {
+        child.geometry.dispose();
+        if (Array.isArray(child.material)) {
+          child.material.forEach((m) => m.dispose());
+        } else {
+          child.material.dispose();
+        }
+      }
+    });
+    group.clear();
+  }
+
+  return { group, dispose, targets };
 }
