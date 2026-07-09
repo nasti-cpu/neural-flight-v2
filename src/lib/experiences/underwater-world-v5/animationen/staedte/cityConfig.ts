@@ -38,10 +38,10 @@ export const GRID_EXTENT = 400;
 // ---------------------------------------------------------------------------
 
 export const DIST_READY = 65;
-export const DIST_SHOW = 50;
-export const DIST_HIDE = 50;
+export const DIST_SHOW = 35;
+export const DIST_HIDE = 55;
 export const DIST_UNLOAD = 80;
-export const DIST_FULL_OPACITY = 25;
+export const DIST_FULL_OPACITY = 20;
 
 // ---------------------------------------------------------------------------
 // Exklusionszone (auch von FishWorld/Korallen genutzt)

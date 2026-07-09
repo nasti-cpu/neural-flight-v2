@@ -97,7 +97,7 @@ export function computeSchoolFrame(
   // Tangenten-Richtung → Basis-Yaw
   const tx = -Math.sin(ang) * swimRadiusX;
   const tz = Math.cos(ang) * swimRadiusZ;
-  const baseYaw = Math.atan2(tx, -tz);
+  const baseYaw = Math.atan2(tx, tz);
 
   const cosA = Math.cos(baseYaw);
   const sinA = Math.sin(baseYaw);

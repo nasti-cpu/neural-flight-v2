@@ -287,9 +287,10 @@ export async function setup(
       cityWorld.registerCityAtChunk(cx, cz);
     } else if (type === "RIFF") {
       coralReefWorld.registerReefAtChunk(cx, cz);
+    } else if (type === "FISCH") {
+      fishWorld.registerFishAtChunk(cx, cz);
     }
-    // FISCH und QUALLE werden von FishWorld/JellyWorld selbstständig
-    // um den Spieler herum gespawnt (kein fester Chunk nötig)
+    // QUALLE wird von JellyWorld selbstständig verwaltet
   });
 
   console.log("🌊 Underwater World V5 gestartet! (WFC-gesteuert)");

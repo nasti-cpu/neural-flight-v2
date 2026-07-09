@@ -508,6 +508,12 @@ export class CityWorld {
           m.opacity = (m.userData.baseOpacity as number) * opacity;
         }
       }
+      if (child instanceof THREE.Sprite && child.material) {
+        if (child.material.userData.baseOpacity === undefined) {
+          child.material.userData.baseOpacity = child.material.opacity;
+        }
+        child.material.opacity = (child.material.userData.baseOpacity as number) * opacity;
+      }
     });
   }
 

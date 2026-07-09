@@ -97,7 +97,7 @@ export function computeOrbitTangent(
   return {
     tx,
     tz,
-    baseYaw: Math.atan2(tx, -tz),
+    baseYaw: Math.atan2(tx, tz),
   };
 }
 

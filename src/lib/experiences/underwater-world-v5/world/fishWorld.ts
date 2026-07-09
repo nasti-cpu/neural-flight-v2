@@ -267,6 +267,11 @@ export class FishWorld {
   private activeSchools: FishSchool[] = [];
   private schoolFishMesh: THREE.Mesh | null = null;
 
+  /** Abstand, ab dem Fische zurÃ¼ck zum Spieler teleportiert werden */
+  private static readonly RESPAWN_DIST = 65;
+  /** Abstand, ab dem Fische um eine Stadt kreisen */
+  private static readonly CITY_ATTRACTION_DIST = 35;
+
   // Exklusionszonen (Stadtkuppeln)
   private _exclusionZones: ExclusionZone[] = [];
 
@@ -411,6 +416,49 @@ export class FishWorld {
 
     // Echoortung
     this._updateEcholocation(delta, elapsed, cameraPos, additionalTargets);
+  }
+
+  // -----------------------------------------------------------------------
+  // WFC-Callback: Neue Fische an einem FISCH-Chunk spawnen
+  // -----------------------------------------------------------------------
+
+  /**
+   * Wird vom ChunkManager/Scene aufgerufen, wenn ein FISCH-Chunk kollabiert.
+   * Erzeugt 2-3 Einzelfische + 1 Schule an dieser Position.
+   */
+  public registerFishAtChunk(cx: number, cz: number): void {
+    if (!this.fishModelTemplate || !this.schoolFishMesh) return;
+    const cs = 16;
+    const worldX = cx * cs + cs / 2;
+    const worldZ = cz * cs + cs / 2;
+
+    const box = new THREE.Box3().setFromObject(this.fishModelTemplate);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z);
+
+    // 2-3 Einzelfische
+    const count = 2 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < count; i++) {
+      const layerIdx = Math.floor(Math.random() * ORBIT_LAYERS.length);
+      const layer = ORBIT_LAYERS[layerIdx];
+      const params = this._createSoloParams(layerIdx, new THREE.Vector3(worldX, 0, worldZ));
+      params.centerX = worldX + (Math.random() - 0.5) * 10;
+      params.centerZ = worldZ + (Math.random() - 0.5) * 10;
+      const scale = this._randomBetween(layer.scaleMin, layer.scaleMax) / maxDim;
+      const fish = this._createSoloFish(params, scale, new THREE.Vector3(worldX, 0, worldZ));
+      this.soloFishes.push(fish);
+    }
+
+    // 1 Schule
+    const school = this._createSchool(
+      Math.floor(Math.random() * ORBIT_LAYERS.length),
+      new THREE.Vector3(worldX, 0, worldZ),
+      maxDim,
+    );
+    school.centerX = worldX;
+    school.centerZ = worldZ;
+    this.activeSchools.push(school);
   }
 
   // -----------------------------------------------------------------------
@@ -599,7 +647,7 @@ export class FishWorld {
       wanderPhase: Math.random() * Math.PI * 2,
       pushAccumX: 0,
       pushAccumZ: 0,
-      heading: Math.atan2(Math.sin(initAngle), -Math.cos(initAngle) + 0.0001),
+      heading: Math.atan2(Math.sin(initAngle), Math.cos(initAngle) + 0.0001),
       glowIntensity: 0,
       fishMesh,
       originalEmissive,
@@ -689,26 +737,30 @@ export class FishWorld {
   // -----------------------------------------------------------------------
 
   /**
-   * Führt das Wander-Zentrum jedes Fisches/Schwarms mit langsamer
-   * Trägheit zur Kamera (Zeitkonstante ~4s).
-   *
-   * Wichtig: KEINE Zone-Repulsion auf das Zentrum – das erzeugt nur
-   * Oszillation. Stattdessen werden nur die Wander-Targets so gewählt,
-   * dass sie außerhalb aller Zonen liegen (safe target selection).
+   * Fische sind NICHT mehr an den Spieler gebunden. Ihre Zentren
+   * bleiben auf ihrer ursprünglichen Welt-Position.
+   * Nur wenn ein Fisch > 65m vom Spieler entfernt ist, wird er
+   * in die Blickrichtung des Spielers vorgeholt ("Respawn").
+   * Das simuliert natürlich wirkende Fische, die von Chunk zu Chunk
+   * schwimmen, ohne den Spieler zu verfolgen.
    */
   private _updateOrbitCenters(
     delta: number, elapsed: number, cameraPos: THREE.Vector3,
   ): void {
-    const dt = Math.min(delta, 0.1);
-
+    const cs = 16;
     for (const fish of this.soloFishes) {
       const p = fish.params;
-      const rate = 0.2 * p.lagFactor;
-      const lf = 1 - Math.exp(-rate * dt);
-      p.centerX += (cameraPos.x - p.centerX) * lf;
-      p.centerZ += (cameraPos.z - p.centerZ) * lf;
+      const dx = p.centerX - cameraPos.x;
+      const dz = p.centerZ - cameraPos.z;
+      if (dx * dx + dz * dz > FishWorld.RESPAWN_DIST * FishWorld.RESPAWN_DIST) {
+        // Neues Zentrum: zufällig in Blickrichtung + seitlichem Offset
+        const angle = Math.atan2(cameraPos.x - p.centerX, cameraPos.z - p.centerZ);
+        const spawnDist = 15 + Math.random() * 25;
+        const spreadAngle = (Math.random() - 0.5) * Math.PI * 1.5;
+        p.centerX = cameraPos.x + Math.sin(angle + spreadAngle) * spawnDist;
+        p.centerZ = cameraPos.z + Math.cos(angle + spreadAngle) * spawnDist;
+      }
     }
-
   }
 
   // -----------------------------------------------------------------------
@@ -755,7 +807,7 @@ export class FishWorld {
     // Vorwärts-Richtung aus Velocity (oder Heading als Fallback)
     const vLen = Math.sqrt(fish.vx * fish.vx + fish.vz * fish.vz);
     const fwdX = vLen > 0.01 ? fish.vx / vLen : Math.sin(fish.heading);
-    const fwdZ = vLen > 0.01 ? fish.vz / vLen : -Math.cos(fish.heading);
+    const fwdZ = vLen > 0.01 ? fish.vz / vLen : Math.cos(fish.heading);
 
     // Wander-Kreis: 8m vor dem Fisch + 4m Radius
     const wDist = 8.0;
@@ -803,7 +855,27 @@ export class FishWorld {
     tX += fish.pushAccumX;
     tZ += fish.pushAccumZ;
 
-    // ═══ 4. Steering zum Ring-Target ═══
+    // ═══ 4. Stadt-Orbit: Statt Repulsion → Orbit um die Kuppel ═══
+    // Wenn der Fisch in der NÃ¤he einer Stadt ist, ersetzt das
+    // Orbit-Ziel das Wander-Ziel. Der Fisch kreist um die Kuppel.
+    if (this._exclusionZones.length > 0) {
+      for (const zone of this._exclusionZones) {
+        const dx = pos.x - zone.centerX;
+        const dz = pos.z - zone.centerZ;
+        const distSq = dx * dx + dz * dz;
+        const attractionRadius = zone.radius + FishWorld.CITY_ATTRACTION_DIST;
+        if (distSq < attractionRadius * attractionRadius) {
+          const orbitRadius = zone.radius + 18;
+          const orbitSpeed = 0.08 + ((fish.wanderPhase * 0.5) % 0.08);
+          const orbitAngle = elapsed * orbitSpeed + fish.wanderPhase;
+          tX = zone.centerX + Math.cos(orbitAngle) * orbitRadius;
+          tZ = zone.centerZ + Math.sin(orbitAngle) * orbitRadius;
+          break;
+        }
+      }
+    }
+
+    // ═══ 5. Steering zum Ring-Target ═══
     const tdx = tX - pos.x;
     const tdz = tZ - pos.z;
     const targetDist = Math.sqrt(tdx * tdx + tdz * tdz) || 0.001;
@@ -842,7 +914,7 @@ export class FishWorld {
     // So schwimmt der Fisch immer in die Richtung, in die er sich bewegt.
     // Die max. Drehrate verhindert 180°-Flips (Rückwärts-Schwimmen).
     if (newVLen > 0.01) {
-      const velYaw = Math.atan2(fish.vx, -fish.vz + 0.0001);
+      const velYaw = Math.atan2(fish.vx, fish.vz + 0.0001);
       let diff = velYaw - fish.heading;
       if (diff > Math.PI) diff -= Math.PI * 2;
       if (diff < -Math.PI) diff += Math.PI * 2;
@@ -870,25 +942,65 @@ export class FishWorld {
     cameraPos: THREE.Vector3,
   ): void {
     for (const school of this.activeSchools) {
-      // ═══ 1. Wander-Target: duale Sinus-Überlagerung um den Spieler ═══
-      // Zwei Frequenzen = reichhaltigere, unvorhersehbare Bahn.
-      const wr = school.wanderRange;
-      const wp = school.wanderPhase;
-      const targetX = cameraPos.x
-        + Math.sin(elapsed * 0.05 + wp) * wr
-        + Math.sin(elapsed * 0.11 + wp * 1.7) * wr * 0.3;
-      const targetZ = cameraPos.z
-        + Math.cos(elapsed * 0.04 + wp * 1.3) * wr
-        + Math.cos(elapsed * 0.09 + wp * 0.7) * wr * 0.3;
-
-      // ═══ 2. Schul-Zentrum folgt dem Target mit Trägheit ═══
       const dt = Math.min(delta, 0.05);
-      const followRate = 1 - Math.exp(-0.5 * school.lagFactor * dt);
-      school.centerX += (targetX - school.centerX) * followRate;
-      school.centerZ += (targetZ - school.centerZ) * followRate;
+      const wp = school.wanderPhase;
 
-      // ═══ 3. Exklusionszonen-Push auf das Zentrum (ganze Schule weicht aus) ═══
+      // ═══ 0. Respawn: Schule zu weit vom Spieler → neu positionieren ═══
+      {
+        const dx = school.centerX - cameraPos.x;
+        const dz = school.centerZ - cameraPos.z;
+        if (dx * dx + dz * dz > FishWorld.RESPAWN_DIST * FishWorld.RESPAWN_DIST) {
+          const angle = Math.atan2(cameraPos.x - school.centerX, cameraPos.z - school.centerZ);
+          const spawnDist = 20 + Math.random() * 30;
+          const spreadAngle = (Math.random() - 0.5) * Math.PI * 1.5;
+          school.centerX = cameraPos.x + Math.sin(angle + spreadAngle) * spawnDist;
+          school.centerZ = cameraPos.z + Math.cos(angle + spreadAngle) * spawnDist;
+        }
+      }
+
+      // ═══ 1. Prüfen ob die Schule in der Nähe einer Stadt ist → Orbit ═══
+      let orbitTargetX: number | null = null;
+      let orbitTargetZ: number | null = null;
       if (this._exclusionZones.length > 0) {
+        for (const zone of this._exclusionZones) {
+          const dx = school.centerX - zone.centerX;
+          const dz = school.centerZ - zone.centerZ;
+          const distSq = dx * dx + dz * dz;
+          const attractionRadius = zone.radius + FishWorld.CITY_ATTRACTION_DIST;
+          if (distSq < attractionRadius * attractionRadius) {
+            const orbitRadius = zone.radius + 22;
+            const orbitSpeed = 0.06 + ((wp * 0.3) % 0.06);
+            const orbitAngle = elapsed * orbitSpeed + wp;
+            orbitTargetX = zone.centerX + Math.cos(orbitAngle) * orbitRadius;
+            orbitTargetZ = zone.centerZ + Math.sin(orbitAngle) * orbitRadius;
+            break;
+          }
+        }
+      }
+
+      if (orbitTargetX !== null && orbitTargetZ !== null) {
+        // ═══ 1b. Stadt-Orbit: Schule kreist um die Kuppel ═══
+        const followRate = 1 - Math.exp(-0.8 * dt);
+        school.centerX += (orbitTargetX - school.centerX) * followRate;
+        school.centerZ += (orbitTargetZ - school.centerZ) * followRate;
+      } else {
+        // ═══ 1c. Wander-Target: um das feste Schul-Zentrum ═══
+        const wr = school.wanderRange;
+        const targetX = school.centerX
+          + Math.sin(elapsed * 0.05 + wp) * wr * 0.5
+          + Math.sin(elapsed * 0.11 + wp * 1.7) * wr * 0.15;
+        const targetZ = school.centerZ
+          + Math.cos(elapsed * 0.04 + wp * 1.3) * wr * 0.5
+          + Math.cos(elapsed * 0.09 + wp * 0.7) * wr * 0.15;
+
+        // ═══ 2. Schul-Zentrum folgt dem Target mit Trägheit ═══
+        const followRate = 1 - Math.exp(-0.5 * school.lagFactor * dt);
+        school.centerX += (targetX - school.centerX) * followRate;
+        school.centerZ += (targetZ - school.centerZ) * followRate;
+      }
+
+      // ═══ 3. Exklusionszonen-Push auf das Zentrum (weicht Hindernissen aus) ═══
+      if (this._exclusionZones.length > 0 && orbitTargetX === null) {
         for (const zone of this._exclusionZones) {
           const dx = school.centerX - zone.centerX;
           const dz = school.centerZ - zone.centerZ;
@@ -903,10 +1015,12 @@ export class FishWorld {
         }
       }
 
-      // ═══ 4. Basis-Yaw aus Richtung zum Target ═══
-      const dirToTargetX = targetX - school.centerX;
-      const dirToTargetZ = targetZ - school.centerZ;
-      const baseYaw = Math.atan2(dirToTargetX, -dirToTargetZ);
+      // ═══ 4. Basis-Yaw aus Richtung zum Target/Orbit-Ziel ═══
+      const yawTargetX = orbitTargetX !== null ? orbitTargetX : school.centerX + Math.sin(elapsed * 0.05 + wp) * school.wanderRange * 0.5;
+      const yawTargetZ = orbitTargetZ !== null ? orbitTargetZ : school.centerZ + Math.cos(elapsed * 0.04 + wp * 1.3) * school.wanderRange * 0.5;
+      const dirToTargetX = yawTargetX - school.centerX;
+      const dirToTargetZ = yawTargetZ - school.centerZ;
+      const baseYaw = Math.atan2(dirToTargetX, dirToTargetZ);
 
       // ═══ 5. Y-Position der Schule ═══
       const schoolY = cameraPos.y + school.yOffset +
