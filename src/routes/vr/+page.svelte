@@ -9,6 +9,7 @@
         loadExperience,
         unloadExperience,
     } from "$lib/experiences/loader";
+    import { FpsCounter } from "$lib/three/fps-counter";
     import { createWebSocketClient } from "$lib/ws/client.svelte";
     import {
         isOrientationData,
@@ -31,6 +32,7 @@
     let lastOrientation = { pitch: 0, roll: 0 };
     let lastSpeed = { accelerate: false, brake: false };
     let removeResizeListener: (() => void) | null = null;
+    let fpsCounter: FpsCounter | null = null;
 
     /** Prüft, ob WebGPU im Browser verfügbar ist */
     function hasWebGPU(): boolean {
@@ -77,6 +79,8 @@
 
                 vrButton = VRButton.createButton(renderer);
                 document.body.appendChild(vrButton);
+
+                fpsCounter = new FpsCounter();
 
                 const experienceId = getActiveExperienceId();
                 console.log("🚀 Lade Experience:", experienceId);
@@ -171,6 +175,7 @@
                         score = result.outputs.score as number;
                     }
 
+                    fpsCounter?.update();
                     renderer.render(scene, renderCamera);
                 });
 
@@ -187,6 +192,7 @@
     });
 
     onDestroy(() => {
+        fpsCounter?.dispose();
         renderer?.setAnimationLoop(null);
         if (scene) unloadExperience(scene);
         renderer?.dispose();

@@ -81,6 +81,9 @@ export interface UnderwaterWorldV5State extends ExperienceState {
   /** City-Vorab-Scan: Tracking des zuletzt gescannten Chunks */
   _lastCityScanChunkX: number;
   _lastCityScanChunkZ: number;
+
+  /** City-Vorab-Scan: Aktuelle Zeile für Row-by-Row-Scan (0..20 = aktiv, >20 = fertig) */
+  _cityScanRow: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -319,6 +322,7 @@ export async function setup(
     _frameCount: 0,
     _lastCityScanChunkX: NaN,
     _lastCityScanChunkZ: NaN,
+    _cityScanRow: 9999,
   };
 }
 
@@ -385,9 +389,13 @@ export function tick(
   // =========================================================================
   // 15. City-Vorab-Scan: Städte in größerer Distanz erkennen (für Leitsystem)
   // =========================================================================
-  // Der WFC-Algorithmus ist deterministisch (Hash-basiert). Daher können wir
-  // "STADT"-Chunks in weiter Entfernung erkennen, OHNE die vollen Chunks zu
-  // laden. So weiß das Leitsystem schon aus 160m Entfernung, wo Städte sind.
+  // OPTIMIERT: Der erste Scan (441 Lookups) wird NICHT in einem Frame
+  // ausgeführt, sondern Row-by-Row über 21 Frames verteilt (je 21 Lookups).
+  // So gibt es keinen Frame-Freeze beim Start.
+  //
+  // FOLGEDURCHLÄUFE scannen weiterhin den äußeren Ring bei SCAN_RADIUS,
+  // um Städte in 160m Entfernung zu finden, sobald der Spieler einen neuen
+  // Chunk betritt.
   // ---------------------------------------------------------------------------
   {
     const SCAN_RADIUS = 10; // 10 Chunks = 160m
@@ -395,45 +403,45 @@ export function tick(
     const pCx = Math.floor(rigPos.x / cs);
     const pCz = Math.floor(rigPos.z / cs);
 
-    const isFirstScan = isNaN(s._lastCityScanChunkX);
+    // ★ INITIALER SCAN: Eine Zeile pro Frame (21 Lookups statt 441)
+    if (s._cityScanRow <= SCAN_RADIUS) {
+      if (s._cityScanRow === 9999) {
+        s._cityScanRow = -SCAN_RADIUS;
+      }
+      const row = s._cityScanRow;
+      for (let dx = -SCAN_RADIUS; dx <= SCAN_RADIUS; dx++) {
+        if (s.chunkManager.getChunkType(pCx + dx, pCz + row) === "STADT") {
+          s.cityWorld.registerCityAtChunk(pCx + dx, pCz + row);
+        }
+      }
+      s._cityScanRow++;
+    }
 
+    // ★ FOLGEDURCHLÄUFE: Nur den äußeren Ring bei SCAN_RADIUS scannen
     if (
-      isFirstScan ||
       pCx !== s._lastCityScanChunkX ||
       pCz !== s._lastCityScanChunkZ
     ) {
       s._lastCityScanChunkX = pCx;
       s._lastCityScanChunkZ = pCz;
 
-      if (isFirstScan) {
-        // ★ ERSTER DURCHLAUF: Gesamtes Quadrat bei SCAN_RADIUS scannen
-        for (let dx = -SCAN_RADIUS; dx <= SCAN_RADIUS; dx++) {
-          for (let dz = -SCAN_RADIUS; dz <= SCAN_RADIUS; dz++) {
-            if (s.chunkManager.getChunkType(pCx + dx, pCz + dz) === "STADT") {
-              s.cityWorld.registerCityAtChunk(pCx + dx, pCz + dz);
-            }
+      for (let i = -SCAN_RADIUS; i <= SCAN_RADIUS; i++) {
+        const check = (cx: number, cz: number) => {
+          if (s.chunkManager.getChunkType(cx, cz) === "STADT") {
+            s.cityWorld.registerCityAtChunk(cx, cz);
           }
+        };
+        // Obere Kante (cz = -SCAN_RADIUS)
+        check(pCx + i, pCz - SCAN_RADIUS);
+        // Untere Kante (cz = +SCAN_RADIUS)
+        check(pCx + i, pCz + SCAN_RADIUS);
+        // Linke Kante, ohne Ecken
+        if (i > -SCAN_RADIUS && i < SCAN_RADIUS) {
+          check(pCx - SCAN_RADIUS, pCz + i);
         }
-      } else {
-        // ★ FOLGEDURCHLÄUFE: Nur den äußeren Ring bei SCAN_RADIUS scannen
-        for (let i = -SCAN_RADIUS; i <= SCAN_RADIUS; i++) {
-          const check = (cx: number, cz: number) => {
-            if (s.chunkManager.getChunkType(cx, cz) === "STADT") {
-              s.cityWorld.registerCityAtChunk(cx, cz);
-            }
-          };
-          // Obere Kante (cz = -SCAN_RADIUS)
-          check(pCx + i, pCz - SCAN_RADIUS);
-          // Untere Kante (cz = +SCAN_RADIUS)
-          check(pCx + i, pCz + SCAN_RADIUS);
-          // Linke Kante, ohne Ecken
-          if (i > -SCAN_RADIUS && i < SCAN_RADIUS) {
-            check(pCx - SCAN_RADIUS, pCz + i);
-          }
-          // Rechte Kante, ohne Ecken
-          if (i > -SCAN_RADIUS && i < SCAN_RADIUS) {
-            check(pCx + SCAN_RADIUS, pCz + i);
-          }
+        // Rechte Kante, ohne Ecken
+        if (i > -SCAN_RADIUS && i < SCAN_RADIUS) {
+          check(pCx + SCAN_RADIUS, pCz + i);
         }
       }
     }
