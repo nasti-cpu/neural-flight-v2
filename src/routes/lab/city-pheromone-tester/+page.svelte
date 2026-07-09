@@ -92,7 +92,7 @@ onMount(async () => {
   // Wiese
   meadow = createMeadow({ fieldSize: 30, grassCount: 20000, curvature: 0.0003, color: "#5a7a4c", groundColor: "#3a5a2c", minHeight: 0.4, maxHeight: 1.4, windStrength: 0.04, windSpeedMultiplier: 0.8 }, 0, 0);
   scene.add(meadow.group);
-  meadow.clearCircle(0, 0, 12);
+  meadow.clearCircle(0, 0, 4);
 
   // Stadt laden
   await loadCity();
