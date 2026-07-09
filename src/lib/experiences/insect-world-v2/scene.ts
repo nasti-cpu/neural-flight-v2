@@ -80,7 +80,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   // 4d. Ersten Chunk-Ladevorgang anstoßen.
   grassManager.update(new THREE.Vector3(0, 2, 0));
 
-  // 5. Bienen (fliegen von Blüte zu Blüte)
+  // 5. Bienen (zufällige Sinus-Bahnen über die Wiese)
   const bees = await createBees(beeGlbUrl, {
     count: 20,
     scale: 0.04,
@@ -92,12 +92,10 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     heightBaseMin: 0.8,
     heightBaseMax: 1.5,
     heightRange: 0.2,
-    flowerTargets: grassManager.flowerTargets,
-    hoverDuration: 1.0,
   });
   ctx.scene.add(bees.group);
 
-  // 6. Schmetterlinge (fliegen von Blüte zu Blüte)
+  // 6. Schmetterlinge (zufällige Sinus-Bahnen über die Wiese)
   const butterflies = await createButterflies(butterflyGlbUrl, {
     count: 12,
     scale: 0.036,
@@ -109,9 +107,6 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     heightBaseMin: 1.2,
     heightBaseMax: 2.2,
     heightRange: 0.4,
-    flowerTargets: grassManager.flowerTargets,
-    hoverDuration: 2.0,
-    heightAboveFlower: 2.0,
   });
   ctx.scene.add(butterflies.group);
 
@@ -172,10 +167,10 @@ export function tick(
 ): { state: ExperienceState; outputs?: Record<string, number> } {
   const s = state as InsectWorldV2State;
 
-  // Bienen-Animation
-  s.bees.update(ctx.elapsed);
+  // Bienen-Animation (time + delta für Nebel-Zyklus)
+  s.bees.update(ctx.elapsed, ctx.delta);
   // Schmetterlings-Animation
-  s.butterflies.update(ctx.elapsed);
+  s.butterflies.update(ctx.elapsed, ctx.delta);
   // Pheromon-Spuren-Animation
   s.pheromones.update(ctx.elapsed);
 

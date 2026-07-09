@@ -1,13 +1,13 @@
 /**
  * insect-world-v2 — Bienen.
  *
- * Lädt ein Bienen-GLB und erzeugt mehrere Bienen.
+ * Lädt ein Bienen-GLB einmalig und erzeugt mehrere Bienen.
+ * Jede Biene fliegt zufällige Sinus-Bahnen über die Wiese.
+ * In regelmäßigen Abständen blendet sie in den Nebel aus
+ * (als ob sie darin verschwindet), teleportiert an eine
+ * neue Position und wird wieder eingeblendet.
  *
- * Zwei Flugmodi:
- *   - **flowerTargets** gesetzt → Bienen fliegen von Blüte zu Blüte
- *     (gerade Strecken, kurzes Verweilen an jeder Blüte)
- *   - **flowerTargets** nicht gesetzt → organische Sinus-Bahnen
- *     (wie Version 1, als Fallback)
+ * Keine "new THREE.Vector3()" im Update-Loop (Pool-Nutzung).
  *
  * WebGPU-konform (GLTFLoader + Instancing).
  */
@@ -15,279 +15,207 @@ import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 export interface BeeConfig {
-	count: number;
-	scale: number;
-	fieldRadius: number;
-	flyRadiusMin: number;
-	flyRadiusMax: number;
-	speedMin: number;
-	speedMax: number;
-	heightBaseMin: number;
-	heightBaseMax: number;
-	heightRange: number;
-	/** Optionale Liste von Blüten-Positionen (x, y, z) */
-	flowerTargets?: THREE.Vector3[];
-	/** Zeit in Sekunden, die an jeder Blüte verweilt wird */
-	hoverDuration?: number;
-	/** Flughöhe über den Blüten (Meter) */
-	heightAboveFlower?: number;
+  count: number;
+  scale: number;
+  fieldRadius: number;
+  flyRadiusMin: number;
+  flyRadiusMax: number;
+  speedMin: number;
+  speedMax: number;
+  heightBaseMin: number;
+  heightBaseMax: number;
+  heightRange: number;
 }
 
 const DEFAULT_CONFIG: BeeConfig = {
-	count: 12,
-	scale: 0.04,
-	fieldRadius: 20,
-	flyRadiusMin: 1,
-	flyRadiusMax: 5,
-	speedMin: 0.3,
-	speedMax: 0.8,
-	heightBaseMin: 0.8,
-	heightBaseMax: 2.0,
-	heightRange: 0.6,
-	hoverDuration: 1.5,
-	heightAboveFlower: 0.6,
+  count: 20,
+  scale: 0.04,
+  fieldRadius: 200,
+  flyRadiusMin: 1,
+  flyRadiusMax: 3,
+  speedMin: 2,
+  speedMax: 4,
+  heightBaseMin: 0.8,
+  heightBaseMax: 1.5,
+  heightRange: 0.2,
 };
 
 /** Interner Zustand einer Biene */
 interface BeeState {
-	group: THREE.Group;
-	/** Für Sinus-Modus: Zentrum, Radius, Phase etc. */
-	center: THREE.Vector3;
-	flyRadius: number;
-	speed: number;
-	phase: number;
-	phase2: number;
-	freqY: number;
-	heightBase: number;
-	heightRange: number;
-	tiltSpeed: number;
-	/** Für Blüten-Modus */
-	target?: THREE.Vector3;
-	targetIndex?: number;
-	progress?: number; // 0..1 wie weit zum nächsten Ziel
-	hoverTimer?: number; // Rest-Verweilzeit
+  group: THREE.Group;
+  centerX: number;
+  centerZ: number;
+  flyRadius: number;
+  speed: number;
+  phase: number;
+  phase2: number;
+  freqY: number;
+  heightBase: number;
+  heightRange: number;
+  tiltSpeed: number;
+  originalScale: number;
+  // Nebel-Ein/Ausblend-Zyklus
+  isVisible: boolean;
+  fadeProgress: number;
+  fadeTimer: number;
 }
 
 export interface BeeSwarm {
-	group: THREE.Group;
-	update: (time: number) => void;
-	dispose: () => void;
+  group: THREE.Group;
+  update: (time: number, delta: number) => void;
+  dispose: () => void;
 }
 
 /** Lädt ein GLB und gibt die Szene zurück */
 function loadGLB(url: string): Promise<THREE.Group> {
-	return new Promise((resolve, reject) => {
-		new GLTFLoader().load(url, (gltf) => resolve(gltf.scene), undefined, reject);
-	});
+  return new Promise((resolve, reject) => {
+    new GLTFLoader().load(url, (gltf) => resolve(gltf.scene), undefined, reject);
+  });
 }
 
-/**
- * Hilfsfunktion: wählt einen zufälligen Ziel-Index (≠ aktueller)
- */
-function pickNextTarget(
-	current: number | undefined,
-	count: number,
-): number {
-	if (count <= 1) return 0;
-	let next: number;
-	do {
-		next = Math.floor(Math.random() * count);
-	} while (next === current);
-	return next;
-}
-
-/**
- * Erzeugt einen Bienenschwarm.
- * @param glbUrl  Pfad zur GLB-Datei
- * @param config  Konfiguration (optional)
- */
 export async function createBees(
-	glbUrl: string,
-	config: BeeConfig = DEFAULT_CONFIG,
+  glbUrl: string,
+  config: BeeConfig = DEFAULT_CONFIG,
 ): Promise<BeeSwarm> {
-	const group = new THREE.Group();
-	const beeScene = await loadGLB(glbUrl);
+  const group = new THREE.Group();
+  const beeScene = await loadGLB(glbUrl);
 
-	// Alle Meshes aus dem GLB als Template
-	const template = new THREE.Group();
-	beeScene.traverse((child) => {
-		if (child instanceof THREE.Mesh) {
-			template.add(child.clone());
-		}
-	});
+  // GLB einmal laden → als Template für alle Bienen klonen
+  const template = new THREE.Group();
+  beeScene.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      template.add(child.clone());
+    }
+  });
 
-	const useFlowerMode = !!(
-		config.flowerTargets && config.flowerTargets.length > 0
-	);
-	const flowers = config.flowerTargets ?? [];
-	const hoverDuration = config.hoverDuration ?? 1.5;
-	const heightAboveFlower = config.heightAboveFlower ?? 0.6;
+  const bees: BeeState[] = [];
 
-	const bees: BeeState[] = [];
+  for (let i = 0; i < config.count; i++) {
+    const beeGroup = new THREE.Group();
+    beeGroup.add(template.clone(true));
+    beeGroup.scale.setScalar(config.scale);
 
-	for (let i = 0; i < config.count; i++) {
-		const beeGroup = new THREE.Group();
-		beeGroup.add(template.clone(true));
-		beeGroup.scale.setScalar(config.scale);
+    // Zufällige Startposition
+    const angle = Math.random() * Math.PI * 2;
+    const dist = Math.random() * config.fieldRadius;
+    const cx = Math.cos(angle) * dist;
+    const cz = Math.sin(angle) * dist;
+    const cy =
+      config.heightBaseMin +
+      Math.random() * (config.heightBaseMax - config.heightBaseMin);
 
-		// Zufällige Startposition
-		const angle = Math.random() * Math.PI * 2;
-		const dist = Math.random() * config.fieldRadius;
-		const cx = Math.cos(angle) * dist;
-		const cz = Math.sin(angle) * dist;
-		const cy =
-			config.heightBaseMin +
-			Math.random() * (config.heightBaseMax - config.heightBaseMin);
+    beeGroup.position.set(cx, cy, cz);
+    beeGroup.rotation.y = Math.random() * Math.PI * 2;
 
-		beeGroup.position.set(cx, cy, cz);
-		beeGroup.rotation.y = Math.random() * Math.PI * 2;
+    group.add(beeGroup);
 
-		group.add(beeGroup);
+    bees.push({
+      group: beeGroup,
+      centerX: cx,
+      centerZ: cz,
+      flyRadius:
+        config.flyRadiusMin +
+        Math.random() * (config.flyRadiusMax - config.flyRadiusMin),
+      speed:
+        config.speedMin + Math.random() * (config.speedMax - config.speedMin),
+      phase: Math.random() * Math.PI * 2,
+      phase2: Math.random() * Math.PI * 2,
+      freqY: 1.5 + Math.random() * 1.5,
+      heightBase:
+        config.heightBaseMin +
+        Math.random() * (config.heightBaseMax - config.heightBaseMin),
+      heightRange: config.heightRange * (0.5 + Math.random() * 0.5),
+      tiltSpeed: 2 + Math.random() * 2,
+      originalScale: config.scale,
+      // Alle Bienen starten sichtbar
+      isVisible: true,
+      fadeProgress: 1,
+      fadeTimer: 4 + Math.random() * 8, // erste Unsichtbarkeit nach 4-12s
+    });
+  }
 
-		const bee: BeeState = {
-			group: beeGroup,
-			center: new THREE.Vector3(cx, 0, cz),
-			flyRadius:
-				config.flyRadiusMin +
-				Math.random() * (config.flyRadiusMax - config.flyRadiusMin),
-			speed:
-				config.speedMin + Math.random() * (config.speedMax - config.speedMin),
-			phase: Math.random() * Math.PI * 2,
-			phase2: Math.random() * Math.PI * 2,
-			freqY: 1.5 + Math.random() * 1.5,
-			heightBase:
-				config.heightBaseMin +
-				Math.random() * (config.heightBaseMax - config.heightBaseMin),
-			heightRange: config.heightRange * (0.5 + Math.random() * 0.5),
-			tiltSpeed: 2 + Math.random() * 2,
-		};
+  function update(time: number, delta: number): void {
+    for (const bee of bees) {
+      // ── Nebel-Ein/Ausblend-Zyklus ──
+      bee.fadeTimer -= delta;
+      if (bee.fadeTimer <= 0) {
+        bee.isVisible = !bee.isVisible;
+        bee.fadeTimer = bee.isVisible
+          ? 4 + Math.random() * 8   // sichtbar: 4-12s
+          : 2 + Math.random() * 4;  // unsichtbar: 2-6s
+      }
 
-		// Blüten-Modus: erstes Ziel setzen
-		if (useFlowerMode) {
-			const idx = pickNextTarget(undefined, flowers.length);
-			bee.target = flowers[idx].clone();
-			bee.targetIndex = idx;
-			bee.progress = 0;
-			bee.hoverTimer = 0;
-		}
+      if (bee.isVisible) {
+        // Sanft einblenden (0.8s)
+        bee.fadeProgress = Math.min(1, bee.fadeProgress + delta * 1.25);
+      } else {
+        // Sanft ausblenden (0.8s)
+        bee.fadeProgress = Math.max(0, bee.fadeProgress - delta * 1.25);
+        if (bee.fadeProgress <= 0) {
+          // Komplett unsichtbar → an neue Position teleportieren
+          const a = Math.random() * Math.PI * 2;
+          const d = Math.random() * config.fieldRadius;
+          bee.centerX = Math.cos(a) * d;
+          bee.centerZ = Math.sin(a) * d;
+        }
+      }
 
-		bees.push(bee);
-	}
+      // Skalierung = fadeProgress * originale Größe
+      const s = bee.fadeProgress * bee.originalScale;
+      bee.group.scale.setScalar(s);
 
-	function update(time: number): void {
-		if (useFlowerMode) {
-			// ─── Blüten-Modus: geradlinig von Blüte zu Blüte ───
-			for (const bee of bees) {
-				// Verweilen
-				if (bee.hoverTimer! > 0) {
-					bee.hoverTimer! -= 0.016; // ~1 Frame
-					// leichtes Wackeln in der Luft
-					bee.group.rotation.z =
-						Math.sin(time * bee.tiltSpeed + bee.phase) * 0.05;
-					bee.group.rotation.x =
-						Math.sin(time * 1.5 + bee.phase2) * 0.03;
-					continue;
-				}
+      // Position nur aktualisieren, wenn nicht komplett unsichtbar
+      if (bee.fadeProgress > 0) {
+        const t = time * bee.speed;
 
-				const end = bee.target!;
-				const pos = bee.group.position;
-				const targetPos = new THREE.Vector3(end.x, end.y + heightAboveFlower, end.z);
-				const dist = pos.distanceTo(targetPos);
+        const cx1 = Math.cos(t + bee.phase) * bee.flyRadius;
+        const cz1 = Math.sin(t + bee.phase) * bee.flyRadius;
+        const cx2 = Math.cos(t * 0.7 + bee.phase2) * bee.flyRadius * 0.3;
+        const cz2 = Math.sin(t * 0.5 + bee.phase2) * bee.flyRadius * 0.3;
 
-				if (dist < 0.5) {
-					// Am Ziel angekommen → neues Ziel
-					bee.hoverTimer = hoverDuration + Math.random() * 0.5;
-					bee.center.copy(pos);
-					const idx = pickNextTarget(bee.targetIndex, flowers.length);
-					bee.target = flowers[idx].clone();
-					bee.targetIndex = idx;
-					bee.progress = 0;
-					continue;
-				}
+        const x = bee.centerX + cx1 + cx2;
+        const z = bee.centerZ + cz1 + cz2;
+        const y =
+          bee.heightBase +
+          Math.sin(t * bee.freqY + bee.phase) * bee.heightRange;
 
-				// Schrittgeschwindigkeit: ~2-3m/s
-				const step = Math.min(3 * 0.016, dist);
-				const dir = new THREE.Vector3().copy(targetPos).sub(pos).normalize();
+        const dx = x - bee.group.position.x;
+        const dz = z - bee.group.position.z;
 
-				// Neue Position = aktuell + Schritt in Richtung Ziel
-				const newPos = pos.clone().add(dir.multiplyScalar(step));
+        bee.group.position.set(x, y, z);
 
-				// Bewegungsrichtung = Blickrichtung
-				const dx = newPos.x - pos.x;
-				const dz = newPos.z - pos.z;
+        // Blickrichtung = Flugrichtung (+PI weil Bee.glb nach +Z zeigt)
+        if (Math.abs(dx) > 0.001 || Math.abs(dz) > 0.001) {
+          bee.group.rotation.y = Math.atan2(dx, dz) + Math.PI;
+        }
 
-				bee.group.position.copy(newPos);
-				bee.center.copy(newPos);
+        // Natürliches Kippen
+        bee.group.rotation.z =
+          Math.sin(t * bee.tiltSpeed + bee.phase) * 0.08;
+        bee.group.rotation.x =
+          Math.sin(t * 1.5 + bee.phase2) * 0.05 +
+          Math.sin(t * 0.5 + bee.phase) * 0.03;
+      }
+    }
+  }
 
-				if (Math.abs(dx) > 0.001 || Math.abs(dz) > 0.001) {
-					// +PI weil Bee.glb nach +Z statt -Z zeigt
-					bee.group.rotation.y = Math.atan2(dx, dz) + Math.PI;
-				}
+  function dispose(): void {
+    for (const child of group.children) {
+      if (child instanceof THREE.Group) {
+        for (const mesh of child.children) {
+          if (mesh instanceof THREE.Mesh) {
+            mesh.geometry.dispose();
+            if (Array.isArray(mesh.material)) {
+              for (const m of mesh.material) m.dispose();
+            } else {
+              mesh.material.dispose();
+            }
+          }
+        }
+      }
+    }
+    group.clear();
+  }
 
-				// Natürliches Kippen
-				bee.group.rotation.z =
-					Math.sin(time * bee.tiltSpeed + bee.phase) * 0.08;
-				bee.group.rotation.x =
-					Math.sin(time * 1.5 + bee.phase2) * 0.05 +
-					Math.sin(time * 0.5 + bee.phase) * 0.03;
-			}
-		} else {
-			// ─── Sinus-Modus (Original) ───
-			for (const bee of bees) {
-				const t = time * bee.speed;
-
-				const cx1 = Math.cos(t + bee.phase) * bee.flyRadius;
-				const cz1 = Math.sin(t + bee.phase) * bee.flyRadius;
-
-				const cx2 =
-					Math.cos(t * 0.7 + bee.phase2) * bee.flyRadius * 0.3;
-				const cz2 =
-					Math.sin(t * 0.5 + bee.phase2) * bee.flyRadius * 0.3;
-
-				const x = bee.center.x + cx1 + cx2;
-				const z = bee.center.z + cz1 + cz2;
-				const y =
-					bee.center.y +
-					bee.heightBase +
-					Math.sin(t * bee.freqY + bee.phase) * bee.heightRange;
-
-				const dx = x - bee.group.position.x;
-				const dz = z - bee.group.position.z;
-
-				bee.group.position.set(x, y, z);
-
-				if (Math.abs(dx) > 0.001 || Math.abs(dz) > 0.001) {
-					// +PI weil Bee.glb nach +Z statt -Z zeigt
-					bee.group.rotation.y = Math.atan2(dx, dz) + Math.PI;
-				}
-
-				bee.group.rotation.z =
-					Math.sin(t * bee.tiltSpeed + bee.phase) * 0.08;
-				bee.group.rotation.x =
-					Math.sin(t * 1.5 + bee.phase2) * 0.05 +
-					Math.sin(t * 0.5 + bee.phase) * 0.03;
-			}
-		}
-	}
-
-	/** Räumt alle Geometrien und Materialien auf */
-	function dispose(): void {
-		for (const child of group.children) {
-			if (child instanceof THREE.Group) {
-				for (const mesh of child.children) {
-					if (mesh instanceof THREE.Mesh) {
-						mesh.geometry.dispose();
-						if (Array.isArray(mesh.material)) {
-							for (const m of mesh.material) m.dispose();
-						} else {
-							mesh.material.dispose();
-						}
-					}
-				}
-			}
-		}
-		group.clear();
-	}
-
-	return { group, update, dispose };
+  return { group, update, dispose };
 }

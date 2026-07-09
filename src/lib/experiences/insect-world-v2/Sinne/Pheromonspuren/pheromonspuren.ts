@@ -43,7 +43,7 @@ export const VARIANTS: PheromonVariant[] = [
   {
     name: "Glühwürmchen",
     desc: "Große leuchtende Punkte, verstreut – Spur reicht 20–35m weit",
-    particlesPerTrail: 30,
+    particlesPerTrail: 12, // 30→12: −60% Sprites, Glühwürmchen-Effekt bleibt
     particleSize: 0.35,
     opacity: 0.9,
     trailLengthMin: 20,
@@ -103,7 +103,7 @@ export const VARIANTS: PheromonVariant[] = [
 ];
 
 export const PHEROMON = {
-  EVERY_NTH_FLOWER: 4,
+  EVERY_NTH_FLOWER: 8, // 4→8: halbiert die Anzahl Trails, Sprites trotzdem sichtbar
 } as const;
 
 export interface FlowerTarget {

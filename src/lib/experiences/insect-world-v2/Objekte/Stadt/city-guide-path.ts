@@ -18,7 +18,7 @@ const PATH_HEIGHT_MIN = 0.5;
 const PATH_HEIGHT_MAX = 1.8;
 const SPRITE_SIZE_MIN = 0.6;
 const SPRITE_SIZE_MAX = 1.2;
-const SPRITES_PER_DASH = 8;
+const SPRITES_PER_DASH = 3; // 8→3: von ~4440 auf ~1660 Sprites (−63%), optisch kaum Unterschied
 
 export class CityGuidePath {
   readonly group = new THREE.Group();
