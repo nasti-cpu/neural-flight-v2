@@ -262,15 +262,23 @@ export class ChunkManager {
       this._lastFloorChunkZ = playerChunkZ;
     }
 
-    // Smooth lerp zur Ziel-Position
-    if (this.floorMesh) {
-      this._floorPosX += (this._floorTargetX - this._floorPosX) * 0.08;
-      this._floorPosZ += (this._floorTargetZ - this._floorPosZ) * 0.08;
-      this.floorMesh.position.x = this._floorPosX;
-      this.floorMesh.position.z = this._floorPosZ;
+    // ⚡ Performance: Nur jeden 2. Frame den Boden updaten.
+    // Lerp + Heights werden zusammen übersprungen, damit Position
+    // und Dünen-Höhen immer synchron bleiben (kein Wackeln).
+    this._floorFrameSkip++;
+    if (this._floorFrameSkip >= 2) {
+      this._floorFrameSkip = 0;
 
-      // Vertex-Höhen an aktuelle Position anpassen (live, kein Neubau)
-      this._updateFloorHeights();
+      // Smooth lerp zur Ziel-Position
+      if (this.floorMesh) {
+        this._floorPosX += (this._floorTargetX - this._floorPosX) * 0.08;
+        this._floorPosZ += (this._floorTargetZ - this._floorPosZ) * 0.08;
+        this.floorMesh.position.x = this._floorPosX;
+        this.floorMesh.position.z = this._floorPosZ;
+
+        // Vertex-Höhen an aktuelle Position anpassen (live, kein Neubau)
+        this._updateFloorHeights();
+      }
     }
   }
 
@@ -340,13 +348,6 @@ export class ChunkManager {
    */
   private _updateFloorHeights(): void {
     if (!this.floorMesh) return;
-
-    // ⚡ Performance: Nur jeden 3. Frame updaten.
-    // Die Dünen sind smooth und das Mesh lerpt sanft –
-    // ein Überspringen ist nicht sichtbar, spart aber ~66% CPU.
-    this._floorFrameSkip++;
-    if (this._floorFrameSkip < 3) return;
-    this._floorFrameSkip = 0;
 
     const meshX = this.floorMesh.position.x;
     const meshZ = this.floorMesh.position.z;
