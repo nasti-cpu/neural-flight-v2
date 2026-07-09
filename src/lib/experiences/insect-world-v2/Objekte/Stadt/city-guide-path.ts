@@ -11,22 +11,39 @@
 import * as THREE from "three/webgpu";
 import { getWorldHeight } from "../../Biome/Wiese/grass-manager";
 
-const NEON_GLOW = new THREE.Color(0x44ffff);
-const DASH_LENGTH = 1.2;
-const GAP_LENGTH = 0.6;
-const PATH_HEIGHT_MIN = 0.5;
-const PATH_HEIGHT_MAX = 1.8;
-const SPRITE_SIZE_MIN = 0.6;
-const SPRITE_SIZE_MAX = 1.2;
-const SPRITES_PER_DASH = 3;
+// ── Standard-Konfiguration ──
+
+export interface GuidePathConfig {
+  neonColor?: number;
+  dashLength?: number;
+  gapLength?: number;
+  pathHeightMin?: number;
+  pathHeightMax?: number;
+  spriteSizeMin?: number;
+  spriteSizeMax?: number;
+  spritesPerDash?: number;
+}
+
+const DEFAULTS: Required<GuidePathConfig> = {
+  neonColor: 0x44ffff,
+  dashLength: 1.2,
+  gapLength: 0.6,
+  pathHeightMin: 0.5,
+  pathHeightMax: 1.8,
+  spriteSizeMin: 0.6,
+  spriteSizeMax: 1.2,
+  spritesPerDash: 3,
+};
 
 export class CityGuidePath {
   readonly group = new THREE.Group();
   private active = false;
   private glowTexture: THREE.CanvasTexture;
   private phases: number[] = [];
+  private config: Required<GuidePathConfig>;
 
-  constructor() {
+  constructor(config?: GuidePathConfig) {
+    this.config = { ...DEFAULTS, ...config };
     this.glowTexture = this.createGlowTexture();
   }
 
@@ -113,7 +130,7 @@ export class CityGuidePath {
         getWorldHeight(to.x, to.z) +
         getWorldHeight(midX, midZ)) /
         3 +
-      (PATH_HEIGHT_MIN + PATH_HEIGHT_MAX) / 2;
+      (this.config.pathHeightMin + this.config.pathHeightMax) / 2;
 
     const ctrlPts = [
       new THREE.Vector3(from.x, from.y, from.z),
@@ -127,7 +144,7 @@ export class CityGuidePath {
       const t = i / numPoints;
       const p = curve.getPoint(t);
       const groundY = getWorldHeight(p.x, p.z);
-      const heightAbove = PATH_HEIGHT_MIN + Math.sin(t * Math.PI) * (PATH_HEIGHT_MAX - PATH_HEIGHT_MIN);
+      const heightAbove = this.config.pathHeightMin + Math.sin(t * Math.PI) * (this.config.pathHeightMax - this.config.pathHeightMin);
       p.y = groundY + heightAbove;
       pts.push(p);
     }
@@ -139,12 +156,12 @@ export class CityGuidePath {
 
     const curve = new THREE.CatmullRomCurve3(points);
     const totalLength = curve.getLength();
-    const segmentLen = DASH_LENGTH + GAP_LENGTH;
+    const segmentLen = this.config.dashLength + this.config.gapLength;
     const numDashes = Math.max(1, Math.floor(totalLength / segmentLen));
 
     const mat = new THREE.SpriteMaterial({
       map: this.glowTexture,
-      color: NEON_GLOW,
+      color: new THREE.Color(this.config.neonColor),
       transparent: true,
       opacity: 1.0,
       blending: THREE.AdditiveBlending,
@@ -153,17 +170,17 @@ export class CityGuidePath {
 
     for (let d = 0; d < numDashes; d++) {
       const dashStart = d * segmentLen;
-      const dashMid = dashStart + DASH_LENGTH / 2;
+      const dashMid = dashStart + this.config.dashLength / 2;
       const t = dashMid / totalLength;
       if (t > 1) break;
 
       const p = curve.getPoint(t);
       const tangent = curve.getTangent(t);
       const groundY = getWorldHeight(p.x, p.z);
-      p.y = groundY + (PATH_HEIGHT_MIN + PATH_HEIGHT_MAX) / 2;
+      p.y = groundY + (this.config.pathHeightMin + this.config.pathHeightMax) / 2;
 
-      for (let s = 0; s < SPRITES_PER_DASH; s++) {
-        const offset = ((s / SPRITES_PER_DASH) - 0.5) * DASH_LENGTH * 0.8;
+      for (let s = 0; s < this.config.spritesPerDash; s++) {
+        const offset = ((s / this.config.spritesPerDash) - 0.5) * this.config.dashLength * 0.8;
         const pos = new THREE.Vector3().copy(p);
         pos.addScaledVector(tangent, offset);
         pos.x += (Math.random() - 0.5) * 0.3;
@@ -172,7 +189,7 @@ export class CityGuidePath {
 
         const sprite = new THREE.Sprite(mat);
         sprite.position.copy(pos);
-        const size = SPRITE_SIZE_MIN + Math.random() * (SPRITE_SIZE_MAX - SPRITE_SIZE_MIN);
+        const size = this.config.spriteSizeMin + Math.random() * (this.config.spriteSizeMax - this.config.spriteSizeMin);
         sprite.scale.set(size, size, 1);
 
         this.phases.push(Math.random() * Math.PI * 2);

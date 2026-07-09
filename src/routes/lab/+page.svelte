@@ -42,6 +42,18 @@ const experiments: { name: string; path: string; description: string }[] = [
 		description:
 			"Komplette Szene: Wiese + Himmel + Blumen + fliegende Bienen (insect-world-v2)",
 	},
+	{
+		name: "City Tester",
+		path: "city-tester",
+		description:
+			"4 Stadtgrößen-Varianten mit Pheromonspuren + Wiese als Referenz (insect-world-v2)",
+	},
+	{
+		name: "City + Pheromon",
+		path: "city-pheromone-tester",
+		description:
+			"Stadt Normalgröße mit 6 Pheromon-Varianten (Dicke × Länge) zum Vergleichen",
+	},
 ];
 </script>
 
