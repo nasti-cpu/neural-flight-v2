@@ -18,6 +18,7 @@
 	import { createBees } from "$lib/experiences/insect-world-v2/Objekte/Bienen/bienen";
 
 	import beeGlbUrl from "$lib/experiences/insect-world-v2/Objekte/Bienen/Bee.glb?url";
+	import { FPSMonitor } from "$lib/experiences/insect-world-v2/Sinne/FPSMonitor";
 
 	let canvas: HTMLCanvasElement;
 	let renderer: THREE.WebGPURenderer;
@@ -26,6 +27,7 @@
 	let controls: OrbitControls;
 	let animationId: number;
 	let errorMsg = $state("");
+	let fpsMonitor: FPSMonitor;
 
 	onMount(async () => {
 		try {
@@ -106,9 +108,14 @@
 			scene.add(bees.group);
 			console.log("[V2] Bienen geladen");
 
+			// FPS-Monitor starten
+			fpsMonitor = new FPSMonitor();
+			fpsMonitor.start();
+
 			// Animationsloop
 			const clock = new THREE.Clock();
-			function animate() {
+			function animate(time: number) {
+				fpsMonitor.update(time);
 				const elapsed = clock.getElapsedTime();
 				bees.update(elapsed);
 				controls.update();
@@ -136,6 +143,7 @@
 	onDestroy(() => {
 		if (!browser) return;
 		cancelAnimationFrame(animationId);
+		fpsMonitor?.stop();
 		renderer?.dispose();
 		controls?.dispose();
 	});

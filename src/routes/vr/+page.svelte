@@ -15,6 +15,7 @@
         isSettingsUpdate,
         isSpeedCommand,
     } from "$lib/ws/protocol";
+    import { FPSMonitor } from "$lib/experiences/insect-world-v2/Sinne/FPSMonitor";
 
     let canvas: HTMLCanvasElement;
     let renderer: THREE.WebGPURenderer;
@@ -24,6 +25,7 @@
     let lastProcessedTimestamp = 0;
     const ws = createWebSocketClient();
     const clock = new THREE.Clock();
+    let fpsMonitor: FPSMonitor;
 
     let lastOrientation = { pitch: 0, roll: 0 };
     let lastSpeed = { accelerate: false, brake: false };
@@ -102,6 +104,8 @@
             })
                 .then((exp: ActiveExperience) => {
                     experienceName = exp.manifest.name;
+                    fpsMonitor = new FPSMonitor();
+                    fpsMonitor.start();
 
                     const renderCamera = exp.state
                         .camera as THREE.PerspectiveCamera;
@@ -116,7 +120,8 @@
                     removeResizeListener = () =>
                         window.removeEventListener("resize", onResize);
 
-                    renderer.setAnimationLoop(() => {
+                    renderer.setAnimationLoop((timestamp: number) => {
+                        fpsMonitor.update(timestamp);
                         // delta = Zeit seit letztem Frame in Sekunden.
                         // Nach Tab-Wechsel oder VR-Session-Start kann delta
                         // riesig werden (>1s). Wir deckeln es auf 0.1s,
@@ -217,6 +222,7 @@
     });
 
     onDestroy(() => {
+        fpsMonitor?.stop();
         renderer?.setAnimationLoop(null);
         if (scene) unloadExperience(scene);
         renderer?.dispose();
