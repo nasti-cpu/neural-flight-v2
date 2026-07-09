@@ -1,0 +1,632 @@
+<script lang="ts">
+import { onMount, onDestroy } from "svelte";
+import * as THREE from "three";
+import {
+	createEchoVariant,
+	ECHO_VARIANTS,
+	ECHO_VARIANT_KEYS,
+} from "$lib/experiences/underwater-world v2/Sinne/Echoortung/echoortung";
+import type { EchoVariant, EchoVariantSystem } from "$lib/experiences/underwater-world v2/Sinne/Echoortung/echoortung";
+
+let canvas: HTMLCanvasElement;
+let renderer: THREE.WebGLRenderer;
+let scene: THREE.Scene;
+let camera: THREE.PerspectiveCamera;
+let clock = new THREE.Clock();
+let system: EchoVariantSystem | null = null;
+let reflectSystem: EchoVariantSystem | null = null;
+let targetGroup: THREE.Group;
+let hitFlash: THREE.Mesh;
+let hitFlashGlow: THREE.Mesh;
+let fishes: FishObj[] = [];
+
+interface FishObj {
+	group: THREE.Group;
+	glow: THREE.Mesh;
+	xzDist: number;
+	flashTimer: number;
+	lastEmit: number;
+}
+
+let currentVariant = $state<EchoVariant>("scan");
+let autoRotate = $state(true);
+let orbitTheta = 0;
+let orbitPhi = 0.35;
+let emitTimer = 0;
+let fishEmitCount = 0;
+let lastMX = 0;
+let lastMY = 0;
+
+const EMIT_INTERVALS: Record<EchoVariant, number> = {
+	scan: 2.3,
+	puls: 2.8,
+	welle: 3.5,
+	reflex: 4.0,
+	faecher: 3.0,
+	impuls: 3.0,
+};
+
+const SOUND_PATHS: Record<EchoVariant, string> = {
+	scan: "/sounds/echo%201.mp3",
+	puls: "/sounds/echo%203.mp3",
+	welle: "/sounds/echo%202.mp3",
+	reflex: "/sounds/echo%201.mp3",
+	faecher: "/sounds/echo%203.mp3",
+	impuls: "/sounds/echo%201.mp3",
+};
+
+// ── Reflex ──
+const REFLEX_EMIT_OFFSET = new THREE.Vector3(0, 0, -8);
+const ORIGIN = new THREE.Vector3(0, 0, 0);
+const TARGET_DIST = 8;
+
+// ── Fächer ──
+const FAN_ANGLES = [-0.3, -0.15, 0, 0.15, 0.3];
+
+// ── Audio ──
+let audioCtx: AudioContext | null = null;
+const audioBuffers = new Map<EchoVariant, AudioBuffer>();
+
+function initAudio() {
+	if (!audioCtx) {
+		audioCtx = new AudioContext();
+	}
+	if (audioCtx.state === "suspended") {
+		audioCtx.resume();
+	}
+}
+
+async function loadAudio() {
+	if (audioBuffers.size > 0) return;
+	initAudio();
+	if (!audioCtx) return;
+	for (const vk of ECHO_VARIANT_KEYS) {
+		try {
+			const res = await fetch(SOUND_PATHS[vk]);
+			if (!res.ok) { console.warn("audio fetch failed", res.status); continue; }
+			const buf = await res.arrayBuffer();
+			const decoded = await audioCtx.decodeAudioData(buf);
+			audioBuffers.set(vk, decoded);
+		} catch (e) {
+			console.warn("audio load error for", vk, e);
+		}
+	}
+	if (system) {
+		setSystemAudio(system, currentVariant);
+	}
+}
+
+function setSystemAudio(sys: EchoVariantSystem, variant: EchoVariant) {
+	if (audioCtx && audioBuffers.has(variant)) {
+		sys.setAudio(audioCtx, audioBuffers.get(variant)!);
+	}
+}
+
+function rebuild(variant: EchoVariant) {
+	initAudio();
+	loadAudio();
+	if (system) {
+		scene.remove(system.group);
+		system.dispose();
+	}
+	if (reflectSystem) {
+		scene.remove(reflectSystem.group);
+		reflectSystem.dispose();
+		reflectSystem = null;
+	}
+	const config = ECHO_VARIANTS[variant];
+	system = createEchoVariant(config);
+	scene.add(system.group);
+	setSystemAudio(system, variant);
+	emitTimer = 0;
+	prevVisibleMap.clear();
+
+	if (variant === "reflex") {
+		const refConfig = { ...ECHO_VARIANTS["scan"] };
+		refConfig.color = 0xff8844;
+		refConfig.label = "Reflexion";
+		refConfig.expandSpeed = 6;
+		refConfig.lifetime = 1.2;
+		refConfig.maxOpacity = 0.5;
+		reflectSystem = createEchoVariant(refConfig);
+		scene.add(reflectSystem.group);
+	}
+}
+
+const prevVisibleMap = new Map<string, boolean>();
+
+onMount(() => {
+	renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+	renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+	renderer.setSize(window.innerWidth, window.innerHeight);
+	renderer.setClearColor(0x001020);
+
+	scene = new THREE.Scene();
+	scene.fog = new THREE.FogExp2(0x001020, 0.006);
+
+	camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 200);
+	camera.position.set(0, 3, 18);
+	camera.lookAt(0, 0, 0);
+
+	// Small sphere at emission point for reflex
+	const emitterSphere = new THREE.Mesh(
+		new THREE.SphereGeometry(0.15, 8, 8),
+		new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.3 }),
+	);
+	emitterSphere.position.copy(REFLEX_EMIT_OFFSET);
+	scene.add(emitterSphere);
+
+	const ambient = new THREE.AmbientLight(0x404060, 0.4);
+	scene.add(ambient);
+	const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+	sun.position.set(10, 20, 10);
+	scene.add(sun);
+
+	// Ground grid
+	const grid = new THREE.GridHelper(30, 15, 0x004466, 0x002244);
+	grid.position.y = -2.5;
+	grid.material.transparent = true;
+	grid.material.opacity = 0.2;
+	scene.add(grid);
+
+	// Stars
+	const starCount = 300;
+	const starGeo = new THREE.BufferGeometry();
+	const starPos = new Float32Array(starCount * 3);
+	for (let i = 0; i < starCount * 3; i++) {
+		starPos[i] = (Math.random() - 0.5) * 120;
+	}
+	starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
+	const starMat = new THREE.PointsMaterial({
+		color: 0x446688,
+		size: 0.1,
+		transparent: true,
+		opacity: 0.3,
+		blending: THREE.AdditiveBlending,
+		depthWrite: false,
+		sizeAttenuation: true,
+	});
+	const stars = new THREE.Points(starGeo, starMat);
+	scene.add(stars);
+
+	// Target object in center
+	targetGroup = new THREE.Group();
+
+	const ringGeo = new THREE.RingGeometry(1.0, 1.3, 32);
+	const ringMat = new THREE.MeshBasicMaterial({
+		color: 0x4488cc,
+		transparent: true,
+		opacity: 0.12,
+		blending: THREE.AdditiveBlending,
+		depthWrite: false,
+		side: THREE.DoubleSide,
+	});
+	const ring = new THREE.Mesh(ringGeo, ringMat);
+	ring.rotation.x = -Math.PI / 2;
+	targetGroup.add(ring);
+
+	const coreGeo = new THREE.IcosahedronGeometry(0.6, 1);
+	const coreMat = new THREE.MeshStandardMaterial({
+		color: 0x4488cc,
+		emissive: 0x4488cc,
+		emissiveIntensity: 0.2,
+		metalness: 0.3,
+		roughness: 0.4,
+		transparent: true,
+		opacity: 0.7,
+	});
+	const core = new THREE.Mesh(coreGeo, coreMat);
+	targetGroup.add(core);
+
+	const glowGeo = new THREE.SphereGeometry(0.2, 12, 12);
+	const glowMat = new THREE.MeshBasicMaterial({
+		color: 0x4488cc,
+		transparent: true,
+		opacity: 0.5,
+		blending: THREE.AdditiveBlending,
+		depthWrite: false,
+	});
+	const glow = new THREE.Mesh(glowGeo, glowMat);
+	targetGroup.add(glow);
+
+	// Hit flash (bright sphere, hidden until reflex hits)
+	const flashGeo = new THREE.SphereGeometry(1.0, 16, 16);
+	const flashMat = new THREE.MeshBasicMaterial({
+		color: 0xff8844,
+		transparent: true,
+		opacity: 0,
+		blending: THREE.AdditiveBlending,
+		depthWrite: false,
+	});
+	hitFlash = new THREE.Mesh(flashGeo, flashMat);
+	targetGroup.add(hitFlash);
+
+	// Additional glow for impact emphasis
+	const flashGlowGeo = new THREE.SphereGeometry(1.6, 16, 16);
+	const flashGlowMat = new THREE.MeshBasicMaterial({
+		color: 0xff8844,
+		transparent: true,
+		opacity: 0,
+		blending: THREE.AdditiveBlending,
+		depthWrite: false,
+	});
+	hitFlashGlow = new THREE.Mesh(flashGlowGeo, flashGlowMat);
+	targetGroup.add(hitFlashGlow);
+
+	targetGroup.position.set(0, 0, 0);
+	scene.add(targetGroup);
+
+	// ── 3 Beispiel-Fische ──
+	const FISH_COLORS = [0x44dd88, 0x88ddff, 0xffaa66];
+	const FISH_POSITIONS: [number, number, number][] = [
+		[2.5, 0.3, 1.5],
+		[-1.5, -0.2, 3.0],
+		[1.2, 0.5, -4.0],
+	];
+
+	function createFish(color: number, pos: [number, number, number]): FishObj {
+		const g = new THREE.Group();
+
+		const body = new THREE.Mesh(
+			new THREE.SphereGeometry(0.22, 8, 6),
+			new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.15, metalness: 0.2, roughness: 0.5 }),
+		);
+		body.scale.set(0.8, 0.8, 1.6);
+		g.add(body);
+
+		const tail = new THREE.Mesh(
+			new THREE.ConeGeometry(0.18, 0.25, 4),
+			new THREE.MeshBasicMaterial({ color }),
+		);
+		tail.rotation.x = Math.PI / 2;
+		tail.position.z = -0.45;
+		g.add(tail);
+
+		const glow = new THREE.Mesh(
+			new THREE.SphereGeometry(0.35, 8, 8),
+			new THREE.MeshBasicMaterial({
+				color: 0x44ddff,
+				transparent: true,
+				opacity: 0,
+				blending: THREE.AdditiveBlending,
+				depthWrite: false,
+			}),
+		);
+		g.add(glow);
+
+		g.position.set(pos[0], pos[1], pos[2]);
+		const xzDist = Math.sqrt(pos[0] * pos[0] + pos[2] * pos[2]);
+
+		// random initial rotation
+		g.rotation.y = Math.random() * Math.PI * 2;
+
+		scene.add(g);
+
+		return { group: g, glow, xzDist, flashTimer: 0, lastEmit: -1 };
+	}
+
+	for (let i = 0; i < 3; i++) {
+		fishes.push(createFish(FISH_COLORS[i], FISH_POSITIONS[i]));
+	}
+
+	rebuild(currentVariant);
+
+	renderer.setAnimationLoop(tick);
+
+	function tick() {
+		const delta = Math.min(clock.getDelta(), 0.05);
+		const elapsed = clock.elapsedTime;
+
+		if (autoRotate) {
+			orbitTheta += delta * 0.2;
+		}
+		const dist = 18;
+		const cx = Math.sin(orbitTheta) * dist * Math.cos(orbitPhi);
+		const cy = Math.sin(orbitPhi) * dist + 2;
+		const cz = Math.cos(orbitTheta) * dist * Math.cos(orbitPhi);
+		camera.position.set(cx, cy, cz);
+		camera.lookAt(0, 0, 0);
+
+		// Auto-emit rings at interval
+		const interval = EMIT_INTERVALS[currentVariant];
+		emitTimer += delta;
+		if (emitTimer >= interval && system) {
+			emitTimer = 0;
+			const emitPos = currentVariant === "reflex" ? REFLEX_EMIT_OFFSET : ORIGIN;
+			system.emit(emitPos.x, emitPos.y, emitPos.z);
+			if (currentVariant === "scan") {
+				fishEmitCount++;
+			}
+		}
+
+		if (system) system.update(delta);
+		if (reflectSystem) reflectSystem.update(delta);
+
+		// ── Fächer: assign rotation to newly activated rings ──
+		if (currentVariant === "faecher" && system) {
+			let fanIdx = 0;
+			for (const child of system.group.children) {
+				if (child instanceof THREE.Mesh) {
+					const nowVis = child.visible;
+					const wasVis = prevVisibleMap.get(child.uuid) ?? false;
+					if (nowVis && !wasVis) {
+						const angle = FAN_ANGLES[fanIdx % FAN_ANGLES.length];
+						child.rotation.y = angle;
+						fanIdx++;
+					}
+					prevVisibleMap.set(child.uuid, nowVis);
+				}
+			}
+		}
+
+		// ── Impuls: pulse ring brightness + slight scale throb ──
+		if (currentVariant === "impuls" && system) {
+			for (const child of system.group.children) {
+				if (child instanceof THREE.Mesh && child.visible) {
+					const mat = child.material as THREE.MeshBasicMaterial;
+					const pulse = 0.5 + 0.5 * Math.sin(elapsed * 7 + child.id * 0.5);
+					const factor = 0.15 + 0.85 * pulse;
+					mat.opacity = mat.opacity * factor;
+					child.scale.setScalar(child.scale.x * (1 + 0.04 * (1 - pulse)));
+				}
+			}
+		}
+
+		// ── Reflex: detect ring reaching target & trigger reflection ──
+		if (currentVariant === "reflex" && system && reflectSystem) {
+			for (const child of system.group.children) {
+				if (child instanceof THREE.Mesh && child.visible) {
+					const s = child.scale.x;
+					if (s >= TARGET_DIST) {
+						if (child.userData._reflexDone) continue;
+						child.userData._reflexDone = true;
+						reflectSystem.emit(0, 0, 0);
+						hitFlash.scale.setScalar(0.2);
+						hitFlashGlow.scale.setScalar(0.3);
+						reflexFlashTimer = 0.4;
+					}
+				}
+			}
+		}
+
+		// ── Hit flash animation ──
+		if (reflexFlashTimer > 0) {
+			reflexFlashTimer -= delta;
+			const t = reflexFlashTimer / 0.4;
+			const ease = 1 - t * t;
+			(hitFlash.material as THREE.MeshBasicMaterial).opacity = ease * 0.9;
+			hitFlash.scale.setScalar(0.2 + ease * 1.0);
+			hitFlash.visible = true;
+			(hitFlashGlow.material as THREE.MeshBasicMaterial).opacity = ease * 0.4;
+			hitFlashGlow.scale.setScalar(0.3 + ease * 2.0);
+			hitFlashGlow.visible = true;
+		} else {
+			hitFlash.visible = false;
+			hitFlashGlow.visible = false;
+		}
+
+		// ── Scan: detect ring crossing fish & trigger flash ──
+		if (currentVariant === "scan" && system) {
+			const expandSpeed = system.config.expandSpeed;
+			for (const child of system.group.children) {
+				if (child instanceof THREE.Mesh && child.visible) {
+					const curRadius = child.scale.x;
+					const prevRadius = curRadius - expandSpeed * delta;
+					for (const fish of fishes) {
+						if (prevRadius < fish.xzDist && curRadius >= fish.xzDist && fish.lastEmit < fishEmitCount) {
+							fish.lastEmit = fishEmitCount;
+							fish.flashTimer = 0.35;
+						}
+					}
+				}
+			}
+		}
+
+		// ── Fish glow animation ──
+		for (const fish of fishes) {
+			const glowMat = fish.glow.material as THREE.MeshBasicMaterial;
+			const bodyMat = (fish.group.children[0] as THREE.Mesh).material as THREE.MeshStandardMaterial;
+			if (fish.flashTimer > 0) {
+				fish.flashTimer -= delta;
+				const t = fish.flashTimer / 0.35;
+				const ease = 1 - t * t;
+				glowMat.opacity = ease * 0.7;
+				const s = 0.6 + ease * 0.8;
+				fish.glow.scale.setScalar(s);
+				fish.glow.visible = true;
+				bodyMat.emissiveIntensity = 0.15 + ease * 0.6;
+			} else {
+				fish.glow.visible = false;
+				bodyMat.emissiveIntensity = 0.15;
+			}
+		}
+
+		// Animate target
+		core.rotation.x = elapsed * 0.4;
+		core.rotation.y = elapsed * 0.6;
+		const r = targetGroup.children[0] as THREE.Mesh;
+		r.scale.setScalar(0.8 + 0.2 * Math.sin(elapsed * 1.2));
+		const g = targetGroup.children[2] as THREE.Mesh;
+		g.scale.setScalar(0.8 + 0.2 * Math.sin(elapsed * 2));
+
+		stars.rotation.y += delta * 0.008;
+
+		// Clear reflex flash on reset for subsequent emits
+		if (currentVariant === "reflex" && system && emitTimer < 0.05) {
+			for (const child of system.group.children) {
+				if (child instanceof THREE.Mesh && !child.visible) {
+					child.userData._reflexDone = false;
+				}
+			}
+		}
+
+		renderer.render(scene, camera);
+	}
+});
+
+let reflexFlashTimer = 0;
+
+onDestroy(() => {
+	renderer?.setAnimationLoop(null);
+	if (system) system.dispose();
+	if (reflectSystem) reflectSystem.dispose();
+	for (const fish of fishes) {
+		(fish.glow.material as THREE.MeshBasicMaterial).dispose();
+		((fish.group.children[0] as THREE.Mesh).material as THREE.MeshStandardMaterial).dispose();
+		((fish.group.children[1] as THREE.Mesh).material as THREE.MeshBasicMaterial).dispose();
+		scene?.remove(fish.group);
+	}
+	renderer?.dispose();
+});
+</script>
+
+<svelte:head>
+	<title>Echoortung Test — ICAROS VR</title>
+</svelte:head>
+
+<div class="ui">
+	<div class="panel">
+		<h2>Echoortung — Delfin-Sinne</h2>
+		<div class="buttons">
+			{#each ECHO_VARIANT_KEYS as vk}
+				{@const cfg = ECHO_VARIANTS[vk]}
+				<button
+					class:active={currentVariant === vk}
+					style="border-color: #{cfg.color.toString(16).padStart(6, '0')}; {currentVariant === vk ? `background: rgba(${parseInt(cfg.color.toString(16).slice(0,2), 16)}, ${parseInt(cfg.color.toString(16).slice(2,4), 16)}, ${parseInt(cfg.color.toString(16).slice(4,6), 16)}, 0.2)` : ''}"
+					onclick={() => {
+						currentVariant = vk;
+						rebuild(vk);
+					}}
+				>
+					<span class="dot" style="background: #{cfg.color.toString(16).padStart(6, '0')}"></span>
+					{cfg.label}
+				</button>
+			{/each}
+		</div>
+		<p class="desc">{ECHO_VARIANTS[currentVariant].description}</p>
+		<div class="controls">
+			<label>
+				<input type="checkbox" checked={autoRotate} onchange={() => (autoRotate = !autoRotate)} />
+				Auto-Rotate
+			</label>
+			<span class="hint">Ziehen zum Drehen</span>
+		</div>
+	</div>
+</div>
+
+<canvas
+	bind:this={canvas}
+	class="canvas"
+	onpointerdown={(e) => {
+		lastMX = e.clientX;
+		lastMY = e.clientY;
+		initAudio();
+		loadAudio();
+	}}
+	onpointermove={(e) => {
+		if (e.buttons === 0) return;
+		const dx = e.clientX - lastMX;
+		const dy = e.clientY - lastMY;
+		lastMX = e.clientX;
+		lastMY = e.clientY;
+		orbitTheta -= dx * 0.005;
+		orbitPhi = Math.max(-0.2, Math.min(1.0, orbitPhi + dy * 0.005));
+	}}
+></canvas>
+
+<style>
+	:global(body) {
+		margin: 0;
+		overflow: hidden;
+		background: #001020;
+		font-family: system-ui, sans-serif;
+	}
+	.canvas {
+		display: block;
+		width: 100vw;
+		height: 100vh;
+	}
+	.ui {
+		position: fixed;
+		top: 16px;
+		left: 16px;
+		z-index: 10;
+		pointer-events: none;
+	}
+	.panel {
+		background: rgba(0, 0, 0, 0.75);
+		border: 1px solid rgba(0, 229, 255, 0.25);
+		border-radius: 12px;
+		padding: 16px 20px;
+		color: #ccf;
+		pointer-events: auto;
+		min-width: 240px;
+	}
+	h2 {
+		font-size: 14px;
+		text-transform: uppercase;
+		letter-spacing: 1px;
+		color: #00e5ff;
+		margin: 0 0 10px;
+	}
+	.buttons {
+		display: flex;
+		gap: 6px;
+		flex-wrap: wrap;
+		margin-bottom: 10px;
+	}
+	button {
+		background: rgba(255, 255, 255, 0.06);
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		color: #aac;
+		padding: 6px 14px;
+		border-radius: 8px;
+		cursor: pointer;
+		font-size: 13px;
+		transition: all 0.15s;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+	button:hover {
+		background: rgba(255, 255, 255, 0.12);
+		color: #eef;
+	}
+	button.active {
+		color: #fff;
+	}
+	.dot {
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		display: inline-block;
+	}
+	.desc {
+		font-size: 11px;
+		color: #668;
+		margin: 0 0 12px;
+		line-height: 1.4;
+	}
+	.controls {
+		display: flex;
+		gap: 16px;
+		align-items: center;
+		border-top: 1px solid rgba(255, 255, 255, 0.08);
+		padding-top: 10px;
+		font-size: 12px;
+	}
+	.controls label {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		cursor: pointer;
+		color: #aac;
+	}
+	.controls input {
+		accent-color: #00e5ff;
+	}
+	.hint {
+		color: #557;
+		font-size: 11px;
+	}
+</style>
