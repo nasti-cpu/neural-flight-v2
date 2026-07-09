@@ -38,7 +38,7 @@ export function startBackgroundAudio(): {
     // =====================================================================
     async function loadAudio(): Promise<void> {
       try {
-        const response = await fetch("/sounds/ambiente%20unterwasser.mp3");
+        const response = await fetch("/sounds/sounds/ambiente%20unterwasser.mp3");
 
         if (!response.ok) {
           console.warn(
