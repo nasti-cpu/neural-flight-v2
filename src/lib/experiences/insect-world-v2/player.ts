@@ -12,6 +12,8 @@ import { getWorldHeight } from "./Biome/Wiese/grass-manager";
 const DEFAULT_BASE_SPEED = 0.98;
 const PITCH_SPEED_FACTOR = 0.03;
 const YAW_FACTOR = 0.02;
+/** Wiederverwendbarer Vector (kein `new` im Update-Loop) */
+const _FORWARD = new THREE.Vector3();
 
 export function updatePlayer(
   orientation: { pitch: number; roll: number },
@@ -36,13 +38,12 @@ export function updatePlayer(
   const yawSpeed = orientation.roll * YAW_FACTOR;
   camera.rotation.y += yawSpeed * delta;
 
-  // Vorwärtsrichtung horizontal halten
-  const forward = new THREE.Vector3(0, 0, -1);
-  forward.applyQuaternion(camera.quaternion);
-  forward.y = 0;
-  forward.normalize();
+  // Vorwärtsrichtung horizontal halten (Pool-Vector, keine Allokation)
+  _FORWARD.set(0, 0, -1).applyQuaternion(camera.quaternion);
+  _FORWARD.y = 0;
+  _FORWARD.normalize();
 
-  camera.position.addScaledVector(forward, moveSpeed * delta);
+  camera.position.addScaledVector(_FORWARD, moveSpeed * delta);
 
   // Höhe über Grund halten (~2m über dem Boden = Insekten-Perspektive)
   const groundY = getWorldHeight(camera.position.x, camera.position.z);

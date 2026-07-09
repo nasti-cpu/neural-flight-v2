@@ -72,6 +72,8 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 
   // 4b. Städte laden und platzieren
   await cityManager.loadCities(cityPositions, ctx.scene, grassManager);
+  // Stadt-Modell unsichtbar starten (wird im tick bei <150m eingeblendet)
+  for (const city of cityManager.cities) city.group.visible = false;
 
   // 4c. Spawn-Chunk vorbereiten: Wir sagen der WFC-Engine,
   // dass der Chunk an Position (0,0) auf jeden Fall FLOWERS_DENSE sein soll.
@@ -177,8 +179,13 @@ export function tick(
   // City Guide Path animieren
   s.guidePath.update(ctx.elapsed);
 
-  // Prüfen ob der Spieler die Stadt erreicht hat (< 20m Distanz)
+  // Stadt-Modell nur anzeigen wenn <150m entfernt (sonst im Nebel unsichtbar)
   const playerPos = ctx.camera.position;
+  for (const city of s.cityManager.cities) {
+    city.group.visible = playerPos.distanceTo(city.position) < 150;
+  }
+
+  // Prüfen ob der Spieler die Stadt erreicht hat (< 20m Distanz)
   const target = s.cityManager.getNearestUndiscovered(playerPos);
   if (target && playerPos.distanceTo(target.position) < 20) {
     s.cityManager.markVisited(target);

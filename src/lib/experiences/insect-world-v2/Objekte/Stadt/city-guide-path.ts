@@ -32,10 +32,20 @@ export class CityGuidePath {
 
   /**
    * Baut einen Pfad vom Startpunkt zur Ziel-Stadt.
+   * Begrenzt die Länge auf 150m – alles dahinter ist im Nebel unsichtbar.
    * Entfernt vorherige Pfade automatisch.
    */
   setTarget(from: THREE.Vector3, to: THREE.Vector3): void {
     this.clear();
+
+    // Pfad auf 150m begrenzen (Nebel-Sichtweite ~80m, Puffer für Annäherung)
+    const _dir = new THREE.Vector3().copy(to).sub(from);
+    const dist = _dir.length();
+    const maxDist = 150;
+    if (dist > maxDist) {
+      _dir.normalize().multiplyScalar(maxDist);
+      to = new THREE.Vector3().copy(from).add(_dir);
+    }
 
     const points = this.buildCurve(from, to);
     if (points.length < 2) return;
