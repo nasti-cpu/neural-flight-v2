@@ -48,10 +48,7 @@ export class ChunkManager {
   /** Das EINE Boden-Mesh (einmal gebaut, Vertex-Höhen werden live aktualisiert) */
   private floorMesh: THREE.Mesh | null = null;
 
-  /** Aktuelle Position (smooth lerp) */
-  private _floorPosX: number = 0;
-  private _floorPosZ: number = 0;
-  /** Ziel = Chunk-Mittelpunkt */
+  /** Floor-Target zum Snappen (kein Lerp – das verursacht Drift) */
   private _floorTargetX: number = 0;
   private _floorTargetZ: number = 0;
   /** Letzter Chunk, für den die Höhen aktualisiert wurden */
@@ -240,50 +237,51 @@ export class ChunkManager {
       }
     }
 
-    // --- Boden-Mesh: smooth lerp + live Vertex-Höhen ---
-    // Das Mesh wird EINMAL gebaut. Die Position wird smooth zum
-    // Chunk-Mittelpunkt interpoliert (kein Snap). Die Vertex-Höhen
-    // werden jeden Frame an die aktuelle Position angepasst, sodass
-    // die Dünen immer zur Welt-Position passen – auch während des
-    // Lerps. Kein Neubau, kein Ruckeln, kein "Vorschnellen".
+    // --- Boden-Mesh: snap zur Spieler-Position ---
+    // WICHTIG: Das Mesh wird NICHT gelerpt! Lerpen würde bedeuten, dass
+    // der Boden relativ zu den Seegras-Chunks (die an festen Welt-Koordinaten
+    // liegen) driftet. Stattdessen snappen wir das Mesh DIREKT auf die
+    // Spieler-Position. Die Dünen-Höhen werden aus Welt-Koordinaten berechnet
+    // und passen daher sofort – kein sichtbarer Sprung, keine Drift.
     const cs = this.config.chunkSize;
-    const centerX = (playerChunkX + 0.5) * cs;
-    const centerZ = (playerChunkZ + 0.5) * cs;
+    const targetX = playerChunkX * cs + cs / 2;
+    const targetZ = playerChunkZ * cs + cs / 2;
 
     if (!this.floorMesh) {
       // Einmal bauen (flach, ohne Höhen)
       this._buildFloorMesh();
+      // Nach Bau: sofort auf Ziel-Position setzen
+      this.floorMesh!.position.x = targetX;
+      this.floorMesh!.position.z = targetZ;
+      this._floorTargetX = targetX;
+      this._floorTargetZ = targetZ;
+      this._updateFloorHeights();
     }
 
-    // Ziel bei Chunk-Wechsel aktualisieren
+    // Nur bei Chunk-Wechsel: snappen (kein Lerp!)
     if (
       playerChunkX !== this._lastFloorChunkX ||
       playerChunkZ !== this._lastFloorChunkZ
     ) {
-      // Aktuelle Position als Start für den Lerp merken
-      this._floorPosX = this.floorMesh!.position.x;
-      this._floorPosZ = this.floorMesh!.position.z;
-      this._floorTargetX = centerX;
-      this._floorTargetZ = centerZ;
+      this._floorTargetX = targetX;
+      this._floorTargetZ = targetZ;
+      this.floorMesh!.position.x = targetX;
+      this.floorMesh!.position.z = targetZ;
       this._lastFloorChunkX = playerChunkX;
       this._lastFloorChunkZ = playerChunkZ;
+
+      // Höhen sofort für die neue Position berechnen
+      this._updateFloorHeights();
     }
 
-    // ⚡ Performance: Nur jeden 2. Frame den Boden updaten.
-    // Lerp + Heights werden zusammen übersprungen, damit Position
-    // und Dünen-Höhen immer synchron bleiben (kein Wackeln).
+    // ⚡ Performance: Nur jeden 2. Frame die Höhen updaten.
+    // Snappen passiert nur bei Chunk-Wechsel, daher kein
+    // ständiges Lerp mehr nötig.
     this._floorFrameSkip++;
     if (this._floorFrameSkip >= 2) {
       this._floorFrameSkip = 0;
-
-      // Smooth lerp zur Ziel-Position
       if (this.floorMesh) {
-        this._floorPosX += (this._floorTargetX - this._floorPosX) * 0.08;
-        this._floorPosZ += (this._floorTargetZ - this._floorPosZ) * 0.08;
-        this.floorMesh.position.x = this._floorPosX;
-        this.floorMesh.position.z = this._floorPosZ;
-
-        // Vertex-Höhen an aktuelle Position anpassen (live, kein Neubau)
+        // Vertex-Höhen an aktuelle Position anpassen
         this._updateFloorHeights();
       }
     }
