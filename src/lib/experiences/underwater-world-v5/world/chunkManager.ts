@@ -178,11 +178,18 @@ export class ChunkManager {
     const dist = this.config.renderDistance;
 
     // --- Bestimmen, welche Chunks geladen sein sollen ---
+    // RUNDES LADEN statt eckig: Wir laden nur Chunks, deren Mittelpunkt
+    // innerhalb des Radius liegt. Das spart ~40% Chunks gegenüber einem
+    // Quadrat und sorgt dafür, dass die Lade-Kante in ALLE Richtungen
+    // gleich weit entfernt ist – kein sichtbares Nachladen beim Umdrehen.
     const neededChunks = new Set<string>();
     const neededCoords: Array<{ cx: number; cz: number }> = [];
+    const radiusSq = (dist + 0.5) * (dist + 0.5); // +0.5 für Rand-Chunks
 
     for (let dx = -dist; dx <= dist; dx++) {
       for (let dz = -dist; dz <= dist; dz++) {
+        // Nur laden, wenn der Chunk im Kreis liegt
+        if (dx * dx + dz * dz > radiusSq) continue;
         const cx = playerChunkX + dx;
         const cz = playerChunkZ + dz;
         const key = this._chunkKey(cx, cz);

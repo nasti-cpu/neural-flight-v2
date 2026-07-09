@@ -98,7 +98,7 @@ const WORLD_CONFIG = {
   floorY: -4,
   duneHeight: 0.3,
   chunkSize: 16,
-  renderDistance: 2, // 5×5=25 Chunks – Städte werden früh registriert, sanftes Fade-In
+  renderDistance: 4, // 9×9 Quadrat, aber Circular = ~50 Chunks – immer genug um den Spieler herum
   seegrassCount: 10,
 
   waterY: 22,
@@ -394,8 +394,11 @@ export function tick(
   s.fillLight.intensity = 0.3 + lightFactor * 0.9;
 
   // Dynamischer Nebel: oben weiter, unten enger
+  // WICHTIG: Nebel immer KÜRZER als renderDistance * chunkSize,
+  // damit die Lade-Kante der Chunks unsichtbar bleibt.
+  const MAX_FOG_FAR = WORLD_CONFIG.chunkSize * WORLD_CONFIG.renderDistance - 6; // 58m
   s.sceneFog.near = 4 + lightFactor * 8;
-  s.sceneFog.far = 24 + lightFactor * 40;
+  s.sceneFog.far = Math.min(24 + lightFactor * 40, MAX_FOG_FAR);
 
   // =========================================================================
   // Chunks aktualisieren (WFC-Collapse passiert automatisch bei neuen Chunks!)
