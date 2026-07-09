@@ -3,7 +3,9 @@
  * Partikel-System für Duftspuren zu den Blüten.
  * Jede Spur hat die Farbe der Ziel-Blüte.
  *
- * Nutzt THREE.Points mit per-vertex Farben → nur 1 Draw Call.
+ * Nutzt THREE.Sprite + SpriteMaterial (Points rendert map in WebGPU nicht).
+ * Reduzierte Partikelanzahl für Performance.
+ *
  * WebGPU-konform.
  */
 import * as THREE from "three/webgpu";
@@ -26,25 +28,10 @@ export interface PheromonVariant {
 
 export const VARIANTS: PheromonVariant[] = [
   {
-    name: "Leuchtpfad",
-    desc: "Dichter, schmaler Pfad aus hellen Partikeln",
-    particlesPerTrail: 40,
-    particleSize: 0.18,
-    opacity: 0.85,
-    trailLengthMin: 2.5,
-    trailLengthMax: 6,
-    windAmplitude: 0.25,
-    windFrequency: 3,
-    scatterWidth: 0.3,
-    scatterHeight: 0.15,
-    pulseSpeed: 1.5,
-    pulseAmount: 0.25,
-  },
-  {
     name: "Glühwürmchen",
     desc: "Große leuchtende Punkte, verstreut – Spur reicht 20–35m weit",
     particlesPerTrail: 12,
-    particleSize: 0.35,
+    particleSize: 0.5,
     opacity: 0.9,
     trailLengthMin: 20,
     trailLengthMax: 35,
@@ -54,51 +41,6 @@ export const VARIANTS: PheromonVariant[] = [
     scatterHeight: 0.3,
     pulseSpeed: 2.0,
     pulseAmount: 0.35,
-  },
-  {
-    name: "Funkelspur",
-    desc: "Viele feine helle Funken, schmal",
-    particlesPerTrail: 60,
-    particleSize: 0.08,
-    opacity: 0.75,
-    trailLengthMin: 3,
-    trailLengthMax: 7,
-    windAmplitude: 0.2,
-    windFrequency: 2,
-    scatterWidth: 0.2,
-    scatterHeight: 0.1,
-    pulseSpeed: 3.0,
-    pulseAmount: 0.4,
-  },
-  {
-    name: "Lichtstrahl",
-    desc: "Sehr dichter, gerader leuchtender Strahl",
-    particlesPerTrail: 30,
-    particleSize: 0.25,
-    opacity: 0.95,
-    trailLengthMin: 2,
-    trailLengthMax: 4,
-    windAmplitude: 0.1,
-    windFrequency: 1.5,
-    scatterWidth: 0.1,
-    scatterHeight: 0.05,
-    pulseSpeed: 1.0,
-    pulseAmount: 0.15,
-  },
-  {
-    name: "Schwebestaub",
-    desc: "Ganz feine Partikel, breit schwebend",
-    particlesPerTrail: 50,
-    particleSize: 0.06,
-    opacity: 0.5,
-    trailLengthMin: 3,
-    trailLengthMax: 8,
-    windAmplitude: 0.6,
-    windFrequency: 5,
-    scatterWidth: 1.0,
-    scatterHeight: 0.5,
-    pulseSpeed: 1.2,
-    pulseAmount: 0.2,
   },
 ];
 
@@ -142,11 +84,17 @@ function createGlowTexture(): THREE.CanvasTexture {
   return tex;
 }
 
+interface Trail {
+  sprites: THREE.Sprite[];
+  material: THREE.SpriteMaterial;
+  phase: number;
+}
+
 export class PheromoneSystem {
   readonly group = new THREE.Group();
-  private variantIndex = 1; // 1 = Glühwürmchen
+  private trails: Trail[] = [];
+  private variantIndex = 0; // 0 = Glühwürmchen
   private glowTexture: THREE.CanvasTexture;
-  private points: THREE.Points | null = null;
 
   constructor() {
     this.glowTexture = createGlowTexture();
@@ -161,8 +109,7 @@ export class PheromoneSystem {
   }
 
   get trailCount(): number {
-    if (!this.points) return 0;
-    return this.points.geometry.getAttribute("position").count;
+    return this.trails.length;
   }
 
   setVariant(index: number): void {
@@ -173,34 +120,11 @@ export class PheromoneSystem {
     flowers: FlowerTarget[],
     playerPosition: THREE.Vector3 = new THREE.Vector3(0, 2, 0),
   ): void {
-    this.clearPoints();
+    this.clearTrails();
     const v = VARIANTS[this.variantIndex];
-    const allPositions: number[] = [];
-    const allColors: number[] = [];
-
     for (let i = PHEROMON.EVERY_NTH_FLOWER - 1; i < flowers.length; i += PHEROMON.EVERY_NTH_FLOWER) {
-      this.collectTrailParticles(flowers[i], v, playerPosition, allPositions, allColors);
+      this.addTrail(flowers[i], v, playerPosition);
     }
-
-    if (allPositions.length === 0) return;
-
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(allPositions, 3));
-    geo.setAttribute("color", new THREE.Float32BufferAttribute(allColors, 3));
-
-    const mat = new THREE.PointsMaterial({
-      map: this.glowTexture,
-      transparent: true,
-      opacity: v.opacity,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      size: v.particleSize,
-      sizeAttenuation: true,
-      vertexColors: true,
-    });
-
-    this.points = new THREE.Points(geo, mat);
-    this.group.add(this.points);
   }
 
   rebuild(
@@ -210,21 +134,14 @@ export class PheromoneSystem {
     this.addTrails(flowers, playerPosition);
   }
 
-  update(elapsed: number): void {
-    if (!this.points) return;
-    const v = VARIANTS[this.variantIndex];
-    const pulse = 1 - v.pulseAmount + v.pulseAmount * Math.sin(elapsed * v.pulseSpeed);
-    (this.points.material as THREE.PointsMaterial).opacity = v.opacity * pulse;
-  }
-
-  private collectTrailParticles(
+  private addTrail(
     flower: FlowerTarget,
     v: PheromonVariant,
     playerPosition: THREE.Vector3,
-    outPos: number[],
-    outCol: number[],
   ): void {
     const count = v.particlesPerTrail;
+    const positions = new Float32Array(count * 3);
+
     const dirToPlayer = new THREE.Vector3().subVectors(playerPosition, flower.position);
     dirToPlayer.y = 0;
     dirToPlayer.normalize();
@@ -253,22 +170,17 @@ export class PheromoneSystem {
       curve.push(new THREE.Vector3(x, y, z));
     }
 
-    const saturated = maxSaturate(flower.color);
-    const cr = saturated.r;
-    const cg = saturated.g;
-    const cb = saturated.b;
-
     for (let i = 0; i < count; i++) {
       const t = Math.random();
       const idx = Math.floor(t * steps);
       const frac = t * steps - idx;
       const nextIdx = Math.min(idx + 1, steps);
+
       const p = new THREE.Vector3().lerpVectors(curve[idx], curve[nextIdx], frac);
 
-      const dir = new THREE.Vector3().subVectors(
-        curve[Math.min(idx + 2, steps)],
-        curve[Math.max(idx - 2, 0)],
-      ).normalize();
+      const dir = new THREE.Vector3()
+        .subVectors(curve[Math.min(idx + 2, steps)], curve[Math.max(idx - 2, 0)])
+        .normalize();
 
       const perp = new THREE.Vector3(-dir.z, 0, dir.x).normalize();
       const scatterFactor = t * (1 - t) * 4;
@@ -277,26 +189,56 @@ export class PheromoneSystem {
       const oh = (Math.random() - 0.5) * sw;
       const ov = (Math.random() - 0.5) * sh;
 
-      outPos.push(
-        p.x + perp.x * oh,
-        p.y + ov,
-        p.z + perp.z * oh,
-      );
-      outCol.push(cr, cg, cb);
+      positions[i * 3] = p.x + perp.x * oh;
+      positions[i * 3 + 1] = p.y + ov;
+      positions[i * 3 + 2] = p.z + perp.z * oh;
+    }
+
+    const material = new THREE.SpriteMaterial({
+      map: this.glowTexture,
+      color: maxSaturate(flower.color),
+      transparent: true,
+      opacity: v.opacity,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+
+    const sprites: THREE.Sprite[] = [];
+    for (let i = 0; i < count; i++) {
+      const sprite = new THREE.Sprite(material);
+      sprite.position.set(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
+      sprite.scale.set(v.particleSize, v.particleSize, 1);
+      this.group.add(sprite);
+      sprites.push(sprite);
+    }
+
+    this.trails.push({
+      sprites,
+      material,
+      phase: Math.random() * Math.PI * 2,
+    });
+  }
+
+  update(elapsed: number): void {
+    const v = VARIANTS[this.variantIndex];
+    for (const trail of this.trails) {
+      const pulse = 1 - v.pulseAmount + v.pulseAmount * Math.sin(elapsed * v.pulseSpeed + trail.phase);
+      trail.material.opacity = v.opacity * pulse;
     }
   }
 
-  private clearPoints(): void {
-    if (this.points) {
-      this.group.remove(this.points);
-      this.points.geometry.dispose();
-      (this.points.material as THREE.PointsMaterial).dispose();
-      this.points = null;
+  private clearTrails(): void {
+    for (const trail of this.trails) {
+      for (const sprite of trail.sprites) {
+        this.group.remove(sprite);
+      }
+      trail.material.dispose();
     }
+    this.trails = [];
   }
 
   dispose(): void {
-    this.clearPoints();
+    this.clearTrails();
     this.glowTexture.dispose();
   }
 }

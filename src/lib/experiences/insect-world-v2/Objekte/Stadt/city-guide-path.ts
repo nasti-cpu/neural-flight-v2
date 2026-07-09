@@ -1,9 +1,10 @@
 /**
  * insect-world-v2 — City Guide Path.
- * Ein leuchtender Neon-Pfad (gestrichelt, Glow-Punkte),
+ * Ein leuchtender Neon-Pfad (gestrichelt, Glow-Sprites),
  * der vom Startpunkt (0, 2, 0) zur Stadt führt und dem Gelände folgt.
  *
- * Nutzt THREE.Points statt einzelner Sprites → nur 1 Draw Call.
+ * Nutzt THREE.Sprite (nicht Points – Points rendert map in WebGPU nicht).
+ * Pfad auf 150m begrenzt (dahinter alles im Nebel).
  *
  * WebGPU-konform.
  */
@@ -15,13 +16,15 @@ const DASH_LENGTH = 1.2;
 const GAP_LENGTH = 0.6;
 const PATH_HEIGHT_MIN = 0.5;
 const PATH_HEIGHT_MAX = 1.8;
-const POINT_SIZE = 0.9;
+const SPRITE_SIZE_MIN = 0.6;
+const SPRITE_SIZE_MAX = 1.2;
+const SPRITES_PER_DASH = 3;
 
 export class CityGuidePath {
   readonly group = new THREE.Group();
   private active = false;
   private glowTexture: THREE.CanvasTexture;
-  private points: THREE.Points | null = null;
+  private phases: number[] = [];
 
   constructor() {
     this.glowTexture = this.createGlowTexture();
@@ -39,26 +42,29 @@ export class CityGuidePath {
       to = new THREE.Vector3().copy(from).add(_dir);
     }
 
-    const pts = this.buildCurve(from, to);
-    if (pts.length < 2) return;
+    const points = this.buildCurve(from, to);
+    if (points.length < 2) return;
 
-    this.buildPoints(pts);
+    this.buildGlowDashes(points);
     this.active = true;
   }
 
   clear(): void {
-    if (this.points) {
-      this.group.remove(this.points);
-      this.points.geometry.dispose();
-      this.points = null;
-    }
+    this.disposeSprites();
     this.active = false;
   }
 
   update(elapsed: number): void {
-    if (!this.active || !this.points) return;
-    const mat = this.points.material as THREE.PointsMaterial;
-    mat.opacity = 0.55 + 0.45 * Math.sin(elapsed * 1.8);
+    if (!this.active) return;
+
+    let idx = 0;
+    for (const child of this.group.children) {
+      if (child instanceof THREE.Sprite && child.material instanceof THREE.SpriteMaterial) {
+        const phase = this.phases[idx] ?? 0;
+        child.material.opacity = 0.55 + 0.45 * Math.sin(elapsed * 1.8 + phase);
+        idx++;
+      }
+    }
   }
 
   dispose(): void {
@@ -128,16 +134,26 @@ export class CityGuidePath {
     return pts;
   }
 
-  private buildPoints(pts: THREE.Vector3[]): void {
-    const curve = new THREE.CatmullRomCurve3(pts);
+  private buildGlowDashes(points: THREE.Vector3[]): void {
+    this.phases = [];
+
+    const curve = new THREE.CatmullRomCurve3(points);
     const totalLength = curve.getLength();
     const segmentLen = DASH_LENGTH + GAP_LENGTH;
     const numDashes = Math.max(1, Math.floor(totalLength / segmentLen));
 
-    const positions: number[] = [];
+    const mat = new THREE.SpriteMaterial({
+      map: this.glowTexture,
+      color: NEON_GLOW,
+      transparent: true,
+      opacity: 1.0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
 
     for (let d = 0; d < numDashes; d++) {
-      const dashMid = d * segmentLen + DASH_LENGTH / 2;
+      const dashStart = d * segmentLen;
+      const dashMid = dashStart + DASH_LENGTH / 2;
       const t = dashMid / totalLength;
       if (t > 1) break;
 
@@ -146,31 +162,37 @@ export class CityGuidePath {
       const groundY = getWorldHeight(p.x, p.z);
       p.y = groundY + (PATH_HEIGHT_MIN + PATH_HEIGHT_MAX) / 2;
 
-      // 3 Punkte pro Dash (einfach statt 3 Sprites)
-      for (let s = 0; s < 3; s++) {
-        const offset = ((s / 3) - 0.5) * DASH_LENGTH * 0.8;
-        p.x += tangent.x * offset;
-        p.y += tangent.y * offset;
-        p.z += tangent.z * offset;
-        positions.push(p.x, p.y, p.z);
+      for (let s = 0; s < SPRITES_PER_DASH; s++) {
+        const offset = ((s / SPRITES_PER_DASH) - 0.5) * DASH_LENGTH * 0.8;
+        const pos = new THREE.Vector3().copy(p);
+        pos.addScaledVector(tangent, offset);
+        pos.x += (Math.random() - 0.5) * 0.3;
+        pos.z += (Math.random() - 0.5) * 0.3;
+        pos.y += (Math.random() - 0.5) * 0.15;
+
+        const sprite = new THREE.Sprite(mat);
+        sprite.position.copy(pos);
+        const size = SPRITE_SIZE_MIN + Math.random() * (SPRITE_SIZE_MAX - SPRITE_SIZE_MIN);
+        sprite.scale.set(size, size, 1);
+
+        this.phases.push(Math.random() * Math.PI * 2);
+        this.group.add(sprite);
       }
     }
+  }
 
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-
-    const mat = new THREE.PointsMaterial({
-      map: this.glowTexture,
-      color: NEON_GLOW,
-      transparent: true,
-      opacity: 1.0,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      size: POINT_SIZE,
-      sizeAttenuation: true,
-    });
-
-    this.points = new THREE.Points(geo, mat);
-    this.group.add(this.points);
+  private disposeSprites(): void {
+    let disposed = false;
+    for (const child of this.group.children) {
+      if (child instanceof THREE.Sprite) {
+        if (!disposed) {
+          child.material.dispose();
+          disposed = true;
+        }
+        this.group.remove(child);
+      }
+    }
+    this.group.clear();
+    this.phases = [];
   }
 }

@@ -49,8 +49,8 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
       fieldSize: 60,
       grassCount: 20000,
       curvature: 0.0001,
-      color: "#6aaf4c",
-      groundColor: "#6aaf4c",
+      color: "#5a8a3c", // dunkler als Original (#6aaf4c) → kompensiert fehlende Lichtberechnung
+      groundColor: "#3a6028", // noch dunkler für Tiefen-Gradient (Schatten am Boden)
       minHeight: 0.6,
       maxHeight: 1.8,
       windStrength: 0.06,
