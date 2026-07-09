@@ -26,7 +26,7 @@ export function startBackgroundAudio(): {
 
     // Gain-Knoten für die Lautstärke (sehr leise, sanfte Atmo)
     const gainNode = audioCtx.createGain();
-    gainNode.gain.value = 0.12;
+    gainNode.gain.value = 0.35;
     gainNode.connect(audioCtx.destination);
 
     // Hier wird der decodierte Sound zwischengespeichert

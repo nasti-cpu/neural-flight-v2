@@ -213,8 +213,8 @@ export class FishWorld {
   /** Alle Fisch-Territorien, key = "chunkX,chunkZ" */
   private _territories: Map<string, FishTerritory> = new Map();
 
-  /** Abstand, ab dem Fische um eine Stadt kreisen */
-  private static readonly CITY_ATTRACTION_DIST = 35;
+  /** Abstand, ab dem Fische um eine Stadt kreisen – DEAKTIVIERT */
+  private static readonly CITY_ATTRACTION_DIST = 0;
   /** Maximale Distanz zum Spieler, bevor ein Territorium entladen wird */
   private static readonly UNLOAD_DIST = 90;
   /** Distanz, ab der Fische anfangen durchzublenden (Nebel-Effekt) */
@@ -745,20 +745,20 @@ export class FishWorld {
         const zx = pos.x - zone.centerX;
         const zz = pos.z - zone.centerZ;
         const zDistSq = zx * zx + zz * zz;
-        // Früher und sanfter eingreifen: 12m Abstand zur Kuppel
-        const effectRadius = zone.radius + 12.0;
+        // Weiter und stärker eingreifen: 20m Abstand zur Kuppel
+        const effectRadius = zone.radius + 20.0;
         if (zDistSq < effectRadius * effectRadius && zDistSq > 0.01) {
           const zDist = Math.sqrt(zDistSq);
           // Sanfter Push: linear von 0 am Rand bis 4.0 nah an der Kuppel
           const overlap = 1 - zDist / effectRadius;
-          const push = overlap * overlap * 8.0; // Quadratisch = sanfter Einstieg
+          const push = overlap * overlap * 20.0; // Quadratisch = sanfter Einstieg, stark genug zum Fernhalten
           targetPushX += (zx / zDist) * push;
           targetPushZ += (zz / zDist) * push;
         }
       }
     }
     // Smooth Lerp für den Push (kein Instant-Switch)
-    const pushLerp = 1 - Math.exp(-2.0 * dt);
+    const pushLerp = 1 - Math.exp(-4.0 * dt);
     fish.pushAccumX += (targetPushX - fish.pushAccumX) * pushLerp;
     fish.pushAccumZ += (targetPushZ - fish.pushAccumZ) * pushLerp;
     if (targetPushX === 0 && targetPushZ === 0) {
@@ -770,24 +770,9 @@ export class FishWorld {
     fish.vx += fish.pushAccumX * dt;
     fish.vz += fish.pushAccumZ * dt;
 
-    // ═══ 5. Stadt-Orbit: Um die Kuppel kreisen ═══
-    if (this._exclusionZones.length > 0) {
-      for (const zone of this._exclusionZones) {
-        const dx = pos.x - zone.centerX;
-        const dz = pos.z - zone.centerZ;
-        const distSq = dx * dx + dz * dz;
-        const attractionRadius = zone.radius + FishWorld.CITY_ATTRACTION_DIST;
-        if (distSq < attractionRadius * attractionRadius) {
-          const orbitRadius = zone.radius + 22;
-          const orbitSpeed = 0.08 + ((fish.wanderPhase * 0.5) % 0.08);
-          const orbitAngle = elapsed * orbitSpeed + fish.wanderPhase;
-          tX = zone.centerX + Math.cos(orbitAngle) * orbitRadius;
-          tZ = zone.centerZ + Math.sin(orbitAngle) * orbitRadius;
-          break;
-        }
-      }
-    }
-
+    // ═══ 5. (kein Stadt-Orbit mehr – Fische sollen der Kuppel
+    //    nicht folgen, sondern einen Bogen um sie herum machen)
+    //    Der Exclusion-Push in Schritt 4 reicht dafür aus.
     // ═══ 6. Steering zum Target ═══
     const tdx = tX - pos.x;
     const tdz = tZ - pos.z;
@@ -853,49 +838,22 @@ export class FishWorld {
     const dt = Math.min(delta, 0.05);
     const wp = school.wanderPhase;
 
-    // ═══ 1. Prüfen ob die Schule in der Nähe einer Stadt ist → Orbit ═══
-    let orbitTargetX: number | null = null;
-    let orbitTargetZ: number | null = null;
+    // ═══ 1. Wander-Target: um das feste Schul-Zentrum (welt-fixiert) ═══
+    const wr = school.wanderRange;
+    const targetX = school.centerX
+      + Math.sin(elapsed * 0.05 + wp) * wr * 0.5
+      + Math.sin(elapsed * 0.11 + wp * 1.7) * wr * 0.15;
+    const targetZ = school.centerZ
+      + Math.cos(elapsed * 0.04 + wp * 1.3) * wr * 0.5
+      + Math.cos(elapsed * 0.09 + wp * 0.7) * wr * 0.15;
+
+    // ═══ 2. Schul-Zentrum folgt dem Target mit Trägheit ═══
+    const followRate = 1 - Math.exp(-0.5 * school.lagFactor * dt);
+    school.centerX += (targetX - school.centerX) * followRate;
+    school.centerZ += (targetZ - school.centerZ) * followRate;
+
+    // ═══ 3. Exklusionszonen: Sanfter, kontinuierlicher Push ═══
     if (this._exclusionZones.length > 0) {
-      for (const zone of this._exclusionZones) {
-        const dx = school.centerX - zone.centerX;
-        const dz = school.centerZ - zone.centerZ;
-        const distSq = dx * dx + dz * dz;
-        const attractionRadius = zone.radius + FishWorld.CITY_ATTRACTION_DIST;
-        if (distSq < attractionRadius * attractionRadius) {
-          const orbitRadius = zone.radius + 22;
-          const orbitSpeed = 0.06 + ((wp * 0.3) % 0.06);
-          const orbitAngle = elapsed * orbitSpeed + wp;
-          orbitTargetX = zone.centerX + Math.cos(orbitAngle) * orbitRadius;
-          orbitTargetZ = zone.centerZ + Math.sin(orbitAngle) * orbitRadius;
-          break;
-        }
-      }
-    }
-
-    if (orbitTargetX !== null && orbitTargetZ !== null) {
-      // ═══ 1b. Stadt-Orbit: Schule kreist um die Kuppel ═══
-      const followRate = 1 - Math.exp(-0.8 * dt);
-      school.centerX += (orbitTargetX - school.centerX) * followRate;
-      school.centerZ += (orbitTargetZ - school.centerZ) * followRate;
-    } else {
-      // ═══ 1c. Wander-Target: um das feste Schul-Zentrum (welt-fixiert) ═══
-      const wr = school.wanderRange;
-      const targetX = school.centerX
-        + Math.sin(elapsed * 0.05 + wp) * wr * 0.5
-        + Math.sin(elapsed * 0.11 + wp * 1.7) * wr * 0.15;
-      const targetZ = school.centerZ
-        + Math.cos(elapsed * 0.04 + wp * 1.3) * wr * 0.5
-        + Math.cos(elapsed * 0.09 + wp * 0.7) * wr * 0.15;
-
-      // ═══ 2. Schul-Zentrum folgt dem Target mit Trägheit ═══
-      const followRate = 1 - Math.exp(-0.5 * school.lagFactor * dt);
-      school.centerX += (targetX - school.centerX) * followRate;
-      school.centerZ += (targetZ - school.centerZ) * followRate;
-    }
-
-    // ═══ 3. Exklusionszonen: Sanfter, kontinuierlicher Push (nie über 0.5m/Frame) ═══
-    if (this._exclusionZones.length > 0 && orbitTargetX === null) {
       for (const zone of this._exclusionZones) {
         const dx = school.centerX - zone.centerX;
         const dz = school.centerZ - zone.centerZ;
@@ -911,7 +869,7 @@ export class FishWorld {
         }
       }
     }
-    // Zusätzlicher Push AUCH bei Orbit (damit Schulen nicht in die Kuppel treiben)
+    // Zusätzlicher Push: nah an der Kuppel extra stark abstoßen
     if (this._exclusionZones.length > 0) {
       for (const zone of this._exclusionZones) {
         const dx = school.centerX - zone.centerX;
@@ -927,9 +885,9 @@ export class FishWorld {
       }
     }
 
-    // ═══ 4. Basis-Yaw aus Richtung zum Target/Orbit-Ziel ═══
-    const yawTargetX = orbitTargetX !== null ? orbitTargetX : school.centerX + Math.sin(elapsed * 0.05 + wp) * school.wanderRange * 0.5;
-    const yawTargetZ = orbitTargetZ !== null ? orbitTargetZ : school.centerZ + Math.cos(elapsed * 0.04 + wp * 1.3) * school.wanderRange * 0.5;
+    // ═══ 4. Basis-Yaw aus Richtung zum Wander-Target ═══
+    const yawTargetX = school.centerX + Math.sin(elapsed * 0.05 + wp) * school.wanderRange * 0.5;
+    const yawTargetZ = school.centerZ + Math.cos(elapsed * 0.04 + wp * 1.3) * school.wanderRange * 0.5;
     const dirToTargetX = yawTargetX - school.centerX;
     const dirToTargetZ = yawTargetZ - school.centerZ;
     const baseYaw = Math.atan2(dirToTargetX, dirToTargetZ);
