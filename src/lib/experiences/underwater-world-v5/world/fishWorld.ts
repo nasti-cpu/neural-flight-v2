@@ -63,104 +63,47 @@ const DEFAULT_FISH_CONFIG: FishWorldConfig = {
 };
 
 // ---------------------------------------------------------------------------
-// Orbit-Layer-Definitionen
+// Territorium: Eine Gruppe Fische an einem FISCH-Chunk
 // ---------------------------------------------------------------------------
 
-/**
- * Ein Orbit-Layer definiert einen konzentrischen Ring um den Spieler.
- * Jeder Layer hat eigene Radien, Höhen, Geschwindigkeiten und Anzahl Fische.
- * So entsteht ein räumlich gestaffeltes, natürliches Schwimmbild.
- */
-interface OrbitLayerDef {
-  minRadius: number;
-  maxRadius: number;
-  minYOffset: number;
-  maxYOffset: number;
-  minSpeed: number;
-  maxSpeed: number;
-  soloCount: number;
-  schoolCount: number;
-  schoolSize: number;
-  scaleMin: number;
-  scaleMax: number;
+/** Ein Fisch-Territorium = alle Fische eines FISCH-Chunks (Welt-Position) */
+interface FishTerritory {
+  chunkX: number;
+  chunkZ: number;
+  centerX: number;
+  centerZ: number;
+  soloFishes: SoloFish[];
+  schools: FishSchool[];
 }
 
-const ORBIT_LAYERS: OrbitLayerDef[] = [
-  {
-    // Layer 0: Nah (10-16m) – kleine Einzelfische
-    minRadius: 10, maxRadius: 16,
-    minYOffset: -2, maxYOffset: 1.5,
-    minSpeed: 0.12, maxSpeed: 0.22,
-    soloCount: 4, schoolCount: 0, schoolSize: 0,
-    scaleMin: 0.8, scaleMax: 1.3,
-  },
-  {
-    // Layer 1: Mittel (22-32m) – Einzelfische + kleine Schule
-    minRadius: 22, maxRadius: 32,
-    minYOffset: -4.5, maxYOffset: 0.5,
-    minSpeed: 0.09, maxSpeed: 0.18,
-    soloCount: 5, schoolCount: 1, schoolSize: 6,
-    scaleMin: 1.0, scaleMax: 1.6,
-  },
-  {
-    // Layer 2: Fern (38-50m) – wenige Einzelfische + größere Schule
-    minRadius: 38, maxRadius: 50,
-    minYOffset: -6, maxYOffset: -1,
-    minSpeed: 0.07, maxSpeed: 0.14,
-    soloCount: 3, schoolCount: 1, schoolSize: 10,
-    scaleMin: 1.3, scaleMax: 1.9,
-  },
-  {
-    // Layer 3: Tief/Fern (55-72m) – große Fische + größte Schule
-    minRadius: 55, maxRadius: 72,
-    minYOffset: -8, maxYOffset: -3,
-    minSpeed: 0.05, maxSpeed: 0.11,
-    soloCount: 2, schoolCount: 1, schoolSize: 14,
-    scaleMin: 1.6, scaleMax: 2.3,
-  },
-];
-
 // ---------------------------------------------------------------------------
-// Wander-Steering-Parameter eines Einzelfisches
+// Wander-Steering-Parameter eines Einzelfisches (welt-fixiert)
 // ---------------------------------------------------------------------------
 
 /**
- * Jeder Solo-Fisch schwimmt mit "Wander Steering":
- * Ein Zielpunkt (wanderTarget) wird zufällig innerhalb eines Ringbereichs
- * (minDist/maxDist um das gelatchte Player-Zentrum) gesetzt. Der Fisch
- * steuert sanft darauf zu. Wenn das Ziel erreicht ist oder nach einer
- * zufälligen Zeit wird ein neues Ziel gewählt.
- *
- * Vorteile gegenüber Orbit:
- * - Keine perfekten Ellipsen → natürlich wirkende Bahnen
- * - Exklusionszonen werden über Velocity-Repulsion gemieden (kein Ruckeln)
- * - Fische verteilen sich organisch im Raum
+ * Jeder Solo-Fisch schwimmt mit "Wander Steering" um seine Heimat-Position.
+ * homeX/homeZ = fixe Welt-Position (Mitte des Territoriums + Offset).
+ * wanderRadius = Radius, in dem der Fisch um sein Zuhause streift.
  */
 interface SoloFishParams {
-  layerIndex: number;
-
-  /** Mindestabstand zum Zentrum (für Zentrierung, keine harte Grenze) */
-  minDist: number;
-  /** Abstand, ab dem die Zentrierung sanft eingreift */
-  maxDist: number;
+  /** Heimat-Position (Welt-Koordinaten) – der Fisch bleibt in der Nähe */
+  homeX: number;
+  homeZ: number;
+  /** Radius, in dem der Fisch um homeX/homeZ wandert (25–35 m) */
+  wanderRadius: number;
   /** Maximale Schwimm-Geschwindigkeit (Einheiten/s) */
   speed: number;
-  /** Wie schnell der Fisch die Richtung ändert (0.1=elegant, 3.0=hektisch) */
+  /** Wie schnell der Fisch die Richtung ändert (0.3=elegant, 3.0=hektisch) */
   agility: number;
 
   // === ⚡ Geschwindigkeits-Modulation (Sinus-Bursts) ===
   speedModAmp: number;
   speedModFreq: number;
 
-  // === Höhen-Varianz ===
+  // === Höhen-Varianz (relativ zur Spieler-Höhe, für Tiefenstaffelung) ===
   yOffset: number;
   yAmp: number;
   yFreq: number;
-
-  // === Kamera-Folge (Zentrum des Wander-Rings) ===
-  lagFactor: number;
-  centerX: number;
-  centerZ: number;
 
   // === Schwimm-Animation (Yaw/Pitch/Roll, Burst) ===
   swim: SwimParams;
@@ -259,18 +202,22 @@ export class FishWorld {
   private config: FishWorldConfig;
   private loader: GLTFLoader;
 
-  // Einzelfische
-  private soloFishes: SoloFish[] = [];
+  /** Modell-Template (wird in init() geladen) */
   private fishModelTemplate: THREE.Group | null = null;
-
-  // Schwärme
-  private activeSchools: FishSchool[] = [];
+  /** Mesh für Instanced Schools */
   private schoolFishMesh: THREE.Mesh | null = null;
 
-  /** Abstand, ab dem Fische zurÃ¼ck zum Spieler teleportiert werden */
-  private static readonly RESPAWN_DIST = 65;
+  /** Alle Fisch-Territorien, key = "chunkX,chunkZ" */
+  private _territories: Map<string, FishTerritory> = new Map();
+
   /** Abstand, ab dem Fische um eine Stadt kreisen */
   private static readonly CITY_ATTRACTION_DIST = 35;
+  /** Maximale Distanz zum Spieler, bevor ein Territorium entladen wird */
+  private static readonly UNLOAD_DIST = 90;
+  /** Distanz, ab der Fische anfangen durchzublenden (Nebel-Effekt) */
+  private static readonly FADE_START = 50;
+  /** Distanz, bei der Fische vollständig unsichtbar sind */
+  private static readonly FADE_END = 75;
 
   // Exklusionszonen (Stadtkuppeln)
   private _exclusionZones: ExclusionZone[] = [];
@@ -329,42 +276,7 @@ export class FishWorld {
       return;
     }
 
-    // Skalierung berechnen
-    const box = new THREE.Box3().setFromObject(this.fishModelTemplate);
-    const size = new THREE.Vector3();
-    box.getSize(size);
-    const maxDim = Math.max(size.x, size.y, size.z);
-
-    const startPos = cameraPos ?? new THREE.Vector3(0, 4, 0);
-
-    // --- Einzelfische pro Layer anlegen ---
-    let soloIdx = 0;
-    for (let l = 0; l < ORBIT_LAYERS.length; l++) {
-      const layer = ORBIT_LAYERS[l];
-      const count = layer.soloCount;
-      for (let i = 0; i < count && soloIdx < this.config.soloCount; i++) {
-        const params = this._createSoloParams(l, startPos);
-        const scale = this._randomBetween(layer.scaleMin, layer.scaleMax) / maxDim;
-        const fish = this._createSoloFish(params, scale, startPos);
-        this.soloFishes.push(fish);
-        soloIdx++;
-      }
-    }
-
-    // Falls noch Slots frei sind (soloCount > Summe Layer), mit Layer 3 auffüllen
-    while (soloIdx < this.config.soloCount) {
-      const lastLayer = ORBIT_LAYERS.length - 1;
-      const params = this._createSoloParams(lastLayer, startPos);
-      const scale = this._randomBetween(
-        ORBIT_LAYERS[lastLayer].scaleMin,
-        ORBIT_LAYERS[lastLayer].scaleMax,
-      ) / maxDim;
-      const fish = this._createSoloFish(params, scale, startPos);
-      this.soloFishes.push(fish);
-      soloIdx++;
-    }
-
-    // --- Schwarm-Mesh extrahieren ---
+    // Schwarm-Mesh aus dem Template extrahieren
     const clone = this.fishModelTemplate.clone(true);
     this.scene.add(clone);
     let foundMesh: THREE.Mesh | null = null;
@@ -377,21 +289,7 @@ export class FishWorld {
       this.schoolFishMesh = foundMesh;
     }
 
-    // --- Schwärme pro Layer anlegen (persistent!) ---
-    if (this.schoolFishMesh) {
-      for (let l = 0; l < ORBIT_LAYERS.length; l++) {
-        const layer = ORBIT_LAYERS[l];
-        for (let s = 0; s < layer.schoolCount; s++) {
-          const school = this._createSchool(l, startPos, maxDim);
-          this.activeSchools.push(school);
-        }
-      }
-    }
-
-    console.log(
-      `🐟 FishWorld bereit: ${this.soloFishes.length} Einzelfische, ` +
-      `${this.activeSchools.length} Schwärme`,
-    );
+    console.log("🐟 FishWorld bereit – wartet auf FISCH-Chunks vom WFC");
   }
 
   // -----------------------------------------------------------------------
@@ -404,15 +302,17 @@ export class FishWorld {
     cameraPos: THREE.Vector3,
     additionalTargets?: EchoTarget[],
   ): void {
-    this._updateOrbitCenters(delta, elapsed, cameraPos);
+    this._manageTerritoryLifecycle(cameraPos);
 
-    // Einzelfische aktualisieren
-    for (const fish of this.soloFishes) {
-      this._updateSoloFish(fish, delta, elapsed, cameraPos);
+    // Alle Fische in allen Territorien aktualisieren
+    for (const [, territory] of this._territories) {
+      for (const fish of territory.soloFishes) {
+        this._updateSoloFish(fish, delta, elapsed, cameraPos);
+      }
+      for (const school of territory.schools) {
+        this._updateSchool(school, delta, elapsed, cameraPos);
+      }
     }
-
-    // Schwärme aktualisieren
-    this._updateSchools(delta, elapsed, cameraPos);
 
     // Echoortung
     this._updateEcholocation(delta, elapsed, cameraPos, additionalTargets);
@@ -424,10 +324,14 @@ export class FishWorld {
 
   /**
    * Wird vom ChunkManager/Scene aufgerufen, wenn ein FISCH-Chunk kollabiert.
-   * Erzeugt 2-3 Einzelfische + 1 Schule an dieser Position.
+   * Erzeugt ein Territorium mit 4-6 Einzelfischen + 1 Schule.
+   * Alle Fische haben ihre Heimat in diesem Chunk (Welt-Position).
    */
   public registerFishAtChunk(cx: number, cz: number): void {
     if (!this.fishModelTemplate || !this.schoolFishMesh) return;
+    const key = `${cx},${cz}`;
+    if (this._territories.has(key)) return;
+
     const cs = 16;
     const worldX = cx * cs + cs / 2;
     const worldZ = cz * cs + cs / 2;
@@ -436,29 +340,32 @@ export class FishWorld {
     const size = new THREE.Vector3();
     box.getSize(size);
     const maxDim = Math.max(size.x, size.y, size.z);
+    const scale = (0.8 + Math.random() * 1.5) / maxDim;
 
-    // 2-3 Einzelfische
-    const count = 2 + Math.floor(Math.random() * 2);
+    const soloFishes: SoloFish[] = [];
+    const count = 6 + Math.floor(Math.random() * 5); // 6-10 Fische
     for (let i = 0; i < count; i++) {
-      const layerIdx = Math.floor(Math.random() * ORBIT_LAYERS.length);
-      const layer = ORBIT_LAYERS[layerIdx];
-      const params = this._createSoloParams(layerIdx, new THREE.Vector3(worldX, 0, worldZ));
-      params.centerX = worldX + (Math.random() - 0.5) * 10;
-      params.centerZ = worldZ + (Math.random() - 0.5) * 10;
-      const scale = this._randomBetween(layer.scaleMin, layer.scaleMax) / maxDim;
-      const fish = this._createSoloFish(params, scale, new THREE.Vector3(worldX, 0, worldZ));
-      this.soloFishes.push(fish);
+      // Jeder Fisch hat sein eigenes "Zuhause" im Territorium
+      const homeX = worldX + (Math.random() - 0.5) * 12;
+      const homeZ = worldZ + (Math.random() - 0.5) * 12;
+      const params = this._createSoloParams(homeX, homeZ);
+      const fish = this._createSoloFish(params, scale, homeX, homeZ);
+      soloFishes.push(fish);
     }
 
     // 1 Schule
     const school = this._createSchool(
-      Math.floor(Math.random() * ORBIT_LAYERS.length),
-      new THREE.Vector3(worldX, 0, worldZ),
-      maxDim,
+      worldX, worldZ, scale,
     );
-    school.centerX = worldX;
-    school.centerZ = worldZ;
-    this.activeSchools.push(school);
+
+    const territory: FishTerritory = {
+      chunkX: cx, chunkZ: cz,
+      centerX: worldX, centerZ: worldZ,
+      soloFishes,
+      schools: [school],
+    };
+
+    this._territories.set(key, territory);
   }
 
   // -----------------------------------------------------------------------
@@ -474,28 +381,10 @@ export class FishWorld {
   // -----------------------------------------------------------------------
 
   dispose(): void {
-    for (const fish of this.soloFishes) {
-      this.scene.remove(fish.mesh);
-      fish.mesh.traverse((ch) => {
-        if (ch instanceof THREE.Mesh) {
-          ch.geometry?.dispose();
-          if (ch.material) {
-            const mats = Array.isArray(ch.material)
-              ? ch.material
-              : [ch.material];
-            for (const m of mats) m.dispose();
-          }
-        }
-      });
+    for (const [, territory] of this._territories) {
+      this._unloadTerritory(territory);
     }
-    this.soloFishes.length = 0;
-
-    for (const school of this.activeSchools) {
-      this.scene.remove(school.instances);
-      school.instances.dispose();
-    }
-    this.activeSchools.length = 0;
-
+    this._territories.clear();
     this.fishModelTemplate = null;
     this.schoolFishMesh = null;
 
@@ -542,58 +431,33 @@ export class FishWorld {
   }
 
   // -----------------------------------------------------------------------
-  // Private: Orbit-Parameter erzeugen
+  // Private: Solo-Fisch-Parameter erzeugen (welt-fixiert)
   // -----------------------------------------------------------------------
 
   /**
-   * Erzeugt Wander-Parameter für einen Einzelfisch.
-   * Fische werden im Wander-Ring (minDist–maxDist) gleichmäßig verteilt
-   * initial positioniert und erhalten individuelle Geschwindigkeiten + Agilität.
+   * Erzeugt Wander-Parameter für einen Einzelfisch mit fixer Heimat-Position.
+   * Der Fisch wandert in einem Radius von 25–35 m um homeX/homeZ.
    */
   private _createSoloParams(
-    layerIndex: number,
-    startPos: THREE.Vector3,
+    homeX: number, homeZ: number,
   ): SoloFishParams {
-    const layer = ORBIT_LAYERS[layerIndex];
     const rand = Math.random;
+    const yOff = this._randomBetween(-5, 2);
     return {
-      layerIndex,
-      minDist: layer.minRadius,
-      maxDist: layer.maxRadius,
-      speed: this._randomBetween(0.3, 0.8),
+      homeX,
+      homeZ,
+      // 8-24m = ~0.5-1.5 Chunks – Fisch bleibt in der Nähe seines
+      // Territoriums, kann aber in benachbarte Chunks schwimmen
+      wanderRadius: 8 + rand() * 16,
+      speed: this._randomBetween(0.5, 1.2),
       agility: 0.3 + rand() * 1.2,
       speedModAmp: 0.10 + rand() * 0.20,
       speedModFreq: 0.04 + rand() * 0.10,
-      yOffset: this._randomBetween(layer.minYOffset, layer.maxYOffset),
+      yOffset: yOff,
       yAmp: 0.3 + rand() * 1.2,
       yFreq: 0.04 + rand() * 0.10,
-      lagFactor: 0.6 + rand() * 1.2,
-      centerX: startPos.x,
-      centerZ: startPos.z,
       swim: createSwimParams(),
     };
-  }
-
-  /**
-   * Zufällige Startposition im Ring, außerhalb aller Exklusionszonen.
-   * (Nur für initiale Platzierung; das Laufzeit-Steering nutzt
-   * Reynolds Wander, keine harten Weltraum-Targets.)
-   */
-  private _randomWanderTarget(
-    centerX: number, centerZ: number,
-    minDist: number, maxDist: number,
-  ): { x: number; z: number } {
-    for (let attempt = 0; attempt < 8; attempt++) {
-      const angle = Math.random() * Math.PI * 2;
-      const dist = this._randomBetween(minDist, maxDist);
-      const x = centerX + Math.cos(angle) * dist;
-      const z = centerZ + Math.sin(angle) * dist;
-      if (!this._isInExclusionZone(x, z, 2.0)) {
-        return { x, z };
-      }
-    }
-    // Fallback: Zentrum selbst (wird durch center-Push auch außerhalb der Zone sein)
-    return { x: centerX, z: centerZ };
   }
 
   // -----------------------------------------------------------------------
@@ -601,7 +465,7 @@ export class FishWorld {
   // -----------------------------------------------------------------------
 
   private _createSoloFish(
-    params: SoloFishParams, scale: number, startPos: THREE.Vector3,
+    params: SoloFishParams, scale: number, homeX: number, homeZ: number,
   ): SoloFish {
     const mesh = this.fishModelTemplate!.clone(true);
     mesh.scale.setScalar(scale);
@@ -626,11 +490,14 @@ export class FishWorld {
 
     const state = createSwimState(0);
 
-    // Initiale Position: zufällig im Wander-Ring
-    const initTarget = this._randomWanderTarget(
-      startPos.x, startPos.z, params.minDist, params.maxDist,
+    // Startposition nahe der Heimat
+    const startAngle = Math.random() * Math.PI * 2;
+    const startDist = Math.random() * 8;
+    mesh.position.set(
+      homeX + Math.cos(startAngle) * startDist,
+      (mesh.position.y || 4) + params.yOffset,
+      homeZ + Math.sin(startAngle) * startDist,
     );
-    mesh.position.set(initTarget.x, startPos.y + params.yOffset, initTarget.z);
 
     // Zufällige Anfangs-Velocity
     const initAngle = Math.random() * Math.PI * 2;
@@ -667,10 +534,9 @@ export class FishWorld {
   // -----------------------------------------------------------------------
 
   private _createSchool(
-    layerIndex: number, startPos: THREE.Vector3, maxDim: number,
+    homeX: number, homeZ: number, scale: number,
   ): FishSchool {
-    const layer = ORBIT_LAYERS[layerIndex];
-    const schoolSize = layer.schoolSize;
+    const schoolSize = 6 + Math.floor(Math.random() * 6); // 6–12 Fische
 
     // InstancedMesh
     const mat = (
@@ -687,21 +553,17 @@ export class FishWorld {
     instances.frustumCulled = false;
     this.scene.add(instances);
 
-    const scale = this._randomBetween(layer.scaleMin, layer.scaleMax) / maxDim;
-
-    // Persistente lokale Offsets für jeden Fisch im Schwarm
-    // Jeder Fisch hat einen zufälligen Abstand und Winkel zum Schul-Zentrum.
-    // Der Winkel rotiert langsam – so entsteht eine natürliche, lockere Schul-Formation.
+    // Persistente lokale Offsets
     const fishOffsets: SchoolFishOffsets[] = [];
     for (let j = 0; j < schoolSize; j++) {
       const angle = Math.random() * Math.PI * 2;
-      const dist = 1.0 + Math.random() * 5.0; // 1–6m vom Zentrum
+      const dist = 1.0 + Math.random() * 5.0;
       fishOffsets.push({
         dist,
         angle,
         ly: (Math.random() - 0.5) * 2.0,
         phase: Math.random() * Math.PI * 2,
-        speedFactor: 0.5 + Math.random() * 1.0, // 0.5–1.5 = breite Streuung
+        speedFactor: 0.5 + Math.random() * 1.0,
       });
     }
 
@@ -712,11 +574,11 @@ export class FishWorld {
       schoolId,
       fishOffsets,
       wanderPhase: Math.random() * Math.PI * 2,
-      wanderRange: 8 + Math.random() * 8, // 8–16m
+      wanderRange: 20 + Math.random() * 15, // 20–35m
       lagFactor: 0.5 + Math.random() * 1.0,
-      centerX: startPos.x,
-      centerZ: startPos.z,
-      yOffset: this._randomBetween(layer.minYOffset, layer.maxYOffset),
+      centerX: homeX,
+      centerZ: homeZ,
+      yOffset: this._randomBetween(-5, 2),
       yAmp: 0.2 + Math.random() * 1.0,
       yFreq: 0.04 + Math.random() * 0.08,
       glowIntensity: 0,
@@ -733,33 +595,77 @@ export class FishWorld {
   }
 
   // -----------------------------------------------------------------------
-  // Private: Orbit-Zentren sanft zur Spieler-Position führen
+  // Private: Territorium-Lebenszyklus (laden/entladen basierend auf Distanz)
   // -----------------------------------------------------------------------
 
   /**
-   * Fische sind NICHT mehr an den Spieler gebunden. Ihre Zentren
-   * bleiben auf ihrer ursprünglichen Welt-Position.
-   * Nur wenn ein Fisch > 65m vom Spieler entfernt ist, wird er
-   * in die Blickrichtung des Spielers vorgeholt ("Respawn").
-   * Das simuliert natürlich wirkende Fische, die von Chunk zu Chunk
-   * schwimmen, ohne den Spieler zu verfolgen.
+   * Entlädt Territorien, die zu weit vom Spieler entfernt sind
+   * und wendet Distanz-basierte Opazität an (Fade im Nebel).
    */
-  private _updateOrbitCenters(
-    delta: number, elapsed: number, cameraPos: THREE.Vector3,
-  ): void {
-    const cs = 16;
-    for (const fish of this.soloFishes) {
-      const p = fish.params;
-      const dx = p.centerX - cameraPos.x;
-      const dz = p.centerZ - cameraPos.z;
-      if (dx * dx + dz * dz > FishWorld.RESPAWN_DIST * FishWorld.RESPAWN_DIST) {
-        // Neues Zentrum: zufällig in Blickrichtung + seitlichem Offset
-        const angle = Math.atan2(cameraPos.x - p.centerX, cameraPos.z - p.centerZ);
-        const spawnDist = 15 + Math.random() * 25;
-        const spreadAngle = (Math.random() - 0.5) * Math.PI * 1.5;
-        p.centerX = cameraPos.x + Math.sin(angle + spreadAngle) * spawnDist;
-        p.centerZ = cameraPos.z + Math.cos(angle + spreadAngle) * spawnDist;
+  private _manageTerritoryLifecycle(cameraPos: THREE.Vector3): void {
+    for (const [key, territory] of this._territories) {
+      const dx = territory.centerX - cameraPos.x;
+      const dz = territory.centerZ - cameraPos.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+
+      if (dist > FishWorld.UNLOAD_DIST) {
+        // ★ Zu weit → Territorium entladen
+        this._unloadTerritory(territory);
+        this._territories.delete(key);
+        continue;
       }
+
+      // ★ Fade im Nebel (50-75m: Fisch wird langsam unsichtbar)
+      let opacity = 1.0;
+      if (dist > FishWorld.FADE_START) {
+        const fadeRange = FishWorld.FADE_END - FishWorld.FADE_START;
+        opacity = Math.max(0, 1.0 - (dist - FishWorld.FADE_START) / fadeRange);
+      }
+      this._applyTerritoryOpacity(territory, opacity);
+    }
+  }
+
+  /**
+   * Wendet Opazität auf alle Fische eines Territoriums an.
+   */
+  private _applyTerritoryOpacity(territory: FishTerritory, opacity: number): void {
+    for (const fish of territory.soloFishes) {
+      fish.mesh.traverse((ch) => {
+        if (ch instanceof THREE.Mesh && ch.material) {
+          const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
+          for (const m of mats) {
+            if (!m.transparent) m.transparent = true;
+            m.opacity = opacity;
+          }
+        }
+      });
+    }
+    for (const school of territory.schools) {
+      const mat = school.instances.material as THREE.MeshStandardMaterial;
+      if (!mat.transparent) mat.transparent = true;
+      mat.opacity = opacity;
+    }
+  }
+
+  /**
+   * Entlädt ein Territorium (entfernt alle Meshes, gibt Speicher frei).
+   */
+  private _unloadTerritory(territory: FishTerritory): void {
+    for (const fish of territory.soloFishes) {
+      this.scene.remove(fish.mesh);
+      fish.mesh.traverse((ch) => {
+        if (ch instanceof THREE.Mesh) {
+          ch.geometry?.dispose();
+          if (ch.material) {
+            const mats = Array.isArray(ch.material) ? ch.material : [ch.material];
+            for (const m of mats) m.dispose();
+          }
+        }
+      });
+    }
+    for (const school of territory.schools) {
+      this.scene.remove(school.instances);
+      school.instances.dispose();
     }
   }
 
@@ -768,12 +674,8 @@ export class FishWorld {
   // -----------------------------------------------------------------------
 
   /**
-   * Reynolds Wander Steering – erweitert um 4 Verbesserungen:
-   *
-   * 1. ⚡ Speed-Modulation: Sinus-Bursts wie bei Schwärmen (0.10–0.30)
-   * 2. ⚡ orbitSwimming angebunden: Yaw/Pitch/Roll + Burst-and-Glide
-   * 3. ⚡ Accumulierter Exklusionszonen-Push (kein Instant-Ruck)
-   * 4. ⚡ Speed-Dampening bei scharfen Kurswechseln
+   * Reynolds Wander Steering um die Heimat-Position (kein Player-Tracking).
+   * Bei Städten: Orbit um die Kuppel.
    */
   private _updateSoloFish(
     fish: SoloFish,
@@ -786,7 +688,6 @@ export class FishWorld {
     const pos = fish.mesh.position;
 
     // ═══ 1. Speed-Modulation (Burst-and-Glide) ═══
-    // Burst-Phase aus orbitSwimming: bei "burst" gibts einen extra Schub
     const bursting = elapsed % p.swim.burstInt < p.swim.burstDur;
     const burstMul = bursting ? 1.2 : 1.0;
     const speedMod =
@@ -795,16 +696,12 @@ export class FishWorld {
     const currentSpeed = p.speed * burstMul * speedMod;
 
     // ═══ 2. Reynolds Wander (smooth Sinus-Überlagerung) ═══
-    // Der Wander-Winkel ändert sich smooth – kein Random, kein Ruckeln.
-    // Das Ziel ist immer VOR dem Fisch in seiner aktuellen Richtung.
-    // Ein sanfter Zentrierungs-Pull verhindert, dass Fische abdriften.
     const smoothAngle =
       Math.sin(elapsed * 0.15 + fish.wanderPhase) * 1.5 +
       Math.sin(elapsed * 0.37 + fish.wanderPhase * 1.7) * 0.7;
     const angleLerp = 1 - Math.exp(-1.5 * dt);
     fish.wanderAngle += (smoothAngle - fish.wanderAngle) * angleLerp;
 
-    // Vorwärts-Richtung aus Velocity (oder Heading als Fallback)
     const vLen = Math.sqrt(fish.vx * fish.vx + fish.vz * fish.vz);
     const fwdX = vLen > 0.01 ? fish.vx / vLen : Math.sin(fish.heading);
     const fwdZ = vLen > 0.01 ? fish.vz / vLen : Math.cos(fish.heading);
@@ -817,17 +714,19 @@ export class FishWorld {
     let tX = cX + Math.cos(fish.wanderAngle) * wRad;
     let tZ = cZ + Math.sin(fish.wanderAngle) * wRad;
 
-    // Sanfter Zentrierungs-Pull: Fisch bleibt im Layer-Ring
-    const centerDx = p.centerX - pos.x;
-    const centerDz = p.centerZ - pos.z;
-    const centerDist = Math.sqrt(centerDx * centerDx + centerDz * centerDz);
-    if (centerDist > p.maxDist) {
-      const pull = (centerDist - p.maxDist) * 0.15;
-      tX += (centerDx / centerDist) * pull;
-      tZ += (centerDz / centerDist) * pull;
+    // ═══ 3. Sanfter Zentrierungs-Pull zur Heimat (verhindert Abdriften) ═══
+    const homeDx = p.homeX - pos.x;
+    const homeDz = p.homeZ - pos.z;
+    const homeDist = Math.sqrt(homeDx * homeDx + homeDz * homeDz);
+    if (homeDist > p.wanderRadius) {
+      // Stärkerer Pull zurück zur Heimat (0.2 statt 0.12) –
+      // der Fisch bleibt natürlich im sichtbaren Bereich
+      const pull = (homeDist - p.wanderRadius) * 0.2;
+      tX += (homeDx / homeDist) * pull;
+      tZ += (homeDz / homeDist) * pull;
     }
 
-    // ═══ 3. Exklusionszonen: Ziel sanft wegdrücken ═══
+    // ═══ 4. Exklusionszonen: Ziel sanft wegdrücken ═══
     let targetPushX = 0;
     let targetPushZ = 0;
     if (this._exclusionZones.length > 0) {
@@ -855,9 +754,7 @@ export class FishWorld {
     tX += fish.pushAccumX;
     tZ += fish.pushAccumZ;
 
-    // ═══ 4. Stadt-Orbit: Statt Repulsion → Orbit um die Kuppel ═══
-    // Wenn der Fisch in der NÃ¤he einer Stadt ist, ersetzt das
-    // Orbit-Ziel das Wander-Ziel. Der Fisch kreist um die Kuppel.
+    // ═══ 5. Stadt-Orbit: Statt Repulsion → Orbit um die Kuppel ═══
     if (this._exclusionZones.length > 0) {
       for (const zone of this._exclusionZones) {
         const dx = pos.x - zone.centerX;
@@ -875,19 +772,18 @@ export class FishWorld {
       }
     }
 
-    // ═══ 5. Steering zum Ring-Target ═══
+    // ═══ 6. Steering zum Target ═══
     const tdx = tX - pos.x;
     const tdz = tZ - pos.z;
     const targetDist = Math.sqrt(tdx * tdx + tdz * tdz) || 0.001;
     const steerX = tdx / targetDist;
     const steerZ = tdz / targetDist;
 
-    // ═══ 5. Velocity (Lerp in Ziel-Richtung) ═══
+    // ═══ 7. Velocity (Lerp in Ziel-Richtung) ═══
     const steerLerp = 1 - Math.exp(-p.agility * 3.0 * dt);
     fish.vx += (steerX * currentSpeed - fish.vx) * steerLerp;
     fish.vz += (steerZ * currentSpeed - fish.vz) * steerLerp;
 
-    // Velocity limitieren + anwenden
     const newVLen = Math.sqrt(fish.vx * fish.vx + fish.vz * fish.vz);
     if (newVLen > currentSpeed) {
       fish.vx = (fish.vx / newVLen) * currentSpeed;
@@ -896,12 +792,11 @@ export class FishWorld {
     pos.x += fish.vx * dt;
     pos.z += fish.vz * dt;
 
-    // ═══ 6. Y-Position (zwei Sinus-Wellen) ═══
-    const playerY = cameraPos.y;
+    // ═══ 8. Y-Position (zwei Sinus-Wellen, relativ zur Heimat-Höhe) ═══
     const yPhase = fish.wanderPhase;
     const yWave1 = Math.sin(elapsed * p.yFreq * Math.PI * 2 + yPhase) * p.yAmp;
     const yWave2 = Math.sin(elapsed * p.yFreq * 0.7 * Math.PI * 2 + yPhase * 0.3) * p.yAmp * 0.4;
-    const rawY = playerY + p.yOffset + yWave1 + yWave2;
+    const rawY = cameraPos.y + p.yOffset + yWave1 + yWave2;
     const clampedY = Math.max(
       this.config.floorY + 2.0,
       Math.min(this.config.waterY - 0.5, rawY),
@@ -910,22 +805,20 @@ export class FishWorld {
     fish.state.curY += (clampedY - fish.state.curY) * yLerp;
     pos.y = fish.state.curY;
 
-    // ═══ 7. Heading aus Velocity (max 90°/s Drehrate) ═══
-    // So schwimmt der Fisch immer in die Richtung, in die er sich bewegt.
-    // Die max. Drehrate verhindert 180°-Flips (Rückwärts-Schwimmen).
+    // ═══ 9. Heading aus Velocity (max 90°/s Drehrate) ═══
     if (newVLen > 0.01) {
       const velYaw = Math.atan2(fish.vx, fish.vz + 0.0001);
       let diff = velYaw - fish.heading;
       if (diff > Math.PI) diff -= Math.PI * 2;
       if (diff < -Math.PI) diff += Math.PI * 2;
-      const maxTurn = 1.57 * dt; // 90° pro Sekunde
+      const maxTurn = 1.57 * dt;
       fish.heading += Math.max(-maxTurn, Math.min(maxTurn, diff));
     }
 
     // ═══ 10. orbitSwimming: Yaw/Pitch/Roll-Animation + Burst ═══
     updateSwimState(p.swim, fish.state, delta, elapsed, fish.wanderAngle);
 
-    // ═══ 11. Rotation anwenden (TSL kümmert sich um die Vertex-Deformation) ═══
+    // ═══ 11. Rotation anwenden ═══
     fish.mesh.rotation.set(0, 0, 0);
     fish.mesh.rotateY(fish.heading + fish.state.yaw);
     fish.mesh.rotateX(fish.state.pitch);
@@ -935,189 +828,160 @@ export class FishWorld {
   // -----------------------------------------------------------------------
   // Private: Schwärme aktualisieren
   // -----------------------------------------------------------------------
-
-  private _updateSchools(
+  private _updateSchool(
+    school: FishSchool,
     delta: number,
     elapsed: number,
     cameraPos: THREE.Vector3,
   ): void {
-    for (const school of this.activeSchools) {
-      const dt = Math.min(delta, 0.05);
-      const wp = school.wanderPhase;
+    const dt = Math.min(delta, 0.05);
+    const wp = school.wanderPhase;
 
-      // ═══ 0. Respawn: Schule zu weit vom Spieler → neu positionieren ═══
-      {
-        const dx = school.centerX - cameraPos.x;
-        const dz = school.centerZ - cameraPos.z;
-        if (dx * dx + dz * dz > FishWorld.RESPAWN_DIST * FishWorld.RESPAWN_DIST) {
-          const angle = Math.atan2(cameraPos.x - school.centerX, cameraPos.z - school.centerZ);
-          const spawnDist = 20 + Math.random() * 30;
-          const spreadAngle = (Math.random() - 0.5) * Math.PI * 1.5;
-          school.centerX = cameraPos.x + Math.sin(angle + spreadAngle) * spawnDist;
-          school.centerZ = cameraPos.z + Math.cos(angle + spreadAngle) * spawnDist;
+    // ═══ 1. Prüfen ob die Schule in der Nähe einer Stadt ist → Orbit ═══
+    let orbitTargetX: number | null = null;
+    let orbitTargetZ: number | null = null;
+    if (this._exclusionZones.length > 0) {
+      for (const zone of this._exclusionZones) {
+        const dx = school.centerX - zone.centerX;
+        const dz = school.centerZ - zone.centerZ;
+        const distSq = dx * dx + dz * dz;
+        const attractionRadius = zone.radius + FishWorld.CITY_ATTRACTION_DIST;
+        if (distSq < attractionRadius * attractionRadius) {
+          const orbitRadius = zone.radius + 22;
+          const orbitSpeed = 0.06 + ((wp * 0.3) % 0.06);
+          const orbitAngle = elapsed * orbitSpeed + wp;
+          orbitTargetX = zone.centerX + Math.cos(orbitAngle) * orbitRadius;
+          orbitTargetZ = zone.centerZ + Math.sin(orbitAngle) * orbitRadius;
+          break;
         }
       }
-
-      // ═══ 1. Prüfen ob die Schule in der Nähe einer Stadt ist → Orbit ═══
-      let orbitTargetX: number | null = null;
-      let orbitTargetZ: number | null = null;
-      if (this._exclusionZones.length > 0) {
-        for (const zone of this._exclusionZones) {
-          const dx = school.centerX - zone.centerX;
-          const dz = school.centerZ - zone.centerZ;
-          const distSq = dx * dx + dz * dz;
-          const attractionRadius = zone.radius + FishWorld.CITY_ATTRACTION_DIST;
-          if (distSq < attractionRadius * attractionRadius) {
-            const orbitRadius = zone.radius + 22;
-            const orbitSpeed = 0.06 + ((wp * 0.3) % 0.06);
-            const orbitAngle = elapsed * orbitSpeed + wp;
-            orbitTargetX = zone.centerX + Math.cos(orbitAngle) * orbitRadius;
-            orbitTargetZ = zone.centerZ + Math.sin(orbitAngle) * orbitRadius;
-            break;
-          }
-        }
-      }
-
-      if (orbitTargetX !== null && orbitTargetZ !== null) {
-        // ═══ 1b. Stadt-Orbit: Schule kreist um die Kuppel ═══
-        const followRate = 1 - Math.exp(-0.8 * dt);
-        school.centerX += (orbitTargetX - school.centerX) * followRate;
-        school.centerZ += (orbitTargetZ - school.centerZ) * followRate;
-      } else {
-        // ═══ 1c. Wander-Target: um das feste Schul-Zentrum ═══
-        const wr = school.wanderRange;
-        const targetX = school.centerX
-          + Math.sin(elapsed * 0.05 + wp) * wr * 0.5
-          + Math.sin(elapsed * 0.11 + wp * 1.7) * wr * 0.15;
-        const targetZ = school.centerZ
-          + Math.cos(elapsed * 0.04 + wp * 1.3) * wr * 0.5
-          + Math.cos(elapsed * 0.09 + wp * 0.7) * wr * 0.15;
-
-        // ═══ 2. Schul-Zentrum folgt dem Target mit Trägheit ═══
-        const followRate = 1 - Math.exp(-0.5 * school.lagFactor * dt);
-        school.centerX += (targetX - school.centerX) * followRate;
-        school.centerZ += (targetZ - school.centerZ) * followRate;
-      }
-
-      // ═══ 3. Exklusionszonen-Push auf das Zentrum (weicht Hindernissen aus) ═══
-      if (this._exclusionZones.length > 0 && orbitTargetX === null) {
-        for (const zone of this._exclusionZones) {
-          const dx = school.centerX - zone.centerX;
-          const dz = school.centerZ - zone.centerZ;
-          const distSq = dx * dx + dz * dz;
-          const minDist = zone.radius + 14;
-          if (distSq < minDist * minDist && distSq > 0.01) {
-            const dist = Math.sqrt(distSq);
-            const push = (minDist - dist) * 1.5 * dt;
-            school.centerX += (dx / dist) * push;
-            school.centerZ += (dz / dist) * push;
-          }
-        }
-      }
-
-      // ═══ 4. Basis-Yaw aus Richtung zum Target/Orbit-Ziel ═══
-      const yawTargetX = orbitTargetX !== null ? orbitTargetX : school.centerX + Math.sin(elapsed * 0.05 + wp) * school.wanderRange * 0.5;
-      const yawTargetZ = orbitTargetZ !== null ? orbitTargetZ : school.centerZ + Math.cos(elapsed * 0.04 + wp * 1.3) * school.wanderRange * 0.5;
-      const dirToTargetX = yawTargetX - school.centerX;
-      const dirToTargetZ = yawTargetZ - school.centerZ;
-      const baseYaw = Math.atan2(dirToTargetX, dirToTargetZ);
-
-      // ═══ 5. Y-Position der Schule ═══
-      const schoolY = cameraPos.y + school.yOffset +
-        Math.sin(elapsed * school.yFreq * Math.PI * 2) * school.yAmp;
-      const clampedY = Math.max(
-        this.config.floorY + 2.0,
-        Math.min(this.config.waterY - 0.5, schoolY),
-      );
-
-      // ═══ 6. Separation: einfacher Abstands-Check innerhalb der Schule ═══
-      // Nur wenn zwei Fische < 1.5m auseinander sind, werden sie sanft getrennt.
-      const offsets = school.fishOffsets;
-      const len = offsets.length;
-      const sepPushX = this._sepPushX;
-      const sepPushZ = this._sepPushZ;
-      for (let j = 0; j < len; j++) {
-        sepPushX[j] = 0;
-        sepPushZ[j] = 0;
-      }
-      if (len <= 14) {
-        for (let a = 0; a < len; a++) {
-          const oa = offsets[a];
-          const ax = school.centerX + Math.cos(oa.angle) * oa.dist;
-          const az = school.centerZ + Math.sin(oa.angle) * oa.dist;
-          for (let b = a + 1; b < len; b++) {
-            const ob = offsets[b];
-            const bx = school.centerX + Math.cos(ob.angle) * ob.dist;
-            const bz = school.centerZ + Math.sin(ob.angle) * ob.dist;
-            const dx = ax - bx;
-            const dz = az - bz;
-            const distSq = dx * dx + dz * dz;
-            if (distSq < 2.25 && distSq > 0.01) {
-              const dist = Math.sqrt(distSq);
-              const push = (1.5 - dist) * 0.5 * delta;
-              const nx = dx / dist;
-              const nz = dz / dist;
-              sepPushX[a] += nx * push;
-              sepPushZ[a] += nz * push;
-              sepPushX[b] -= nx * push;
-              sepPushZ[b] -= nz * push;
-            }
-          }
-        }
-      }
-
-      // ═══ 7. Jeden Fisch individuell positionieren ═══
-      // Jeder Fisch hat eigene Amplituden (aus speedFactor) und Frequenzen
-      // für Yaw/Pitch/Roll + Distanz-Puls + Höhen-Bobbing.
-      const scale = school.fishScale;
-      for (let j = 0; j < len; j++) {
-        const fo = offsets[j];
-
-        // Offset rotiert mit individueller Geschwindigkeit
-        fo.angle += fo.speedFactor * 0.08 * delta;
-
-        // Amplituden-Skalierung aus speedFactor (0.5–1.5)
-        const amp = 0.5 + fo.speedFactor; // 1.0–2.0
-
-        // Distanz pulsiert leicht (±15%) pro Fisch
-        const distPulse = 1.0 + Math.sin(elapsed * (0.08 + fo.speedFactor * 0.06) + fo.phase * 0.5) * 0.15;
-
-        // Separation anwenden
-        const sepX = sepPushX[j] || 0;
-        const sepZ = sepPushZ[j] || 0;
-
-        // Position = Zentrum + rotierter Offset * Puls + Separation
-        const cosA = Math.cos(fo.angle);
-        const sinA = Math.sin(fo.angle);
-        const px = school.centerX + cosA * fo.dist * distPulse + sepX;
-        const pz = school.centerZ + sinA * fo.dist * distPulse + sepZ;
-        const py = clampedY + fo.ly
-          + Math.sin(elapsed * (0.2 + fo.speedFactor * 0.15) + fo.phase) * (0.4 * amp);
-
-        // ═══ 8. Richtung mit individueller Variation ═══
-        // Yaw: ±0.2–0.4 rad – jeder Fisch schaut etwas anders
-        const yawVar = Math.sin(elapsed * (0.5 + fo.speedFactor * 0.3) + fo.phase) * (0.2 * amp);
-        // Pitch: ±0.08–0.16 rad – leichte Nick-Bewegung
-        const pitch = Math.sin(elapsed * (0.4 + fo.speedFactor * 0.2) + fo.phase * 0.7) * (0.08 * amp);
-        // Roll: ±0.12–0.24 rad – wie echte Fische in der Kurve
-        const roll = Math.cos(elapsed * (0.3 + fo.speedFactor * 0.2) + fo.phase * 0.3) * (0.12 * amp);
-        const yaw = baseYaw + yawVar;
-
-        // Matrix setzen
-        this._tmpVec3.set(px, py, pz);
-        this._tmpQuat.identity();
-        this._tmpQuatA.setFromAxisAngle(this._up, yaw);
-        this._tmpQuat.multiply(this._tmpQuatA);
-        this._tmpQuatB.setFromAxisAngle(this._axisPitch, pitch);
-        this._tmpQuat.multiply(this._tmpQuatB);
-        this._tmpQuatA.setFromAxisAngle(this._axisRoll, roll);
-        this._tmpQuat.multiply(this._tmpQuatA);
-        this._tmpScale.set(scale, scale, scale);
-        this._tmpMatrix.compose(this._tmpVec3, this._tmpQuat, this._tmpScale);
-        school.instances.setMatrixAt(j, this._tmpMatrix);
-      }
-      school.instances.instanceMatrix.needsUpdate = true;
     }
+
+    if (orbitTargetX !== null && orbitTargetZ !== null) {
+      // ═══ 1b. Stadt-Orbit: Schule kreist um die Kuppel ═══
+      const followRate = 1 - Math.exp(-0.8 * dt);
+      school.centerX += (orbitTargetX - school.centerX) * followRate;
+      school.centerZ += (orbitTargetZ - school.centerZ) * followRate;
+    } else {
+      // ═══ 1c. Wander-Target: um das feste Schul-Zentrum (welt-fixiert) ═══
+      const wr = school.wanderRange;
+      const targetX = school.centerX
+        + Math.sin(elapsed * 0.05 + wp) * wr * 0.5
+        + Math.sin(elapsed * 0.11 + wp * 1.7) * wr * 0.15;
+      const targetZ = school.centerZ
+        + Math.cos(elapsed * 0.04 + wp * 1.3) * wr * 0.5
+        + Math.cos(elapsed * 0.09 + wp * 0.7) * wr * 0.15;
+
+      // ═══ 2. Schul-Zentrum folgt dem Target mit Trägheit ═══
+      const followRate = 1 - Math.exp(-0.5 * school.lagFactor * dt);
+      school.centerX += (targetX - school.centerX) * followRate;
+      school.centerZ += (targetZ - school.centerZ) * followRate;
+    }
+
+    // ═══ 3. Exklusionszonen-Push auf das Zentrum ═══
+    if (this._exclusionZones.length > 0 && orbitTargetX === null) {
+      for (const zone of this._exclusionZones) {
+        const dx = school.centerX - zone.centerX;
+        const dz = school.centerZ - zone.centerZ;
+        const distSq = dx * dx + dz * dz;
+        const minDist = zone.radius + 14;
+        if (distSq < minDist * minDist && distSq > 0.01) {
+          const dist = Math.sqrt(distSq);
+          const push = (minDist - dist) * 1.5 * dt;
+          school.centerX += (dx / dist) * push;
+          school.centerZ += (dz / dist) * push;
+        }
+      }
+    }
+
+    // ═══ 4. Basis-Yaw aus Richtung zum Target/Orbit-Ziel ═══
+    const yawTargetX = orbitTargetX !== null ? orbitTargetX : school.centerX + Math.sin(elapsed * 0.05 + wp) * school.wanderRange * 0.5;
+    const yawTargetZ = orbitTargetZ !== null ? orbitTargetZ : school.centerZ + Math.cos(elapsed * 0.04 + wp * 1.3) * school.wanderRange * 0.5;
+    const dirToTargetX = yawTargetX - school.centerX;
+    const dirToTargetZ = yawTargetZ - school.centerZ;
+    const baseYaw = Math.atan2(dirToTargetX, dirToTargetZ);
+
+    // ═══ 5. Y-Position der Schule ═══
+    const schoolY = cameraPos.y + school.yOffset +
+      Math.sin(elapsed * school.yFreq * Math.PI * 2) * school.yAmp;
+    const clampedY = Math.max(
+      this.config.floorY + 2.0,
+      Math.min(this.config.waterY - 0.5, schoolY),
+    );
+
+    // ═══ 6. Separation ═══
+    const offsets = school.fishOffsets;
+    const len = offsets.length;
+    const sepPushX = this._sepPushX;
+    const sepPushZ = this._sepPushZ;
+    for (let j = 0; j < len; j++) {
+      sepPushX[j] = 0;
+      sepPushZ[j] = 0;
+    }
+    if (len <= 14) {
+      for (let a = 0; a < len; a++) {
+        const oa = offsets[a];
+        const ax = school.centerX + Math.cos(oa.angle) * oa.dist;
+        const az = school.centerZ + Math.sin(oa.angle) * oa.dist;
+        for (let b = a + 1; b < len; b++) {
+          const ob = offsets[b];
+          const bx = school.centerX + Math.cos(ob.angle) * ob.dist;
+          const bz = school.centerZ + Math.sin(ob.angle) * ob.dist;
+          const dx = ax - bx;
+          const dz = az - bz;
+          const distSq = dx * dx + dz * dz;
+          if (distSq < 2.25 && distSq > 0.01) {
+            const dist = Math.sqrt(distSq);
+            const push = (1.5 - dist) * 0.5 * delta;
+            const nx = dx / dist;
+
+            const nz = dz / dist;
+            sepPushX[a] += nx * push;
+            sepPushZ[a] += nz * push;
+            sepPushX[b] -= nx * push;
+            sepPushZ[b] -= nz * push;
+          }
+        }
+      }
+    }
+
+    // ═══ 7. Jeden Fisch individuell positionieren ═══
+    const scale = school.fishScale;
+    for (let j = 0; j < len; j++) {
+      const fo = offsets[j];
+
+      fo.angle += fo.speedFactor * 0.08 * delta;
+      const amp = 0.5 + fo.speedFactor;
+      const distPulse = 1.0 + Math.sin(elapsed * (0.08 + fo.speedFactor * 0.06) + fo.phase * 0.5) * 0.15;
+
+      const sepX = sepPushX[j] || 0;
+      const sepZ = sepPushZ[j] || 0;
+
+      const cosA = Math.cos(fo.angle);
+      const sinA = Math.sin(fo.angle);
+      const px = school.centerX + cosA * fo.dist * distPulse + sepX;
+      const pz = school.centerZ + sinA * fo.dist * distPulse + sepZ;
+      const py = clampedY + fo.ly
+        + Math.sin(elapsed * (0.2 + fo.speedFactor * 0.15) + fo.phase) * (0.4 * amp);
+
+      const yawVar = Math.sin(elapsed * (0.5 + fo.speedFactor * 0.3) + fo.phase) * (0.2 * amp);
+      const pitch = Math.sin(elapsed * (0.4 + fo.speedFactor * 0.2) + fo.phase * 0.7) * (0.08 * amp);
+      const roll = Math.cos(elapsed * (0.3 + fo.speedFactor * 0.2) + fo.phase * 0.3) * (0.12 * amp);
+      const yaw = baseYaw + yawVar;
+
+      this._tmpVec3.set(px, py, pz);
+      this._tmpQuat.identity();
+      this._tmpQuatA.setFromAxisAngle(this._up, yaw);
+      this._tmpQuat.multiply(this._tmpQuatA);
+      this._tmpQuatB.setFromAxisAngle(this._axisPitch, pitch);
+      this._tmpQuat.multiply(this._tmpQuatB);
+      this._tmpQuatA.setFromAxisAngle(this._axisRoll, roll);
+      this._tmpQuat.multiply(this._tmpQuatA);
+      this._tmpScale.set(scale, scale, scale);
+      this._tmpMatrix.compose(this._tmpVec3, this._tmpQuat, this._tmpScale);
+      school.instances.setMatrixAt(j, this._tmpMatrix);
+    }
+    school.instances.instanceMatrix.needsUpdate = true;
   }
 
   // -----------------------------------------------------------------------
@@ -1132,20 +996,22 @@ export class FishWorld {
   ): void {
     if (!this.echolocation) return;
 
-    // Echo-Targets sammeln
+    // Echo-Targets sammeln (über Territorien)
     this._echoTargets.length = 0;
-    for (const fish of this.soloFishes) {
-      if (!fish.fishMesh) continue;
-      fish._echoTarget.position.copy(fish.mesh.position);
-      this._echoTargets.push(fish._echoTarget);
-    }
-    for (const school of this.activeSchools) {
-      school._echoTarget.position.set(
-        school.centerX,
-        cameraPos.y + school.yOffset,
-        school.centerZ,
-      );
-      this._echoTargets.push(school._echoTarget);
+    for (const [, territory] of this._territories) {
+      for (const fish of territory.soloFishes) {
+        if (!fish.fishMesh) continue;
+        fish._echoTarget.position.copy(fish.mesh.position);
+        this._echoTargets.push(fish._echoTarget);
+      }
+      for (const school of territory.schools) {
+        school._echoTarget.position.set(
+          school.centerX,
+          cameraPos.y + school.yOffset,
+          school.centerZ,
+        );
+        this._echoTargets.push(school._echoTarget);
+      }
     }
     if (additionalTargets) {
       for (const t of additionalTargets) {
@@ -1161,33 +1027,35 @@ export class FishWorld {
 
     // Glow decay
     const decay = Math.exp(-3.0 * delta);
-    for (const fish of this.soloFishes) {
-      if (!fish.fishMesh || !fish.originalEmissive) continue;
-      fish.glowIntensity *= decay;
-      const mat = fish.fishMesh.material as THREE.MeshStandardMaterial;
-      if (fish.glowIntensity > 0.01) {
-        this._tmpColor
-          .copy(fish.originalEmissive)
-          .lerp(this._glowColor, fish.glowIntensity);
-        mat.emissive.copy(this._tmpColor);
-        mat.emissiveIntensity = 0.2 + fish.glowIntensity * 1.8;
-      } else {
-        mat.emissive.copy(fish.originalEmissive);
-        mat.emissiveIntensity = 0;
+    for (const [, territory] of this._territories) {
+      for (const fish of territory.soloFishes) {
+        if (!fish.fishMesh || !fish.originalEmissive) continue;
+        fish.glowIntensity *= decay;
+        const mat = fish.fishMesh.material as THREE.MeshStandardMaterial;
+        if (fish.glowIntensity > 0.01) {
+          this._tmpColor
+            .copy(fish.originalEmissive)
+            .lerp(this._glowColor, fish.glowIntensity);
+          mat.emissive.copy(this._tmpColor);
+          mat.emissiveIntensity = 0.2 + fish.glowIntensity * 1.8;
+        } else {
+          mat.emissive.copy(fish.originalEmissive);
+          mat.emissiveIntensity = 0;
+        }
       }
-    }
-    for (const school of this.activeSchools) {
-      school.glowIntensity *= decay;
-      const mat = school.instances.material as THREE.MeshStandardMaterial;
-      if (school.glowIntensity > 0.01) {
-        this._tmpColor
-          .copy(school.originalEmissive)
-          .lerp(this._glowColor, school.glowIntensity);
-        mat.emissive.copy(this._tmpColor);
-        mat.emissiveIntensity = 0.2 + school.glowIntensity * 1.8;
-      } else {
-        mat.emissive = school.originalEmissive;
-        mat.emissiveIntensity = 0;
+      for (const school of territory.schools) {
+        school.glowIntensity *= decay;
+        const mat = school.instances.material as THREE.MeshStandardMaterial;
+        if (school.glowIntensity > 0.01) {
+          this._tmpColor
+            .copy(school.originalEmissive)
+            .lerp(this._glowColor, school.glowIntensity);
+          mat.emissive.copy(this._tmpColor);
+          mat.emissiveIntensity = 0.2 + school.glowIntensity * 1.8;
+        } else {
+          mat.emissive = school.originalEmissive;
+          mat.emissiveIntensity = 0;
+        }
       }
     }
   }

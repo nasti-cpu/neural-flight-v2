@@ -25,7 +25,7 @@ const TILE_WEIGHTS: Record<ChunkType, number> = {
   SAND: 75,
   RIFF: 10,
   QUALLE: 6,
-  FISCH: 6,
+  FISCH: 20,
   STADT: 3,
 };
 
