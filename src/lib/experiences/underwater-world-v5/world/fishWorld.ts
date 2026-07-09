@@ -763,7 +763,7 @@ export class FishWorld {
     tX += fish.pushAccumX;
     tZ += fish.pushAccumZ;
 
-    // ═══ 5. Stadt-Orbit: Statt Repulsion → Orbit um die Kuppel ═══
+    // ═══ 5. Stadt-Orbit: Um die Kuppel kreisen (außerhalb) ═══
     if (this._exclusionZones.length > 0) {
       for (const zone of this._exclusionZones) {
         const dx = pos.x - zone.centerX;
@@ -771,11 +771,31 @@ export class FishWorld {
         const distSq = dx * dx + dz * dz;
         const attractionRadius = zone.radius + FishWorld.CITY_ATTRACTION_DIST;
         if (distSq < attractionRadius * attractionRadius) {
-          const orbitRadius = zone.radius + 18;
+          const orbitRadius = zone.radius + 22; // Weiter draußen, damit Fische nicht im Modell sind
           const orbitSpeed = 0.08 + ((fish.wanderPhase * 0.5) % 0.08);
           const orbitAngle = elapsed * orbitSpeed + fish.wanderPhase;
           tX = zone.centerX + Math.cos(orbitAngle) * orbitRadius;
           tZ = zone.centerZ + Math.sin(orbitAngle) * orbitRadius;
+          break;
+        }
+      }
+    }
+
+    // ═══ 5b. Hard Clamp: Fisch ist IN einer ExclusionZone → sofort raus ═══
+    if (this._exclusionZones.length > 0) {
+      for (const zone of this._exclusionZones) {
+        const dx = pos.x - zone.centerX;
+        const dz = pos.z - zone.centerZ;
+        const distSq = dx * dx + dz * dz;
+        const minDist = zone.radius + 4; // 4m Sicherheitsabstand zur Kuppel
+        if (distSq < minDist * minDist && distSq > 0.01) {
+          const dist = Math.sqrt(distSq);
+          const pushOut = (minDist - dist) * 0.5;
+          pos.x += (dx / dist) * pushOut;
+          pos.z += (dz / dist) * pushOut;
+          // Auch das Target anpassen, damit der Fisch nicht zurücksteuert
+          tX = pos.x + (dx / dist) * 5;
+          tZ = pos.z + (dz / dist) * 5;
           break;
         }
       }
@@ -899,6 +919,23 @@ export class FishWorld {
           const push = (minDist - dist) * 1.5 * dt;
           school.centerX += (dx / dist) * push;
           school.centerZ += (dz / dist) * push;
+        }
+      }
+    }
+
+    // ═══ 3b. Hard Clamp: Schul-Zentrum ist IN einer ExclusionZone → sofort raus ═══
+    if (this._exclusionZones.length > 0) {
+      for (const zone of this._exclusionZones) {
+        const dx = school.centerX - zone.centerX;
+        const dz = school.centerZ - zone.centerZ;
+        const distSq = dx * dx + dz * dz;
+        const minDist = zone.radius + 8; // 8m Sicherheitsabstand
+        if (distSq < minDist * minDist && distSq > 0.01) {
+          const dist = Math.sqrt(distSq);
+          const pushOut = (minDist - dist) * 0.3;
+          school.centerX += (dx / dist) * pushOut;
+          school.centerZ += (dz / dist) * pushOut;
+          break;
         }
       }
     }

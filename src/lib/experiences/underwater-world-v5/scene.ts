@@ -288,7 +288,26 @@ export async function setup(
     } else if (type === "RIFF") {
       coralReefWorld.registerReefAtChunk(cx, cz);
     } else if (type === "FISCH") {
-      fishWorld.registerFishAtChunk(cx, cz);
+      // ★ Keine Fische in Chunks, die neben einer Stadt liegen.
+      // Städte haben einen Mindestabstand von 48m (= 3 Chunks),
+      // also prüfen wir die 8 Nachbarn um den FISCH-Chunk.
+      const cs = WORLD_CONFIG.chunkSize;
+      const fwX = cx * cs + cs / 2;
+      const fwZ = cz * cs + cs / 2;
+      const MIN_DIST_TO_CITY_SQ = 28 * 28; // ~1.75 Chunks
+      let nearCity = false;
+      const cityPositions = cityWorld.getActiveCityPositions();
+      for (const pos of cityPositions) {
+        const dx = fwX - pos.x;
+        const dz = fwZ - pos.z;
+        if (dx * dx + dz * dz < MIN_DIST_TO_CITY_SQ) {
+          nearCity = true;
+          break;
+        }
+      }
+      if (!nearCity) {
+        fishWorld.registerFishAtChunk(cx, cz);
+      }
     }
     // QUALLE wird von JellyWorld selbstständig verwaltet
   });
