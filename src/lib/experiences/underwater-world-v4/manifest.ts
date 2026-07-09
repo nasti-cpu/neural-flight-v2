@@ -1,0 +1,49 @@
+import type { ExperienceManifest, ParameterDef } from "../types";
+import { dispose, setup, tick } from "./scene";
+import { applySettings } from "./settings";
+
+const parameters: ParameterDef[] = [
+  {
+    id: "driftSpeed",
+    label: "Drift Speed",
+    group: "Movement",
+    min: 0.5,
+    max: 20,
+    default: 2,
+    step: 0.5,
+    unit: "m/s",
+    icon: "Gauge",
+  },
+];
+
+export const manifest: ExperienceManifest = {
+  id: "underwater-world-v4",
+  name: "Underwater World V4",
+  description:
+    "Tiefsee-Unterwasserwelt mit endlosem Sandboden, Seegras, God Rays, Fischen, Quallen, Städten, Korallenriffen, Leitsystem, Scheinwerfer & Biolumineszenz. (WebGPU — standalone page)",
+  version: "0.1.0",
+  author: "Anastasia",
+
+  parameters,
+  outputs: [],
+  interfaces: { orientation: false, speed: false },
+
+  camera: { fov: 75, near: 0.1, far: 600 },
+  scene: {
+    background: "#000814",
+    fogNear: 10,
+    fogFar: 180,
+    fogColor: "#001020",
+    ambientIntensity: 0.5,
+    sunIntensity: 0.8,
+    sunColor: "#2288bb",
+    sunPosition: { x: 0, y: 80, z: -50 },
+  },
+  spawn: { position: { x: 0, y: 4, z: 0 } },
+
+  setup,
+  tick,
+  applySettings,
+  updatePlayer: () => {},
+  dispose,
+};

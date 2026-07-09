@@ -1,11 +1,10 @@
 import { manifest as cloudTowers } from "./cloud-towers";
+import { manifest as experiment12 } from "./experiment-12";
 import { manifest as gradientPrism } from "./gradient-prism";
 import { manifest as mountainFlight } from "./mountain-flight";
 import { manifest as shaderDemo } from "./shader-demo";
-import { manifest as underwaterWorld } from "./underwater-world v2";
-import { manifest as visioTechnologica } from "./visio-technologica";
-import { manifest as visioTechnologicaCityTest } from "./visio-technologica-city-test";
-import { manifest as spaceWorld } from "./space-world";
+import { manifest as underwaterWorldV4 } from "./underwater-world-v4";
+import { manifest as underwaterWorldV5 } from "./underwater-world-v5";
 import type { ExperienceManifest } from "./types";
 
 // ── Registry ──
@@ -18,13 +17,12 @@ import type { ExperienceManifest } from "./types";
 
 const CATALOG: Record<string, ExperienceManifest> = {
   "cloud-towers": cloudTowers,
+  "experiment-12": experiment12,
   "gradient-prism": gradientPrism,
   "mountain-flight": mountainFlight,
   "shader-demo": shaderDemo,
-  "underwater-world": underwaterWorld,
-  "visio-technologica": visioTechnologica,
-  "visio-technologica-city-test": visioTechnologicaCityTest,
-  "space-world": spaceWorld,
+  "underwater-world-v4": underwaterWorldV4,
+  "underwater-world-v5": underwaterWorldV5,
 };
 
 export const DEFAULT_EXPERIENCE_ID = "mountain-flight";
