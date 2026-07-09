@@ -33,10 +33,10 @@ const DEFAULT_CONFIG: BeeConfig = {
   fieldRadius: 200,
   flyRadiusMin: 1,
   flyRadiusMax: 3,
-  speedMin: 2,
-  speedMax: 4,
-  heightBaseMin: 0.8,
-  heightBaseMax: 1.5,
+  speedMin: 1.2,
+  speedMax: 2.5,
+  heightBaseMin: 0.9,
+  heightBaseMax: 1.6,
   heightRange: 0.2,
 };
 

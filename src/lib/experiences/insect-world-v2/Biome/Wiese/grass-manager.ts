@@ -409,6 +409,10 @@ export class GrassManager {
     flowerPositionsOut: THREE.Vector3[],
   ): void {
     const dummy = new THREE.Object3D();
+    const MIN_FLOWER_DIST = 0.15; // Mindestabstand 15cm zwischen Blumen
+
+    // Bereits platzierte Positionen (für Abstands-Check, chunk-intern)
+    const placedPositions: { x: number; z: number }[] = [];
 
     // Positionen pro Blumentyp sammeln
     const flowerInstances: Array<
@@ -417,20 +421,43 @@ export class GrassManager {
 
     for (let i = 0; i < flowerCount; i++) {
       const typeIdx = Math.floor(Math.random() * this.preloadedFlowers.length);
-      const x = worldX + (Math.random() - 0.5) * CHUNK_SIZE;
-      const z = worldZ + (Math.random() - 0.5) * CHUNK_SIZE;
 
-      // Überspringen, wenn Position in Clear-Region liegt (z.B. Stadt)
-      if (this.isPositionCleared(x, z)) {
-        continue;
+      // Versuche bis zu 20x einen freien Platz zu finden (mind. 15cm Abstand)
+      let placed = false;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const x = worldX + (Math.random() - 0.5) * CHUNK_SIZE;
+        const z = worldZ + (Math.random() - 0.5) * CHUNK_SIZE;
+
+        // Überspringen, wenn Position in Clear-Region liegt (z.B. Stadt)
+        if (this.isPositionCleared(x, z)) {
+          continue;
+        }
+
+        // Prüfen ob weit genug von anderen Blumen entfernt
+        let tooClose = false;
+        for (const p of placedPositions) {
+          const dx = x - p.x;
+          const dz = z - p.z;
+          if (dx * dx + dz * dz < MIN_FLOWER_DIST * MIN_FLOWER_DIST) {
+            tooClose = true;
+            break;
+          }
+        }
+
+        if (!tooClose) {
+          const y = worldGroundHeight(x, z) + Math.random() * 0.05;
+          const rotY = Math.random() * Math.PI * 2;
+          const s =
+            this.preloadedFlowers[typeIdx].scale * (0.8 + Math.random() * 0.7);
+
+          flowerInstances[typeIdx].push({ x, y, z, rotY, s });
+          placedPositions.push({ x, z });
+          placed = true;
+          break;
+        }
       }
-
-      const y = worldGroundHeight(x, z) + Math.random() * 0.05;
-      const rotY = Math.random() * Math.PI * 2;
-      const s =
-        this.preloadedFlowers[typeIdx].scale * (0.8 + Math.random() * 0.7);
-
-      flowerInstances[typeIdx].push({ x, y, z, rotY, s });
+      // Wenn kein freier Platz gefunden, wird diese Blume übersprungen
+      if (!placed) continue;
     }
 
     // InstancedMeshes pro Blumentyp erstellen

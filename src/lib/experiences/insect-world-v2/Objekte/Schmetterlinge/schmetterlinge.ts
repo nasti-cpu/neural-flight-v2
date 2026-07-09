@@ -31,10 +31,10 @@ const DEFAULT_CONFIG: ButterflyConfig = {
   fieldRadius: 200,
   flyRadiusMin: 1,
   flyRadiusMax: 4,
-  speedMin: 1.0,
-  speedMax: 2.5,
-  heightBaseMin: 1.2,
-  heightBaseMax: 2.2,
+  speedMin: 0.8,
+  speedMax: 1.8,
+  heightBaseMin: 1.3,
+  heightBaseMax: 2.3,
   heightRange: 0.4,
 };
 

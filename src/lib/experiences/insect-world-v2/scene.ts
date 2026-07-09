@@ -62,32 +62,32 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   // 5. Ersten Chunk-Ladevorgang anstoßen
   grassManager.update(new THREE.Vector3(0, 2, 0));
 
-  // 6. Bienen
+  // 6. Bienen (langsam, zufällige Wegpunkte, +10cm höher)
   const bees = await createBees(beeGlbUrl, {
     count: 10,
     scale: 0.04,
     fieldRadius: 200,
     flyRadiusMin: 1,
     flyRadiusMax: 3,
-    speedMin: 2,
-    speedMax: 4,
-    heightBaseMin: 0.8,
-    heightBaseMax: 1.5,
+    speedMin: 1.2,
+    speedMax: 2.5,
+    heightBaseMin: 0.9,
+    heightBaseMax: 1.6,
     heightRange: 0.2,
   });
   ctx.scene.add(bees.group);
 
-  // 7. Schmetterlinge
+  // 7. Schmetterlinge (langsam, zufällige Wegpunkte, +10cm höher)
   const butterflies = await createButterflies(butterflyGlbUrl, {
     count: 6,
     scale: 0.036,
     fieldRadius: 200,
     flyRadiusMin: 1,
     flyRadiusMax: 4,
-    speedMin: 1.0,
-    speedMax: 2.5,
-    heightBaseMin: 1.2,
-    heightBaseMax: 2.2,
+    speedMin: 0.8,
+    speedMax: 1.8,
+    heightBaseMin: 1.3,
+    heightBaseMax: 2.3,
     heightRange: 0.4,
   });
   ctx.scene.add(butterflies.group);
