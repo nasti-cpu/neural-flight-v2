@@ -42,6 +42,7 @@ import { CoralReefWorld } from "./world/coralReefWorld";
 import { GuidanceSystem } from "./sinne/leitsystem/guidanceSystem";
 import { SubmarineSpotlight } from "./sinne/beleuchtung/spotlight";
 import { BioParticles } from "./sinne/beleuchtung/bioParticles";
+import { startBackgroundAudio } from "./sinne/backgroundAudio";
 
 // ---------------------------------------------------------------------------
 // Typen für den Experience-State
@@ -74,7 +75,10 @@ export interface UnderwaterWorldV5State extends ExperienceState {
   fillLight: THREE.DirectionalLight;
   sceneFog: THREE.Fog;
 
-  // Szene-Referenz für sauberes Cleanup
+  /** Hintergrund-Atmo (kann null sein, wenn Sound fehlschlägt) */
+  audio: { stop: () => void } | null;
+
+  /** Szene-Referenz für sauberes Cleanup */
   _scene: THREE.Scene;
   _frameCount: number;
 
@@ -278,7 +282,13 @@ export async function setup(
   const bioParticles = new BioParticles(ctx.scene);
 
   // =========================================================================
-  // 14. WFC-Callbacks registrieren:
+  // 14. Hintergrund-Atmo starten (sanft, leise, loop)
+  // =========================================================================
+  // Falls das Laden fehlschlägt, ist audio = null – alles okay.
+  const backgroundAudio = startBackgroundAudio();
+
+  // =========================================================================
+  // 15. WFC-Callbacks registrieren:
   //     Wenn ein Chunk kollabiert, werden CityWorld und CoralReefWorld
   //     benachrichtigt, damit sie Städte/Riffe an den richtigen Positionen platzieren
   // =========================================================================
@@ -321,6 +331,7 @@ export async function setup(
   return {
     player,
     camera: player.camera,
+    audio: backgroundAudio,
     chunkManager,
     fishWorld,
     jellyWorld,
@@ -553,6 +564,9 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
     s.particles.geometry?.dispose();
     (s.particles.material as any)?.dispose();
   }
+
+  // Hintergrund-Atmo stoppen
+  s.audio?.stop();
 }
 
 // ---------------------------------------------------------------------------
