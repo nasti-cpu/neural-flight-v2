@@ -182,7 +182,7 @@ export class CoralReefWorld {
 
       if (reef.state === "visible" && reef.group) {
         const dist = Math.sqrt(distSq);
-        const fullOpacityDist = 30;
+        const fullOpacityDist = 55;
         const hideDist = 65;
         let target = 1.0;
         if (dist > fullOpacityDist) {

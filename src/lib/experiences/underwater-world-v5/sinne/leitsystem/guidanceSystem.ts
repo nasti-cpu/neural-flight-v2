@@ -21,7 +21,7 @@ import * as THREE from "three/webgpu";
 
 const GUIDANCE_CONFIG = {
   /** Anzahl Kugeln zwischen Spieler und Stadt */
-  orbCount: 10,
+  orbCount: 20,
   /** Abstand der Kugeln vom Meeresboden (Y-Höhe) */
   orbHeight: 1.5,
   /** Größe jeder Kugel */
@@ -33,9 +33,9 @@ const GUIDANCE_CONFIG = {
   /** Maximale Verschiebung der Kugel entlang der Pfadrichtung */
   flowAmplitude: 0.25,
   /** Kugeln anzeigen sobald die Stadt in dieser Distanz ist (groß = immer) */
-  showDistance: 500,
+  showDistance: 10000,
   /** Maximale Pfad-Länge – verhindert zu dünn verteilte Kugeln bei fernen Städten */
-  maxGuideDistance: 100,
+  maxGuideDistance: 300,
   /** Mindest-Abstand zum Pfad-Neubau (Spieler-Bewegung in Meter) */
   rebuildThreshold: 2.0,
 };

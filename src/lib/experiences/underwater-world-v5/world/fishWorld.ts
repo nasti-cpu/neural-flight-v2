@@ -23,6 +23,7 @@ import {
   type SwimState,
   createSwimParams,
   createSwimState,
+  updateSwimState,
 } from "../animationen/fische/orbitSwimming";
 import {
   type FormationOffset,
@@ -152,6 +153,10 @@ interface SoloFishParams {
   /** Wie schnell der Fisch die Richtung ändert (0.1=elegant, 3.0=hektisch) */
   agility: number;
 
+  // === ⚡ Geschwindigkeits-Modulation (Sinus-Bursts) ===
+  speedModAmp: number;
+  speedModFreq: number;
+
   // === Höhen-Varianz ===
   yOffset: number;
   yAmp: number;
@@ -180,6 +185,10 @@ interface SoloFish {
   vz: number;
   /** Reynolds-Wander-Winkel: wird pro Frame leicht verrauscht (keine harten Targets) */
   wanderAngle: number;
+
+  /** Accumulierter Push aus Exklusionszonen (smooth, kein Instant-Ruck) */
+  pushAccumX: number;
+  pushAccumZ: number;
 
   // Kontinuierlicher Heading (Yaw) – wird über die π/-π Grenze hinweg aufgedreht
   heading: number;
@@ -502,8 +511,10 @@ export class FishWorld {
       layerIndex,
       minDist: layer.minRadius,
       maxDist: layer.maxRadius,
-      speed: this._randomBetween(0.6, 1.8),
+      speed: this._randomBetween(0.3, 0.8),
       agility: 0.3 + rand() * 1.2,
+      speedModAmp: 0.10 + rand() * 0.20,
+      speedModFreq: 0.04 + rand() * 0.10,
       yOffset: this._randomBetween(layer.minYOffset, layer.maxYOffset),
       yAmp: 0.3 + rand() * 1.2,
       yFreq: 0.04 + rand() * 0.10,
@@ -584,6 +595,8 @@ export class FishWorld {
       vx: Math.sin(initAngle) * initSpeed,
       vz: Math.cos(initAngle) * initSpeed,
       wanderAngle: Math.random() * Math.PI * 2,
+      pushAccumX: 0,
+      pushAccumZ: 0,
       heading: Math.atan2(Math.sin(initAngle), -Math.cos(initAngle) + 0.0001),
       glowIntensity: 0,
       fishMesh,
@@ -649,7 +662,7 @@ export class FishWorld {
       schoolId,
       radiusX: radius,
       radiusZ: radius * (0.85 + rand() * 0.3),
-      speed: this._randomBetween(layer.minSpeed, layer.maxSpeed),
+      speed: this._randomBetween(layer.minSpeed, layer.maxSpeed) * 0.25,
       startAngle: rand() * Math.PI * 2,
       yOffset: this._randomBetween(layer.minYOffset, layer.maxYOffset),
       yAmp: 0.2 + rand() * 1.0,
@@ -665,7 +678,7 @@ export class FishWorld {
       wanderFreq: 0.02 + rand() * 0.05,
 
       // Geschwindigkeits-Modulation
-      speedModAmp: 0.10 + rand() * 0.25,
+      speedModAmp: 0.05 + rand() * 0.10,
       speedModFreq: 0.04 + rand() * 0.10,
 
       lagFactor: 0.5 + rand() * 1.0,
@@ -745,13 +758,12 @@ export class FishWorld {
   // -----------------------------------------------------------------------
 
   /**
-   * Reynolds Wander Steering: Der Wander-Winkel wird pro Frame leicht
-   * verrauscht. Das Target wird auf einem Kreis projiziert, der immer
-   * VOR dem Fisch liegt → keine scharfen Kehren, nur weite Bögen.
+   * Reynolds Wander Steering – erweitert um 4 Verbesserungen:
    *
-   * Eine sanfte Zentrierung verhindert Abdriften aus dem Sichtbereich.
-   * Exklusionszonen werden durch Target-Repulsion gemieden (kein
-   * Velocity-Kick, keine Oszillation).
+   * 1. ⚡ Speed-Modulation: Sinus-Bursts wie bei Schwärmen (0.10–0.30)
+   * 2. ⚡ orbitSwimming angebunden: Yaw/Pitch/Roll + Burst-and-Glide
+   * 3. ⚡ Accumulierter Exklusionszonen-Push (kein Instant-Ruck)
+   * 4. ⚡ Speed-Dampening bei scharfen Kurswechseln
    */
   private _updateSoloFish(
     fish: SoloFish,
@@ -761,20 +773,24 @@ export class FishWorld {
   ): void {
     const p = fish.params;
     const dt = Math.min(delta, 0.05);
-
-    // ═══ 1. Reynolds Wander Steering (keine harten Targets) ═══
-    // Der Wander-Winkel wird pro Frame leicht verrauscht. Das Target
-    // wird auf einem Kreis projiziert, der immer VOR dem Fisch liegt.
-    // Keine scharfen 180°-Kehren – nur weite, organische Bögen.
     const pos = fish.mesh.position;
+
+    // ═══ 1. Speed-Modulation (Burst-and-Glide) ═══
+    // Burst-Phase aus orbitSwimming: bei "burst" gibts einen extra Schub
+    const bursting = elapsed % p.swim.burstInt < p.swim.burstDur;
+    const burstMul = bursting ? 1.2 : 1.0;
+    const speedMod =
+      1.0 +
+      Math.sin(elapsed * p.speedModFreq * Math.PI * 2) * p.speedModAmp;
+    const currentSpeed = p.speed * burstMul * speedMod;
+
+    // ═══ 2. Reynolds Wander Steering ═══
     fish.wanderAngle += (Math.random() - 0.5) * p.agility * 2.0 * dt;
 
-    // Blickrichtung (Fallback auf Heading, falls Fisch noch keine Velocity hat)
     const vLen = Math.sqrt(fish.vx * fish.vx + fish.vz * fish.vz);
     const fwdX = vLen > 0.01 ? fish.vx / vLen : Math.sin(fish.heading);
     const fwdZ = vLen > 0.01 ? fish.vz / vLen : -Math.cos(fish.heading);
 
-    // Kreis in Bewegungsrichtung projizieren
     const wDist = 8.0;
     const wRad = 4.0;
     const cX = pos.x + fwdX * wDist;
@@ -782,8 +798,7 @@ export class FishWorld {
     let tX = cX + Math.cos(fish.wanderAngle) * wRad;
     let tZ = cZ + Math.sin(fish.wanderAngle) * wRad;
 
-    // Sanfte Zentrierung: wenn der Fisch zu weit vom Ring-Mittelpunkt
-    // abdriftet, wird das Target leicht zur Mitte gezogen.
+    // Sanfte Zentrierung
     const centerDx = p.centerX - pos.x;
     const centerDz = p.centerZ - pos.z;
     const centerDist = Math.sqrt(centerDx * centerDx + centerDz * centerDz);
@@ -793,60 +808,89 @@ export class FishWorld {
       tZ += (centerDz / centerDist) * pull;
     }
 
-    // Exklusionszonen: Target von Zonen wegdrücken (kein Velocity-Kick)
+    // ═══ 3. Accumulierter Exklusionszonen-Push (kein Instant-Ruck) ═══
+    // Statt das Target sofort wegzudrücken (→ ruckartige Kurven),
+    // berechnen wir einen Ziel-Push und lerpen den accumulated push dorthin.
+    let targetPushX = 0;
+    let targetPushZ = 0;
     if (this._exclusionZones.length > 0) {
       for (const zone of this._exclusionZones) {
         const zx = tX - zone.centerX;
         const zz = tZ - zone.centerZ;
         const zDistSq = zx * zx + zz * zz;
-        const minZ = zone.radius + 3.0;
-        if (zDistSq < minZ * minZ && zDistSq > 0.01) {
+        const effectRadius = zone.radius + 3.0;
+        if (zDistSq < effectRadius * effectRadius && zDistSq > 0.01) {
           const zDist = Math.sqrt(zDistSq);
-          const push = (minZ - zDist) * 1.5;
-          tX += (zx / zDist) * push;
-          tZ += (zz / zDist) * push;
+          const overlap = 1 - zDist / effectRadius; // 0..1
+          const push = overlap * 3.0;
+          targetPushX += (zx / zDist) * push;
+          targetPushZ += (zz / zDist) * push;
         }
       }
     }
 
-    // ═══ 2. Steering-Vektor zum Wander-Target ═══
+    // Accumulierten Push sanft zum Ziel-Push führen
+    const pushLerp = 1 - Math.exp(-3.0 * dt);
+    fish.pushAccumX += (targetPushX - fish.pushAccumX) * pushLerp;
+    fish.pushAccumZ += (targetPushZ - fish.pushAccumZ) * pushLerp;
+
+    // Decay wenn kein Push nötig
+    if (targetPushX === 0 && targetPushZ === 0) {
+      fish.pushAccumX *= Math.exp(-2.0 * dt);
+      fish.pushAccumZ *= Math.exp(-2.0 * dt);
+    }
+
+    tX += fish.pushAccumX;
+    tZ += fish.pushAccumZ;
+
+    // ═══ 4. Steering-Vektor ═══
     const tdx = tX - pos.x;
     const tdz = tZ - pos.z;
     const targetDist = Math.sqrt(tdx * tdx + tdz * tdz) || 0.001;
     const steerX = tdx / targetDist;
     const steerZ = tdz / targetDist;
 
-    // ═══ 3. Sanftes Steering (Velocity zur Ziel-Richtung drehen) ═══
+    // ═══ 5. Speed-Dampening bei scharfen Kurven ═══
+    // Echte Fische bremsen in Kurven. Wenn der Winkel zwischen aktueller
+    // Flugrichtung und Steering-Richtung > 30° (0.5 rad), wird runtergebremst.
+    const cosDiff = fwdX * steerX + fwdZ * steerZ;
+    const angleDiff = Math.acos(Math.max(-1, Math.min(1, cosDiff)));
+    const speedDamp = angleDiff > 0.5
+      ? Math.max(0.4, 1.0 - (angleDiff - 0.5) * 0.8)
+      : 1.0;
+    const adjSpeed = currentSpeed * speedDamp;
+
+    // ═══ 6. Steering-Velocity (Lerp zur Ziel-Richtung) ═══
     const steerLerp = 1 - Math.exp(-p.agility * 4.0 * dt);
-    const targetVx = steerX * p.speed;
-    const targetVz = steerZ * p.speed;
+    const targetVx = steerX * adjSpeed;
+    const targetVz = steerZ * adjSpeed;
     fish.vx += (targetVx - fish.vx) * steerLerp;
     fish.vz += (targetVz - fish.vz) * steerLerp;
 
-    // ═══ 4. Velocity limitieren + anwenden ═══
+    // ═══ 7. Velocity limitieren + anwenden ═══
     const newVLen = Math.sqrt(fish.vx * fish.vx + fish.vz * fish.vz);
-    if (newVLen > p.speed) {
-      fish.vx = (fish.vx / newVLen) * p.speed;
-      fish.vz = (fish.vz / newVLen) * p.speed;
+    if (newVLen > currentSpeed) {
+      fish.vx = (fish.vx / newVLen) * currentSpeed;
+      fish.vz = (fish.vz / newVLen) * currentSpeed;
     }
-    const dx = fish.vx * dt;
-    const dz = fish.vz * dt;
-    pos.x += dx;
-    pos.z += dz;
+    pos.x += fish.vx * dt;
+    pos.z += fish.vz * dt;
 
-    // ═══ 7. Y-Position ═══
+    // ═══ 8. Y-Position ═══
     const playerY = cameraPos.y;
-    const rawY = playerY + p.yOffset +
+    const rawY =
+      playerY +
+      p.yOffset +
       Math.sin(elapsed * p.yFreq * Math.PI * 2) * p.yAmp;
-    const clampedY = Math.max(this.config.floorY + 2.0, Math.min(
-      this.config.waterY - 0.5, rawY,
-    ));
-    const lf = 1 - Math.exp(-5.0 * dt);
-    fish.state.curY += (clampedY - fish.state.curY) * lf;
+    const clampedY = Math.max(
+      this.config.floorY + 2.0,
+      Math.min(this.config.waterY - 0.5, rawY),
+    );
+    const yLerp = 1 - Math.exp(-5.0 * dt);
+    fish.state.curY += (clampedY - fish.state.curY) * yLerp;
+    pos.y = fish.state.curY;
 
-    // ═══ 8. Kontinuierlicher Heading (Yaw) aus Velocity – kein π-Sprung ═══
-    // Math.atan2 springt von +π nach −π. Stattdessen speichern wir einen
-    // aufgedrehten heading, der über diese Grenze hinweg stetig bleibt.
+    // ═══ 9. Heading (Yaw) aus Velocity – kein π-Sprung ═══
     if (vLen > 0.01) {
       const rawYaw = Math.atan2(fish.vx, -fish.vz + 0.0001);
       let diff = rawYaw - fish.heading;
@@ -854,15 +898,15 @@ export class FishWorld {
       if (diff < -Math.PI) diff += Math.PI * 2;
       fish.heading += diff;
     }
-    const yaw = fish.heading;
 
-    // ═══ 9. Position + Rotation anwenden ═══
-    pos.y = fish.state.curY;
+    // ═══ 10. orbitSwimming: Yaw/Pitch/Roll-Animation + Burst ═══
+    updateSwimState(p.swim, fish.state, delta, elapsed, fish.wanderAngle);
+
+    // ═══ 11. Rotation anwenden (TSL kümmert sich um die Vertex-Deformation) ═══
     fish.mesh.rotation.set(0, 0, 0);
-    fish.mesh.rotateY(yaw);
-    // Sanfte Körperwelle: leichtes Auf und Ab beim Schwimmen (kein Orbit-Roll)
-    const bodyWave = Math.sin(elapsed * 2.0 + fish.mesh.id) * 0.03;
-    fish.mesh.rotateX(bodyWave);
+    fish.mesh.rotateY(fish.heading + fish.state.yaw);
+    fish.mesh.rotateX(fish.state.pitch);
+    fish.mesh.rotateZ(fish.state.roll);
   }
 
   // -----------------------------------------------------------------------
@@ -913,7 +957,7 @@ export class FishWorld {
         schoolBuf,
       );
 
-      // ═══ Sanfter radialer Push aus Exklusionszonen (pro Schul-Fisch) ═══
+      // ═══ Sanfter radialer Push aus Exklusionszonen (quadratisch = weicher Rand) ═══
       if (this._exclusionZones.length > 0) {
         for (let j = 0; j < schoolBuf.length; j++) {
           const f = schoolBuf[j];
@@ -921,11 +965,11 @@ export class FishWorld {
             const dx = f.fx - zone.centerX;
             const dz = f.fz - zone.centerZ;
             const distSq = dx * dx + dz * dz;
-            const effectRadius = zone.radius + 2.0;
+            const effectRadius = zone.radius + 3.0;
             if (distSq < effectRadius * effectRadius && distSq > 0.01) {
               const dist = Math.sqrt(distSq);
-              const overlap = effectRadius - dist;
-              const strength = Math.min(overlap / effectRadius, 1.0);
+              const overlap = 1 - dist / effectRadius; // 0..1
+              const strength = overlap * overlap; // quadratisch = sanfter Einstieg
               const pushDist = strength * 2.5;
               f.fx += (dx / dist) * pushDist;
               f.fz += (dz / dist) * pushDist;

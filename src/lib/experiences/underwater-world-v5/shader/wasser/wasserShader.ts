@@ -118,6 +118,7 @@ function waveNormal(x: any, z: any, t: any, spd: any, amp: any): any {
  */
 export function createWaterSurfaceMaterial(
   options: Partial<WaterSurfaceOptions> = {},
+  size?: number,
 ): MeshBasicNodeMaterial {
   const opts: WaterSurfaceOptions = {
     waveAmplitude: 0.6,
@@ -131,6 +132,8 @@ export function createWaterSurfaceMaterial(
   const waveAmp = uniform(opts.waveAmplitude);
   const waveSpd = uniform(opts.waveSpeed);
   const surfOpacity = uniform(opts.opacity);
+  const halfSize = float(size !== undefined ? size / 2 : 8);
+  const fadeEdge = float(10);
   const surfColor = uniform(opts.surfaceColor);
   const highColor = uniform(opts.highlightColor);
 
@@ -171,7 +174,14 @@ export function createWaterSurfaceMaterial(
   // --- Alpha ---
   const alpha = mix(surfOpacity, surfOpacity.sub(float(0.2)), totalBrightness);
 
-  material.colorNode = vec4(waterColor, alpha);
+  // --- Radialer Edge-Fade: Plane-Kanten weich ausblenden ---
+  const dist = tslLength(positionLocal.xz);
+  const edgeFade = float(1.0).sub(
+    smoothstep(halfSize.sub(fadeEdge), halfSize, dist),
+  );
+  const finalAlpha = alpha.mul(edgeFade);
+
+  material.colorNode = vec4(waterColor, finalAlpha);
   return material;
 }
 
@@ -181,7 +191,7 @@ export function createWaterSurface(
   segments: number = 80,
 ): THREE.Mesh {
   const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
-  const material = createWaterSurfaceMaterial(options);
+  const material = createWaterSurfaceMaterial(options, size);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.rotation.x = -Math.PI / 2;
   return mesh;

@@ -77,6 +77,10 @@ export interface UnderwaterWorldV5State extends ExperienceState {
   // Szene-Referenz für sauberes Cleanup
   _scene: THREE.Scene;
   _frameCount: number;
+
+  /** City-Vorab-Scan: Tracking des zuletzt gescannten Chunks */
+  _lastCityScanChunkX: number;
+  _lastCityScanChunkZ: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,7 +129,7 @@ export async function setup(
     near: 0.1,
     far: 80, // Kamera-Far-Clip passend zum Nebel
     spawnPosition: { x: 0, y: 4, z: 0 },
-    baseSpeed: 2,
+    baseSpeed: 10,
   });
   player.rollYawMultiplier = 0;
   // clampToTerrain deaktivieren – wir haben unseren eigenen Y-Clamp
@@ -313,6 +317,8 @@ export async function setup(
     sceneFog,
     _scene: ctx.scene,
     _frameCount: 0,
+    _lastCityScanChunkX: NaN,
+    _lastCityScanChunkZ: NaN,
   };
 }
 
@@ -374,6 +380,63 @@ export function tick(
   // =========================================================================
   if (!s.cityWorld.processNextHeavyOp()) {
     s.coralReefWorld.processNextHeavyOp();
+  }
+
+  // =========================================================================
+  // 15. City-Vorab-Scan: Städte in größerer Distanz erkennen (für Leitsystem)
+  // =========================================================================
+  // Der WFC-Algorithmus ist deterministisch (Hash-basiert). Daher können wir
+  // "STADT"-Chunks in weiter Entfernung erkennen, OHNE die vollen Chunks zu
+  // laden. So weiß das Leitsystem schon aus 160m Entfernung, wo Städte sind.
+  // ---------------------------------------------------------------------------
+  {
+    const SCAN_RADIUS = 10; // 10 Chunks = 160m
+    const cs = WORLD_CONFIG.chunkSize;
+    const pCx = Math.floor(rigPos.x / cs);
+    const pCz = Math.floor(rigPos.z / cs);
+
+    const isFirstScan = isNaN(s._lastCityScanChunkX);
+
+    if (
+      isFirstScan ||
+      pCx !== s._lastCityScanChunkX ||
+      pCz !== s._lastCityScanChunkZ
+    ) {
+      s._lastCityScanChunkX = pCx;
+      s._lastCityScanChunkZ = pCz;
+
+      if (isFirstScan) {
+        // ★ ERSTER DURCHLAUF: Gesamtes Quadrat bei SCAN_RADIUS scannen
+        for (let dx = -SCAN_RADIUS; dx <= SCAN_RADIUS; dx++) {
+          for (let dz = -SCAN_RADIUS; dz <= SCAN_RADIUS; dz++) {
+            if (s.chunkManager.getChunkType(pCx + dx, pCz + dz) === "STADT") {
+              s.cityWorld.registerCityAtChunk(pCx + dx, pCz + dz);
+            }
+          }
+        }
+      } else {
+        // ★ FOLGEDURCHLÄUFE: Nur den äußeren Ring bei SCAN_RADIUS scannen
+        for (let i = -SCAN_RADIUS; i <= SCAN_RADIUS; i++) {
+          const check = (cx: number, cz: number) => {
+            if (s.chunkManager.getChunkType(cx, cz) === "STADT") {
+              s.cityWorld.registerCityAtChunk(cx, cz);
+            }
+          };
+          // Obere Kante (cz = -SCAN_RADIUS)
+          check(pCx + i, pCz - SCAN_RADIUS);
+          // Untere Kante (cz = +SCAN_RADIUS)
+          check(pCx + i, pCz + SCAN_RADIUS);
+          // Linke Kante, ohne Ecken
+          if (i > -SCAN_RADIUS && i < SCAN_RADIUS) {
+            check(pCx - SCAN_RADIUS, pCz + i);
+          }
+          // Rechte Kante, ohne Ecken
+          if (i > -SCAN_RADIUS && i < SCAN_RADIUS) {
+            check(pCx + SCAN_RADIUS, pCz + i);
+          }
+        }
+      }
+    }
   }
 
   // =========================================================================
