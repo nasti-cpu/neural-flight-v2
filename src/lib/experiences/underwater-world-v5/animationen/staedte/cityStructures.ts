@@ -53,8 +53,12 @@ export function colorBuildings(model: THREE.Object3D): void {
         color: baseColor,
         roughness: 0.5,
         metalness: 0.05,
-        emissive,
-        emissiveIntensity,
+        emissive: hasLights
+          ? emissive
+          : baseColor.clone().multiplyScalar(0.12),
+        emissiveIntensity: hasLights
+          ? emissiveIntensity
+          : 0.25,
         transparent: true,
         opacity: 1,
       });

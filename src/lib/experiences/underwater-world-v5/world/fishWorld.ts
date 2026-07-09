@@ -1,14 +1,15 @@
 ﻿/**
  * fishWorld.ts – Fisch-Integration für die Tiefsee-Unterwasserwelt
  *
- * Einzelfische (Solo) schwimmen mit Reynolds Wander Steering – einer
- * weichen, kontinuierlichen Zufallsbewegung ohne harte Target-Wechsel.
- * Schwärme (Schools) orbitieren um den Spieler in konzentrischen Ringen.
+ * Einzelfische (Solo) schwimmen mit Reynolds Wander Steering + smooth
+ * Sinus-Überlagerung (kein Random im Frame-Loop).
+ * Schwärme (Schools) nutzen ebenfalls Smooth Wander + per-fish Offsets
+ * + einfache Separation – kein Orbit mehr.
  *
  * Architektur:
- *   - orbitSwimming.ts  → Schwimm-Parameter/Zustand (für Schulen)
- *   - schoolFormation.ts → Schwarm-Formation
- *   - fishWorld.ts       → World-Management + Three.js-Integration
+ *   - orbitSwimming.ts → Yaw/Pitch/Roll-Animation + Burst-and-Glide
+ *   - fishWorld.ts     → World-Management + Three.js-Integration
+ *   - schoolFormation.ts nicht mehr benötigt (Separation inline)
  */
 
 import * as THREE from "three/webgpu";
@@ -25,12 +26,6 @@ import {
   createSwimState,
   updateSwimState,
 } from "../animationen/fische/orbitSwimming";
-import {
-  type FormationOffset,
-  type SchoolFrameFish,
-  generateVFormation,
-  computeSchoolFrame,
-} from "../animationen/fische/schoolFormation";
 
 /**
  * Ausschlusszone (z. B. um eine Stadtkuppel).
@@ -183,8 +178,10 @@ interface SoloFish {
   // === Wander-Steering-Zustand ===
   vx: number;
   vz: number;
-  /** Reynolds-Wander-Winkel: wird pro Frame leicht verrauscht (keine harten Targets) */
+  /** Smooth Wander-Winkel: Sinus-Überlagerung statt Random */
   wanderAngle: number;
+  /** Phase für die zwei Sinus-Wellen (einmal in init() gesetzt) */
+  wanderPhase: number;
 
   /** Accumulierter Push aus Exklusionszonen (smooth, kein Instant-Ruck) */
   pushAccumX: number;
@@ -203,43 +200,47 @@ interface SoloFish {
 }
 
 // ---------------------------------------------------------------------------
-// Fisch-Schwarm (persistent, orbitiert um den Spieler)
+// Per-Fish-Offset für Schulen (lokale Position relativ zum Schul-Zentrum)
+// ---------------------------------------------------------------------------
+
+interface SchoolFishOffsets {
+  /** Abstand vom Schul-Zentrum */
+  dist: number;
+  /** Aktueller Winkel um das Zentrum (rad) */
+  angle: number;
+  /** Vertikaler Offset */
+  ly: number;
+  /** Phase für individuelle Schwimm-Animation */
+  phase: number;
+  /** Geschwindigkeits-Faktor der Rotation (0.8–1.2) */
+  speedFactor: number;
+}
+
+// ---------------------------------------------------------------------------
+// Fisch-Schwarm (persistent, smooth wander + lightweight Boids)
 // ---------------------------------------------------------------------------
 
 interface FishSchool {
   instances: THREE.InstancedMesh;
-  formation: FormationOffset[];
   fishScale: number;
   schoolId: number;
 
-  // === Orbit-Basis ===
-  radiusX: number;
-  radiusZ: number;
-  speed: number;
-  startAngle: number;
+  // === Pro-Fisch Offsets (persistent) ===
+  fishOffsets: SchoolFishOffsets[];
 
-  // === Höhen-Varianz ===
-  yOffset: number;
-  yAmp: number;
-  yFreq: number;
-
-  // === ⚡ NEU: Radius-Drift ===
-  driftAmp: number;
-  driftFreqX: number;
-  driftFreqZ: number;
-
-  // === ⚡ NEU: Zentrum-Wanderung ===
-  wanderAmp: number;
-  wanderFreq: number;
-
-  // === ⚡ NEU: Geschwindigkeits-Modulation ===
-  speedModAmp: number;
-  speedModFreq: number;
+  // === Smooth Wander ===
+  wanderPhase: number;
+  wanderRange: number;
 
   // === Kamera-Folge ===
   lagFactor: number;
   centerX: number;
   centerZ: number;
+
+  // === Höhen-Varianz ===
+  yOffset: number;
+  yAmp: number;
+  yFreq: number;
 
   // Glow
   glowIntensity: number;
@@ -273,12 +274,12 @@ export class FishWorld {
   private echolocation: EcholocationRings | null = null;
   private _echoTargets: EchoTarget[] = [];
 
-  // Wiederverwendbare V-Formation für alle Schwärme
-  private _defaultFormations: Map<number, FormationOffset[]> = new Map();
-
-  // Wiederverwendbare Puffer für computeSchoolFrame (einer pro Schule)
-  private _schoolFrameBuffers: Map<number, SchoolFrameFish[]> = new Map();
+  // Wiederverwendbare Puffer
   private _nextSchoolId = 0;
+
+  /** Pre-allocierte Separation-Puffer (max 14 Fische pro Schule) */
+  private _sepPushX: number[] = new Array(14).fill(0);
+  private _sepPushZ: number[] = new Array(14).fill(0);
 
   // Wiederverwendbare Vektoren/Quaternionen (kein "new" im Loop)
   private _tmpVec3 = new THREE.Vector3();
@@ -595,6 +596,7 @@ export class FishWorld {
       vx: Math.sin(initAngle) * initSpeed,
       vz: Math.cos(initAngle) * initSpeed,
       wanderAngle: Math.random() * Math.PI * 2,
+      wanderPhase: Math.random() * Math.PI * 2,
       pushAccumX: 0,
       pushAccumZ: 0,
       heading: Math.atan2(Math.sin(initAngle), -Math.cos(initAngle) + 0.0001),
@@ -621,21 +623,6 @@ export class FishWorld {
   ): FishSchool {
     const layer = ORBIT_LAYERS[layerIndex];
     const schoolSize = layer.schoolSize;
-    const rand = Math.random;
-
-    // Formation für diese Schulgröße (cached)
-    if (!this._defaultFormations.has(schoolSize)) {
-      this._defaultFormations.set(schoolSize, generateVFormation(schoolSize));
-    }
-    const formation = this._defaultFormations.get(schoolSize)!;
-
-    // Frame-Puffer für diese Schule
-    const schoolId = this._nextSchoolId++;
-    const buf: SchoolFrameFish[] = [];
-    for (let j = 0; j < schoolSize; j++) {
-      buf.push({ fx: 0, fy: 0, fz: 0, yawVariation: 0, pitch: 0, roll: 0 });
-    }
-    this._schoolFrameBuffers.set(schoolId, buf);
 
     // InstancedMesh
     const mat = (
@@ -653,37 +640,37 @@ export class FishWorld {
     this.scene.add(instances);
 
     const scale = this._randomBetween(layer.scaleMin, layer.scaleMax) / maxDim;
-    const radius = this._randomBetween(layer.minRadius, layer.maxRadius);
 
+    // Persistente lokale Offsets für jeden Fisch im Schwarm
+    // Jeder Fisch hat einen zufälligen Abstand und Winkel zum Schul-Zentrum.
+    // Der Winkel rotiert langsam – so entsteht eine natürliche, lockere Schul-Formation.
+    const fishOffsets: SchoolFishOffsets[] = [];
+    for (let j = 0; j < schoolSize; j++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 1.0 + Math.random() * 5.0; // 1–6m vom Zentrum
+      fishOffsets.push({
+        dist,
+        angle,
+        ly: (Math.random() - 0.5) * 2.0,
+        phase: Math.random() * Math.PI * 2,
+        speedFactor: 0.5 + Math.random() * 1.0, // 0.5–1.5 = breite Streuung
+      });
+    }
+
+    const schoolId = this._nextSchoolId++;
     const school: FishSchool = {
       instances,
-      formation,
       fishScale: scale,
       schoolId,
-      radiusX: radius,
-      radiusZ: radius * (0.85 + rand() * 0.3),
-      speed: this._randomBetween(layer.minSpeed, layer.maxSpeed) * 0.25,
-      startAngle: rand() * Math.PI * 2,
-      yOffset: this._randomBetween(layer.minYOffset, layer.maxYOffset),
-      yAmp: 0.2 + rand() * 1.0,
-      yFreq: 0.04 + rand() * 0.08,
-
-      // Radius drift
-      driftAmp: 0.5 + rand() * 2.0,
-      driftFreqX: 0.03 + rand() * 0.06,
-      driftFreqZ: 0.04 + rand() * 0.07,
-
-      // Zentrum-Wanderung
-      wanderAmp: 0.3 + rand() * 1.5,
-      wanderFreq: 0.02 + rand() * 0.05,
-
-      // Geschwindigkeits-Modulation
-      speedModAmp: 0.05 + rand() * 0.10,
-      speedModFreq: 0.04 + rand() * 0.10,
-
-      lagFactor: 0.5 + rand() * 1.0,
+      fishOffsets,
+      wanderPhase: Math.random() * Math.PI * 2,
+      wanderRange: 8 + Math.random() * 8, // 8–16m
+      lagFactor: 0.5 + Math.random() * 1.0,
       centerX: startPos.x,
       centerZ: startPos.z,
+      yOffset: this._randomBetween(layer.minYOffset, layer.maxYOffset),
+      yAmp: 0.2 + Math.random() * 1.0,
+      yFreq: 0.04 + Math.random() * 0.08,
       glowIntensity: 0,
       originalEmissive: mat.emissive?.clone() ?? new THREE.Color(0x000000),
       _echoTarget: {
@@ -708,9 +695,6 @@ export class FishWorld {
    * Wichtig: KEINE Zone-Repulsion auf das Zentrum – das erzeugt nur
    * Oszillation. Stattdessen werden nur die Wander-Targets so gewählt,
    * dass sie außerhalb aller Zonen liegen (safe target selection).
-   *
-   * Solo-Fische: Das Zentrum definiert den Mittelpunkt des Wander-Rings.
-   * Schulen:     Das Zentrum ist der Orbit-Mittelpunkt.
    */
   private _updateOrbitCenters(
     delta: number, elapsed: number, cameraPos: THREE.Vector3,
@@ -725,32 +709,6 @@ export class FishWorld {
       p.centerZ += (cameraPos.z - p.centerZ) * lf;
     }
 
-    for (const school of this.activeSchools) {
-      const rate = 0.3 * school.lagFactor;
-      const lf = 1 - Math.exp(-rate * dt);
-      school.centerX += (cameraPos.x - school.centerX) * lf;
-      school.centerZ += (cameraPos.z - school.centerZ) * lf;
-
-      // Schul-Zentren von Zonen wegdrücken (nur Schulen, da Orbit-Modell)
-      if (this._exclusionZones.length > 0) {
-        for (const zone of this._exclusionZones) {
-          const dx = school.centerX - zone.centerX;
-          const dz = school.centerZ - zone.centerZ;
-          const distSq = dx * dx + dz * dz;
-          const minDist = zone.radius + Math.max(school.radiusX, school.radiusZ) + 4.0;
-          if (distSq < minDist * minDist && distSq > 0.01) {
-            const dist = Math.sqrt(distSq);
-            const push = (minDist - dist) * 2.0 * dt;
-            school.centerX += (dx / dist) * push;
-            school.centerZ += (dz / dist) * push;
-          }
-        }
-      }
-
-      const wa = school.wanderAmp * dt;
-      school.centerX += Math.sin(elapsed * school.wanderFreq * Math.PI * 2 + school.startAngle) * wa;
-      school.centerZ += Math.cos(elapsed * school.wanderFreq * 0.7 * Math.PI * 2 + school.startAngle) * wa;
-    }
   }
 
   // -----------------------------------------------------------------------
@@ -784,13 +742,22 @@ export class FishWorld {
       Math.sin(elapsed * p.speedModFreq * Math.PI * 2) * p.speedModAmp;
     const currentSpeed = p.speed * burstMul * speedMod;
 
-    // ═══ 2. Reynolds Wander Steering ═══
-    fish.wanderAngle += (Math.random() - 0.5) * p.agility * 2.0 * dt;
+    // ═══ 2. Reynolds Wander (smooth Sinus-Überlagerung) ═══
+    // Der Wander-Winkel ändert sich smooth – kein Random, kein Ruckeln.
+    // Das Ziel ist immer VOR dem Fisch in seiner aktuellen Richtung.
+    // Ein sanfter Zentrierungs-Pull verhindert, dass Fische abdriften.
+    const smoothAngle =
+      Math.sin(elapsed * 0.15 + fish.wanderPhase) * 1.5 +
+      Math.sin(elapsed * 0.37 + fish.wanderPhase * 1.7) * 0.7;
+    const angleLerp = 1 - Math.exp(-1.5 * dt);
+    fish.wanderAngle += (smoothAngle - fish.wanderAngle) * angleLerp;
 
+    // Vorwärts-Richtung aus Velocity (oder Heading als Fallback)
     const vLen = Math.sqrt(fish.vx * fish.vx + fish.vz * fish.vz);
     const fwdX = vLen > 0.01 ? fish.vx / vLen : Math.sin(fish.heading);
     const fwdZ = vLen > 0.01 ? fish.vz / vLen : -Math.cos(fish.heading);
 
+    // Wander-Kreis: 8m vor dem Fisch + 4m Radius
     const wDist = 8.0;
     const wRad = 4.0;
     const cX = pos.x + fwdX * wDist;
@@ -798,7 +765,7 @@ export class FishWorld {
     let tX = cX + Math.cos(fish.wanderAngle) * wRad;
     let tZ = cZ + Math.sin(fish.wanderAngle) * wRad;
 
-    // Sanfte Zentrierung
+    // Sanfter Zentrierungs-Pull: Fisch bleibt im Layer-Ring
     const centerDx = p.centerX - pos.x;
     const centerDz = p.centerZ - pos.z;
     const centerDist = Math.sqrt(centerDx * centerDx + centerDz * centerDz);
@@ -808,9 +775,7 @@ export class FishWorld {
       tZ += (centerDz / centerDist) * pull;
     }
 
-    // ═══ 3. Accumulierter Exklusionszonen-Push (kein Instant-Ruck) ═══
-    // Statt das Target sofort wegzudrücken (→ ruckartige Kurven),
-    // berechnen wir einen Ziel-Push und lerpen den accumulated push dorthin.
+    // ═══ 3. Exklusionszonen: Ziel sanft wegdrücken ═══
     let targetPushX = 0;
     let targetPushZ = 0;
     if (this._exclusionZones.length > 0) {
@@ -818,60 +783,39 @@ export class FishWorld {
         const zx = tX - zone.centerX;
         const zz = tZ - zone.centerZ;
         const zDistSq = zx * zx + zz * zz;
-        const effectRadius = zone.radius + 3.0;
+        const effectRadius = zone.radius + 5.0;
         if (zDistSq < effectRadius * effectRadius && zDistSq > 0.01) {
           const zDist = Math.sqrt(zDistSq);
-          const overlap = 1 - zDist / effectRadius; // 0..1
-          const push = overlap * 3.0;
+          const overlap = 1 - zDist / effectRadius;
+          const push = overlap * 6.0;
           targetPushX += (zx / zDist) * push;
           targetPushZ += (zz / zDist) * push;
         }
       }
     }
-
-    // Accumulierten Push sanft zum Ziel-Push führen
     const pushLerp = 1 - Math.exp(-3.0 * dt);
     fish.pushAccumX += (targetPushX - fish.pushAccumX) * pushLerp;
     fish.pushAccumZ += (targetPushZ - fish.pushAccumZ) * pushLerp;
-
-    // Decay wenn kein Push nötig
     if (targetPushX === 0 && targetPushZ === 0) {
       fish.pushAccumX *= Math.exp(-2.0 * dt);
       fish.pushAccumZ *= Math.exp(-2.0 * dt);
     }
-
     tX += fish.pushAccumX;
     tZ += fish.pushAccumZ;
 
-    // ═══ 4. Steering-Vektor ═══
+    // ═══ 4. Steering zum Ring-Target ═══
     const tdx = tX - pos.x;
     const tdz = tZ - pos.z;
     const targetDist = Math.sqrt(tdx * tdx + tdz * tdz) || 0.001;
     const steerX = tdx / targetDist;
     const steerZ = tdz / targetDist;
 
-    // ═══ 5. Speed-Dampening bei scharfen Kurven ═══
-    // Echte Fische bremsen in Kurven. Wenn der Winkel zwischen aktueller
-    // Flugrichtung und Steering-Richtung > 30° (0.5 rad), wird runtergebremst.
-    // OPTIMIERT: atan2(kreuzprodukt, punktprodukt) statt Math.acos() –
-    // atan2 ist ~5x schneller und vermeidet NaN-Risiken.
-    const cosDiff = fwdX * steerX + fwdZ * steerZ;
-    const cross = fwdX * steerZ - fwdZ * steerX;
-    let speedDamp = 1.0;
-    if (cosDiff < 0.88) { // cos(0.5) ≈ 0.88 → Winkel > 0.5 rad
-      const angleDiff = Math.atan2(Math.sqrt(cross * cross + 1e-10), cosDiff);
-      speedDamp = Math.max(0.4, 1.0 - (angleDiff - 0.5) * 0.8);
-    }
-    const adjSpeed = currentSpeed * speedDamp;
+    // ═══ 5. Velocity (Lerp in Ziel-Richtung) ═══
+    const steerLerp = 1 - Math.exp(-p.agility * 3.0 * dt);
+    fish.vx += (steerX * currentSpeed - fish.vx) * steerLerp;
+    fish.vz += (steerZ * currentSpeed - fish.vz) * steerLerp;
 
-    // ═══ 6. Steering-Velocity (Lerp zur Ziel-Richtung) ═══
-    const steerLerp = 1 - Math.exp(-p.agility * 4.0 * dt);
-    const targetVx = steerX * adjSpeed;
-    const targetVz = steerZ * adjSpeed;
-    fish.vx += (targetVx - fish.vx) * steerLerp;
-    fish.vz += (targetVz - fish.vz) * steerLerp;
-
-    // ═══ 7. Velocity limitieren + anwenden ═══
+    // Velocity limitieren + anwenden
     const newVLen = Math.sqrt(fish.vx * fish.vx + fish.vz * fish.vz);
     if (newVLen > currentSpeed) {
       fish.vx = (fish.vx / newVLen) * currentSpeed;
@@ -880,12 +824,12 @@ export class FishWorld {
     pos.x += fish.vx * dt;
     pos.z += fish.vz * dt;
 
-    // ═══ 8. Y-Position ═══
+    // ═══ 6. Y-Position (zwei Sinus-Wellen) ═══
     const playerY = cameraPos.y;
-    const rawY =
-      playerY +
-      p.yOffset +
-      Math.sin(elapsed * p.yFreq * Math.PI * 2) * p.yAmp;
+    const yPhase = fish.wanderPhase;
+    const yWave1 = Math.sin(elapsed * p.yFreq * Math.PI * 2 + yPhase) * p.yAmp;
+    const yWave2 = Math.sin(elapsed * p.yFreq * 0.7 * Math.PI * 2 + yPhase * 0.3) * p.yAmp * 0.4;
+    const rawY = playerY + p.yOffset + yWave1 + yWave2;
     const clampedY = Math.max(
       this.config.floorY + 2.0,
       Math.min(this.config.waterY - 0.5, rawY),
@@ -894,13 +838,16 @@ export class FishWorld {
     fish.state.curY += (clampedY - fish.state.curY) * yLerp;
     pos.y = fish.state.curY;
 
-    // ═══ 9. Heading (Yaw) aus Velocity – kein π-Sprung ═══
-    if (vLen > 0.01) {
-      const rawYaw = Math.atan2(fish.vx, -fish.vz + 0.0001);
-      let diff = rawYaw - fish.heading;
+    // ═══ 7. Heading aus Velocity (max 90°/s Drehrate) ═══
+    // So schwimmt der Fisch immer in die Richtung, in die er sich bewegt.
+    // Die max. Drehrate verhindert 180°-Flips (Rückwärts-Schwimmen).
+    if (newVLen > 0.01) {
+      const velYaw = Math.atan2(fish.vx, -fish.vz + 0.0001);
+      let diff = velYaw - fish.heading;
       if (diff > Math.PI) diff -= Math.PI * 2;
       if (diff < -Math.PI) diff += Math.PI * 2;
-      fish.heading += diff;
+      const maxTurn = 1.57 * dt; // 90° pro Sekunde
+      fish.heading += Math.max(-maxTurn, Math.min(maxTurn, diff));
     }
 
     // ═══ 10. orbitSwimming: Yaw/Pitch/Roll-Animation + Burst ═══
@@ -923,17 +870,45 @@ export class FishWorld {
     cameraPos: THREE.Vector3,
   ): void {
     for (const school of this.activeSchools) {
-      // ═══ Radius-Drift für die Schulbahn ═══
-      const driftX = Math.sin(elapsed * school.driftFreqX * Math.PI * 2) * school.driftAmp;
-      const driftZ = Math.sin(elapsed * school.driftFreqZ * Math.PI * 2) * school.driftAmp;
-      const rX = school.radiusX + driftX;
-      const rZ = school.radiusZ + driftZ;
+      // ═══ 1. Wander-Target: duale Sinus-Überlagerung um den Spieler ═══
+      // Zwei Frequenzen = reichhaltigere, unvorhersehbare Bahn.
+      const wr = school.wanderRange;
+      const wp = school.wanderPhase;
+      const targetX = cameraPos.x
+        + Math.sin(elapsed * 0.05 + wp) * wr
+        + Math.sin(elapsed * 0.11 + wp * 1.7) * wr * 0.3;
+      const targetZ = cameraPos.z
+        + Math.cos(elapsed * 0.04 + wp * 1.3) * wr
+        + Math.cos(elapsed * 0.09 + wp * 0.7) * wr * 0.3;
 
-      // ═══ Geschwindigkeits-Modulation ═══
-      const speedMod = 1.0 + Math.sin(elapsed * school.speedModFreq * Math.PI * 2) * school.speedModAmp;
-      const currentSpeed = school.speed * speedMod;
+      // ═══ 2. Schul-Zentrum folgt dem Target mit Trägheit ═══
+      const dt = Math.min(delta, 0.05);
+      const followRate = 1 - Math.exp(-0.5 * school.lagFactor * dt);
+      school.centerX += (targetX - school.centerX) * followRate;
+      school.centerZ += (targetZ - school.centerZ) * followRate;
 
-      // School-Y: Höhen-Offset + vertikale Oszillation
+      // ═══ 3. Exklusionszonen-Push auf das Zentrum (ganze Schule weicht aus) ═══
+      if (this._exclusionZones.length > 0) {
+        for (const zone of this._exclusionZones) {
+          const dx = school.centerX - zone.centerX;
+          const dz = school.centerZ - zone.centerZ;
+          const distSq = dx * dx + dz * dz;
+          const minDist = zone.radius + 14;
+          if (distSq < minDist * minDist && distSq > 0.01) {
+            const dist = Math.sqrt(distSq);
+            const push = (minDist - dist) * 1.5 * dt;
+            school.centerX += (dx / dist) * push;
+            school.centerZ += (dz / dist) * push;
+          }
+        }
+      }
+
+      // ═══ 4. Basis-Yaw aus Richtung zum Target ═══
+      const dirToTargetX = targetX - school.centerX;
+      const dirToTargetZ = targetZ - school.centerZ;
+      const baseYaw = Math.atan2(dirToTargetX, -dirToTargetZ);
+
+      // ═══ 5. Y-Position der Schule ═══
       const schoolY = cameraPos.y + school.yOffset +
         Math.sin(elapsed * school.yFreq * Math.PI * 2) * school.yAmp;
       const clampedY = Math.max(
@@ -941,63 +916,88 @@ export class FishWorld {
         Math.min(this.config.waterY - 0.5, schoolY),
       );
 
-      // Vorab alloziierten Frame-Puffer für diese Schule abrufen
-      const schoolBuf = this._schoolFrameBuffers.get(school.schoolId);
-      if (!schoolBuf) continue;
-
-      const baseYaw = computeSchoolFrame(
-        school.formation,
-        elapsed,
-        school.centerX,
-        school.centerZ,
-        clampedY,
-        rX,
-        rZ,
-        currentSpeed,
-        school.startAngle,
-        0,
-        0,
-        this.config.floorY,
-        schoolBuf,
-      );
-
-      // ═══ Sanfter radialer Push aus Exklusionszonen (quadratisch = weicher Rand) ═══
-      if (this._exclusionZones.length > 0) {
-        for (let j = 0; j < schoolBuf.length; j++) {
-          const f = schoolBuf[j];
-          for (const zone of this._exclusionZones) {
-            const dx = f.fx - zone.centerX;
-            const dz = f.fz - zone.centerZ;
+      // ═══ 6. Separation: einfacher Abstands-Check innerhalb der Schule ═══
+      // Nur wenn zwei Fische < 1.5m auseinander sind, werden sie sanft getrennt.
+      const offsets = school.fishOffsets;
+      const len = offsets.length;
+      const sepPushX = this._sepPushX;
+      const sepPushZ = this._sepPushZ;
+      for (let j = 0; j < len; j++) {
+        sepPushX[j] = 0;
+        sepPushZ[j] = 0;
+      }
+      if (len <= 14) {
+        for (let a = 0; a < len; a++) {
+          const oa = offsets[a];
+          const ax = school.centerX + Math.cos(oa.angle) * oa.dist;
+          const az = school.centerZ + Math.sin(oa.angle) * oa.dist;
+          for (let b = a + 1; b < len; b++) {
+            const ob = offsets[b];
+            const bx = school.centerX + Math.cos(ob.angle) * ob.dist;
+            const bz = school.centerZ + Math.sin(ob.angle) * ob.dist;
+            const dx = ax - bx;
+            const dz = az - bz;
             const distSq = dx * dx + dz * dz;
-            const effectRadius = zone.radius + 3.0;
-            if (distSq < effectRadius * effectRadius && distSq > 0.01) {
+            if (distSq < 2.25 && distSq > 0.01) {
               const dist = Math.sqrt(distSq);
-              const overlap = 1 - dist / effectRadius; // 0..1
-              const strength = overlap * overlap; // quadratisch = sanfter Einstieg
-              const pushDist = strength * 2.5;
-              f.fx += (dx / dist) * pushDist;
-              f.fz += (dz / dist) * pushDist;
-              f.fy = Math.max(f.fy, this.config.floorY + 2.0 + strength * 4.0);
+              const push = (1.5 - dist) * 0.5 * delta;
+              const nx = dx / dist;
+              const nz = dz / dist;
+              sepPushX[a] += nx * push;
+              sepPushZ[a] += nz * push;
+              sepPushX[b] -= nx * push;
+              sepPushZ[b] -= nz * push;
             }
           }
         }
       }
 
-      // Matrizen setzen
+      // ═══ 7. Jeden Fisch individuell positionieren ═══
+      // Jeder Fisch hat eigene Amplituden (aus speedFactor) und Frequenzen
+      // für Yaw/Pitch/Roll + Distanz-Puls + Höhen-Bobbing.
       const scale = school.fishScale;
-      for (let j = 0; j < schoolBuf.length; j++) {
-        const f = schoolBuf[j];
+      for (let j = 0; j < len; j++) {
+        const fo = offsets[j];
 
-        this._tmpVec3.set(f.fx, f.fy, f.fz);
+        // Offset rotiert mit individueller Geschwindigkeit
+        fo.angle += fo.speedFactor * 0.08 * delta;
 
+        // Amplituden-Skalierung aus speedFactor (0.5–1.5)
+        const amp = 0.5 + fo.speedFactor; // 1.0–2.0
+
+        // Distanz pulsiert leicht (±15%) pro Fisch
+        const distPulse = 1.0 + Math.sin(elapsed * (0.08 + fo.speedFactor * 0.06) + fo.phase * 0.5) * 0.15;
+
+        // Separation anwenden
+        const sepX = sepPushX[j] || 0;
+        const sepZ = sepPushZ[j] || 0;
+
+        // Position = Zentrum + rotierter Offset * Puls + Separation
+        const cosA = Math.cos(fo.angle);
+        const sinA = Math.sin(fo.angle);
+        const px = school.centerX + cosA * fo.dist * distPulse + sepX;
+        const pz = school.centerZ + sinA * fo.dist * distPulse + sepZ;
+        const py = clampedY + fo.ly
+          + Math.sin(elapsed * (0.2 + fo.speedFactor * 0.15) + fo.phase) * (0.4 * amp);
+
+        // ═══ 8. Richtung mit individueller Variation ═══
+        // Yaw: ±0.2–0.4 rad – jeder Fisch schaut etwas anders
+        const yawVar = Math.sin(elapsed * (0.5 + fo.speedFactor * 0.3) + fo.phase) * (0.2 * amp);
+        // Pitch: ±0.08–0.16 rad – leichte Nick-Bewegung
+        const pitch = Math.sin(elapsed * (0.4 + fo.speedFactor * 0.2) + fo.phase * 0.7) * (0.08 * amp);
+        // Roll: ±0.12–0.24 rad – wie echte Fische in der Kurve
+        const roll = Math.cos(elapsed * (0.3 + fo.speedFactor * 0.2) + fo.phase * 0.3) * (0.12 * amp);
+        const yaw = baseYaw + yawVar;
+
+        // Matrix setzen
+        this._tmpVec3.set(px, py, pz);
         this._tmpQuat.identity();
-        this._tmpQuatA.setFromAxisAngle(this._up, baseYaw + f.yawVariation);
+        this._tmpQuatA.setFromAxisAngle(this._up, yaw);
         this._tmpQuat.multiply(this._tmpQuatA);
-        this._tmpQuatB.setFromAxisAngle(this._axisPitch, f.pitch);
+        this._tmpQuatB.setFromAxisAngle(this._axisPitch, pitch);
         this._tmpQuat.multiply(this._tmpQuatB);
-        this._tmpQuatA.setFromAxisAngle(this._axisRoll, f.roll);
+        this._tmpQuatA.setFromAxisAngle(this._axisRoll, roll);
         this._tmpQuat.multiply(this._tmpQuatA);
-
         this._tmpScale.set(scale, scale, scale);
         this._tmpMatrix.compose(this._tmpVec3, this._tmpQuat, this._tmpScale);
         school.instances.setMatrixAt(j, this._tmpMatrix);

@@ -64,8 +64,11 @@ export class ChunkManager {
 
   /** Exklusionszonen â€“ hier wÃ¤chst kein Seegras */
   private _exclusionZones: ExclusionZone[] = [];
-  /** Letzter Zonen-String zum Erkennen von Ã„nderungen */
+  /** Letzter Zonen-String zum Erkennen von Änderungen */
   private _lastZoneKey: string = "";
+
+  /** Wiederverwendbarer Puffer für _computeDune (kein Tuple-Array pro Vertex!) */
+  private _duneResult: [number, number, number] = [0, 0, 0];
 
   /** WFC-Callbacks: Werden benachrichtigt, wenn ein Chunk-Typ kollabiert */
   private _wfcCallbacks: Array<
@@ -73,11 +76,12 @@ export class ChunkManager {
   > = [];
 
   /**
-   * Warteschlange fÃ¼r Chunks, die noch geladen werden mÃ¼ssen.
+   * Warteschlange für Chunks, die noch geladen werden müssen.
    * Gestaffeltes Laden: max 2 Chunks pro Frame, damit der Haupt-Thread
    * nicht blockiert wird und kein Ruckler entsteht.
    */
   private _pendingLoad: Array<{ cx: number; cz: number }> = [];
+  private _pendingLoadIndex: number = 0;
 
   constructor(scene: THREE.Scene, config: ChunkManagerConfig) {
     this.scene = scene;
@@ -189,20 +193,22 @@ export class ChunkManager {
     // Performance: nicht alle Chunks in einem Frame laden, sondern
     // gestaffelt (max 2 pro Frame). Das verhindert Ruckler beim
     // Betreten neuer Chunk-Reihen.
-    this._pendingLoad.length = 0;
-    for (const { cx, cz } of neededCoords) {
-      const key = this._chunkKey(cx, cz);
-      if (!this.chunks.has(key)) {
-        this._pendingLoad.push({ cx, cz });
+    if (this._pendingLoadIndex >= this._pendingLoad.length) {
+      this._pendingLoad.length = 0;
+      this._pendingLoadIndex = 0;
+      for (const { cx, cz } of neededCoords) {
+        const key = this._chunkKey(cx, cz);
+        if (!this.chunks.has(key)) {
+          this._pendingLoad.push({ cx, cz });
+        }
       }
     }
 
-    // --- Gestaffelt laden: max 4 Chunks pro Frame ---
+    // --- Gestaffelt laden: max 4 Chunks pro Frame (kein slice!) ---
     const MAX_LOADS_PER_FRAME = 4;
-    const toLoad = this._pendingLoad.slice(0, MAX_LOADS_PER_FRAME);
-    // Geladene aus Warteschlange entfernen, Rest bleibt für nächste Frames
-    this._pendingLoad = this._pendingLoad.slice(MAX_LOADS_PER_FRAME);
-    for (const { cx, cz } of toLoad) {
+    const end = Math.min(this._pendingLoadIndex + MAX_LOADS_PER_FRAME, this._pendingLoad.length);
+    for (let i = this._pendingLoadIndex; i < end; i++) {
+      const { cx, cz } = this._pendingLoad[i];
       const key = this._chunkKey(cx, cz);
       if (this.chunks.has(key)) continue; // Wurde inzwischen geladen?
 
@@ -215,6 +221,7 @@ export class ChunkManager {
         cb(cx, cz, chunkType);
       }
     }
+    this._pendingLoadIndex = end;
 
     // --- EntlÃ¤dt alte Chunks ---
     for (const [key, chunk] of this.chunks) {
@@ -425,7 +432,10 @@ export class ChunkManager {
       dh * 0.3 * 0.8 * cosC +
       dh * 0.2 * 1.4 * sinD;
 
-    return [height, dhdx, dhdz];
+    this._duneResult[0] = height;
+    this._duneResult[1] = dhdx;
+    this._duneResult[2] = dhdz;
+    return this._duneResult;
   }
 
   // -----------------------------------------------------------------------
