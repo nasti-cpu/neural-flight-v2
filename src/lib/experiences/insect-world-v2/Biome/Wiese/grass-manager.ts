@@ -409,7 +409,7 @@ export class GrassManager {
     flowerPositionsOut: THREE.Vector3[],
   ): void {
     const dummy = new THREE.Object3D();
-    const MIN_FLOWER_DIST = 0.15; // Mindestabstand 15cm zwischen Blumen
+    const MIN_FLOWER_DIST = 1.0; // Mindestabstand 1m zwischen Blumen (nie ineinander)
 
     // Bereits platzierte Positionen (für Abstands-Check, chunk-intern)
     const placedPositions: { x: number; z: number }[] = [];
