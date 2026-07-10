@@ -90,7 +90,13 @@ export class CityManager {
         // Modell klonen
         const clone = model.clone(true);
         clone.scale.setScalar(CITY_CONFIG.SCALE);
-        clone.position.set(0, 0, 0);
+
+        // GLB zentrieren (interner Offset ausgleichen)
+        const box = new THREE.Box3().setFromObject(clone);
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        clone.position.set(-center.x, 0, -center.z);
+
         clone.rotation.y = Math.random() * Math.PI * 2;
         group.add(clone);
       }

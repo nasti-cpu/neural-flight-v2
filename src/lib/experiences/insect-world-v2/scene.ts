@@ -16,6 +16,8 @@ import {
   type ButterflySwarm,
 } from "./Objekte/Schmetterlinge/schmetterlinge";
 import { PheromoneSystem } from "./Sinne/Pheromonspuren/pheromonspuren";
+import { CityManager } from "./Objekte/Stadt/city-manager";
+import { CityGuidePath } from "./Objekte/Stadt/city-guide-path";
 import beeGlbUrl from "./Objekte/Bienen/Bee.glb?url";
 import butterflyGlbUrl from "./Objekte/Schmetterlinge/Beautiful Butterfly.glb?url";
 
@@ -27,6 +29,8 @@ interface InsectWorldV2State extends ExperienceState {
   butterflies: ButterflySwarm;
   pheromones: PheromoneSystem;
   sky: THREE.Mesh;
+  cityManager: CityManager;
+  guidePath: CityGuidePath;
   /** Zählt Frames für verzögertes Update (Bienen/Schmetterlinge/WFC) */
   tickInterval: number;
 }
@@ -101,6 +105,29 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   pheromones.addTrails(pheromoneTargets, ctx.camera.position);
   ctx.scene.add(pheromones.group);
 
+  // 9. Städte (prozedural, zufällig, 200-300m entfernt)
+  const cityManager = new CityManager();
+  const positions = cityManager.generatePositions(5, 80, 150);
+  await cityManager.loadCities(positions, ctx.scene, grassManager);
+  console.log(`[City] ${cityManager.cities.length} Städte erzeugt`);
+
+  // 10. GuidePath – direkt beim Start zur nächsten Stadt aktivieren
+  // Große Sprites (1.0-1.8) damit die Spur durch den Nebel sichtbar ist
+  const guidePath = new CityGuidePath({
+    neonColor: 0x44ffff,
+    dashLength: 0.5,
+    gapLength: 0.3,
+    spriteSizeMin: 1.0,
+    spriteSizeMax: 1.8,
+    spritesPerDash: 3,
+  });
+  const firstCity = cityManager.getNearestUndiscovered(new THREE.Vector3(0, 2, 0));
+  if (firstCity) {
+    guidePath.setTarget(new THREE.Vector3(0, 2, 0), firstCity.position);
+    console.log(`[City] Leitspur aktiv: Stadt ${firstCity.index} bei`, firstCity.position);
+  }
+  ctx.scene.add(guidePath.group);
+
   // ── Atmosphärischer Nebel ──
   // Density 0.04 = Sichtweite ~30-50m, dann vollständig im Nebel.
   const fogColor = new THREE.Color("#4a90d9");
@@ -116,6 +143,8 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     bees,
     butterflies,
     pheromones,
+    cityManager,
+    guidePath,
     sky,
     tickInterval: 0,
   };
@@ -146,6 +175,37 @@ export function tick(
   // Wiese: Chunks laden/entladen + WFC-Cleanup (jeden Frame – VIEW_RADIUS=1 = nur 9 Chunks)
   s.grassManager.update(ctx.camera.position);
 
+  // Städte weiter als 100m unsichtbar schalten spart GPU
+  if (s.tickInterval % 6 === 0) {
+    for (const city of s.cityManager.cities) {
+      const d = ctx.camera.position.distanceTo(city.position);
+      city.group.visible = d < 100;
+    }
+  }
+
+  // GuidePath: Prüfen ob aktuelle Ziel-Stadt erreicht wurde, dann zur nächsten
+  const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);
+  if (nearest) {
+    const dist = ctx.camera.position.distanceTo(nearest.position);
+
+    // Stadt erreicht (< 15m) → als besucht markieren und Trail löschen
+    if (dist < 15) {
+      s.cityManager.markVisited(nearest);
+      s.guidePath.clear();
+      console.log(`[City] Stadt ${nearest.index} entdeckt!`);
+
+      // Nächste unentdeckte Stadt suchen und neuen Trail aktivieren
+      const next = s.cityManager.getNearestUndiscovered(ctx.camera.position);
+      if (next) {
+        s.guidePath.setTarget(ctx.camera.position, next.position);
+        console.log(`[City] Neue Leitspur zu Stadt ${next.index}`);
+      }
+    }
+  }
+
+  // GuidePath animieren (pulsierende Sprites)
+  s.guidePath.update(ctx.elapsed);
+
   return {
     state: s,
   };
@@ -157,6 +217,8 @@ export function dispose(state: ExperienceState, _scene: THREE.Scene): void {
   s.bees.dispose();
   s.butterflies.dispose();
   s.pheromones.dispose();
+  s.cityManager.dispose(_scene);
+  s.guidePath.dispose();
   s.grassManager.dispose();
   _scene.remove(s.sky);
   (s.sky.geometry as THREE.BufferGeometry).dispose();
@@ -164,5 +226,6 @@ export function dispose(state: ExperienceState, _scene: THREE.Scene): void {
   _scene.remove(s.grassManager.group);
   _scene.remove(s.bees.group);
   _scene.remove(s.butterflies.group);
+  _scene.remove(s.guidePath.group);
   _scene.remove(s.pheromones.group);
 }
