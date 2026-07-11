@@ -310,31 +310,9 @@ export async function setup(
       cityWorld.registerCityAtChunk(cx, cz);
     } else if (type === "RIFF") {
       coralReefWorld.registerReefAtChunk(cx, cz);
-    } else if (type === "FISCH") {
-      // ★ Keine Fische in Chunks, die neben einer Stadt liegen.
-      // Städte haben einen Mindestabstand von 48m (= 3 Chunks),
-      // also prüfen wir die 8 Nachbarn um den FISCH-Chunk.
-      const cs = WORLD_CONFIG.chunkSize;
-      const fwX = cx * cs + cs / 2;
-      const fwZ = cz * cs + cs / 2;
-      const MIN_DIST_TO_CITY_SQ = 28 * 28; // ~1.75 Chunks
-      let nearCity = false;
-      const cityPositions = cityWorld.getActiveCityPositions();
-      for (const pos of cityPositions) {
-        const dx = fwX - pos.x;
-        const dz = fwZ - pos.z;
-        if (dx * dx + dz * dz < MIN_DIST_TO_CITY_SQ) {
-          nearCity = true;
-          break;
-        }
-      }
-      if (!nearCity) {
-        fishWorld.registerFishAtChunk(cx, cz);
-        // ★ Quallen + große Tiere werden nicht mehr pro Chunk erzeugt –
-        //    genau 5 Quallen + 2 Delfine + 1 Hai schwimmen auf weiten
-        //    Orbits und tauchen immer wieder im Nebel auf/ab.
-      }
     }
+    // "FISCH" wird nicht mehr beachtet – Fische schwimmen jetzt
+    // auf Kamera-zentrierten Orbits (32 Einzelfische + 1 Schule).
   });
 
   console.log("🌊 Underwater World V5 gestartet! (WFC-gesteuert)");
