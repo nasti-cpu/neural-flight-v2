@@ -36,7 +36,7 @@ export interface EchoTarget {
 
 const DEFAULT_CONFIG: EcholocationConfig = {
   ringMaxRadius: 80,
-  ringSpeed: 8,
+  ringSpeed: 30,
   ringInterval: 5,
   ringColor: 0x44ccff,
   hitColor: 0xffcc44,
@@ -61,10 +61,6 @@ export class EcholocationRings {
 
   // Cache: pro Frame einmal berechnete Distanz-Quadrate (vermeidet GC)
   private _distCache: Float64Array = new Float64Array(0);
-
-  /**
-   * (Kollision inzwischen instant bei Ring-Emission, daher kein Frame-Check mehr)
-   */
 
   constructor(scene: THREE.Scene, config?: Partial<EcholocationConfig>) {
     this.scene = scene;
