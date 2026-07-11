@@ -59,8 +59,8 @@ interface CreatureState {
 
   // Echoortung
   glowIntensity: number;
-  creatureMesh: THREE.Mesh | null;
-  originalEmissive: THREE.Color | null;
+  creatureMeshes: THREE.Mesh[];
+  originalEmissives: THREE.Color[];
   echoTarget: EchoTarget;
 }
 
@@ -270,8 +270,8 @@ export class LargeCreatureWorld {
       depthAmp: 0,
       depthFreq: 0,
       glowIntensity: 0,
-      creatureMesh: null,
-      originalEmissive: null,
+      creatureMeshes: [],
+      originalEmissives: [],
       echoTarget: { position: new THREE.Vector3(), onHit: () => {} },
     };
     ref.echoTarget.onHit = (intensity: number) => { ref.glowIntensity = intensity; };
@@ -310,8 +310,8 @@ export class LargeCreatureWorld {
       depthAmp: 3 + Math.random() * 2,
       depthFreq: 0.04 + Math.random() * 0.03,
       glowIntensity: 0,
-      creatureMesh: null,
-      originalEmissive: null,
+      creatureMeshes: [],
+      originalEmissives: [],
       echoTarget: { position: new THREE.Vector3(), onHit: () => {} },
     };
     ref.echoTarget.onHit = (intensity: number) => { ref.glowIntensity = intensity; };
@@ -321,29 +321,36 @@ export class LargeCreatureWorld {
 
   private _findMesh(creature: CreatureState): void {
     creature.mesh.traverse((ch) => {
-      if (ch instanceof THREE.Mesh && !creature.creatureMesh) {
-        creature.creatureMesh = ch;
+      if (ch instanceof THREE.Mesh) {
+        creature.creatureMeshes.push(ch);
         const mat = ch.material as THREE.MeshStandardMaterial;
-        creature.originalEmissive = mat.emissive
-          ? mat.emissive.clone()
-          : new THREE.Color(0x000000);
+        creature.originalEmissives.push(
+          mat.emissive
+            ? mat.emissive.clone()
+            : new THREE.Color(0x000000),
+        );
       }
     });
   }
 
   private _applyGlowDecay(creature: CreatureState, decay: number): void {
-    if (!creature.creatureMesh || !creature.originalEmissive) return;
+    if (creature.creatureMeshes.length === 0) return;
     creature.glowIntensity *= decay;
-    const mat = creature.creatureMesh.material as THREE.MeshStandardMaterial;
-    if (creature.glowIntensity > 0.01) {
-      this._tmpColor
-        .copy(creature.originalEmissive)
-        .lerp(this._glowColor, creature.glowIntensity);
-      mat.emissive.copy(this._tmpColor);
-      mat.emissiveIntensity = 0.2 + creature.glowIntensity * 1.8;
-    } else {
-      mat.emissive.copy(creature.originalEmissive);
-      mat.emissiveIntensity = 0;
+    const isActive = creature.glowIntensity > 0.01;
+    for (let i = 0; i < creature.creatureMeshes.length; i++) {
+      const mesh = creature.creatureMeshes[i];
+      const orig = creature.originalEmissives[i];
+      const mat = mesh.material as THREE.MeshStandardMaterial;
+      if (isActive) {
+        this._tmpColor
+          .copy(orig)
+          .lerp(this._glowColor, creature.glowIntensity);
+        mat.emissive.copy(this._tmpColor);
+        mat.emissiveIntensity = 0.2 + creature.glowIntensity * 1.8;
+      } else {
+        mat.emissive.copy(orig);
+        mat.emissiveIntensity = 0;
+      }
     }
   }
 

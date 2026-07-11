@@ -55,11 +55,21 @@ interface SoloFishState {
   mesh: THREE.Group;
   scale: number;
 
-  /** Ellipsen-Orbit um die Kamera */
+  /** Lissajous-Orbit um die Kamera */
   radiusX: number;
   radiusZ: number;
   speed: number;
+  /** Richtung: 1 = rechtsrum, -1 = linksrum */
+  direction: number;
+  /** Frequenz-Verhältnis X/Z (nie 1.0 → Lissajous statt Kreis) */
+  freqRatio: number;
   angle: number;
+
+  /** Geschwindigkeits-Modulation (Burst-and-Glide) */
+  speedAmp: number;
+  speedFreq: number;
+  burstInt: number;
+  burstDur: number;
 
   /** Y relativ zur Kamera */
   yOffset: number;
@@ -182,12 +192,18 @@ export class FishWorld {
       return;
     }
 
+    // Maximale Ausdehnung des Modells für korrekte Skalierung
+    const rawBox = new THREE.Box3().setFromObject(this.fishModelTemplate);
+    const rawSize = new THREE.Vector3();
+    rawBox.getSize(rawSize);
+    const maxDim = Math.max(rawSize.x, rawSize.y, rawSize.z);
+
     // Mesh für die Schule extrahieren
     this._extractSchoolMesh();
 
     // ═══ 32 Solo-Fische erzeugen ═══
     for (let i = 0; i < this.config.soloCount; i++) {
-      const fish = this._createSoloFish();
+      const fish = this._createSoloFish(maxDim);
       this.scene.add(fish.mesh);
       this.soloFish.push(fish);
     }
@@ -319,9 +335,10 @@ export class FishWorld {
   // Private: Solo-Fisch erzeugen
   // -----------------------------------------------------------------------
 
-  private _createSoloFish(): SoloFishState {
+  private _createSoloFish(maxDim: number): SoloFishState {
     const mesh = this.fishModelTemplate!.clone(true);
-    const scale = 0.8 + Math.random() * 0.7;
+    // Skalierung wie im alten System: relativ zur Modellgröße
+    const scale = (0.8 + Math.random() * 1.2) / maxDim;
     mesh.scale.setScalar(scale);
     mesh.traverse((ch) => {
       if (ch instanceof THREE.Mesh) {
@@ -342,19 +359,33 @@ export class FishWorld {
       }
     });
 
-    // Orbit variieren: manche nah, manche fern, manche rund, manche elliptisch
-    const rBase = 10 + Math.random() * 35;
+    // Orbit: 25–70m, elliptisch + Lissajous-Frequenz (nie 1.0)
+    const rBase = 25 + Math.random() * 45;
     const ellipticity = 0.3 + Math.random() * 0.7;
     const radiusX = rBase * (1 + (Math.random() - 0.5) * 0.6);
     const radiusZ = rBase * ellipticity;
+
+    // Frequenz-Verhältnis: 0.6–0.95 oder 1.05–1.4 (nie genau 1.0)
+    const freqRatio = Math.random() > 0.5
+      ? 0.6 + Math.random() * 0.35
+      : 1.05 + Math.random() * 0.35;
+    // Richtung: 50% links-/rechtsrum
+    const direction = Math.random() > 0.5 ? 1 : -1;
 
     const state: SoloFishState = {
       mesh,
       scale,
       radiusX,
       radiusZ,
-      speed: 0.08 + Math.random() * 0.07,
+      speed: 0.03 + Math.random() * 0.04,
+      direction,
+      freqRatio,
       angle: Math.random() * Math.PI * 2,
+      // Burst-and-Glide: sanfte Geschwindigkeits-Änderungen
+      speedAmp: 0.15 + Math.random() * 0.2,
+      speedFreq: 0.03 + Math.random() * 0.05,
+      burstInt: 4 + Math.random() * 4,
+      burstDur: 1.5 + Math.random() * 1.5,
       yOffset: (Math.random() - 0.5) * 6,
       yAmp: 0.5 + Math.random() * 2.0,
       yFreq: 0.04 + Math.random() * 0.08,
@@ -385,6 +416,13 @@ export class FishWorld {
   private _createSchool(): FishSchool | null {
     if (!this.schoolFishMesh) return null;
 
+    // Box einmal aus dem geladenen Modell holen
+    const rawBox = new THREE.Box3().setFromObject(this.fishModelTemplate!);
+    const rawSize = new THREE.Vector3();
+    rawBox.getSize(rawSize);
+    const maxDim = Math.max(rawSize.x, rawSize.y, rawSize.z);
+    const schoolScale = 1.5 / maxDim; // etwas größer als Einzelfische
+
     const schoolSize = 8;
     const mat = (
       this.schoolFishMesh.material as THREE.MeshStandardMaterial
@@ -413,8 +451,8 @@ export class FishWorld {
 
     const result: FishSchool = {
       instances,
-      fishScale: 1.0,
-      orbitRadius: 15 + Math.random() * 15,
+      fishScale: schoolScale,
+      orbitRadius: 30 + Math.random() * 20, // 30–50m, weiter weg als Solos
       orbitSpeed: 0.06 + Math.random() * 0.04,
       orbitAngle: Math.random() * Math.PI * 2,
       yOffset: (Math.random() - 0.5) * 4,
@@ -446,10 +484,22 @@ export class FishWorld {
     const lerpSpeed = 3.5;
     const lerp = 1 - Math.exp(-lerpSpeed * dt);
 
-    // Orbit
-    fish.angle += fish.speed * dt;
-    const px = cameraPos.x + Math.cos(fish.angle) * fish.radiusX;
-    const pz = cameraPos.z + Math.sin(fish.angle) * fish.radiusZ;
+    // ═══ Geschwindigkeits-Modulation (sanfter Burst-and-Glide) ═══
+    // Sinus-Welle für weiche Übergänge (kein harter Ein/Aus-Schalter)
+    const burstPhase = ((elapsed % fish.burstInt) / fish.burstInt) * Math.PI * 2;
+    const burstCurve = Math.max(0, Math.sin(burstPhase));
+    const burstFactor = 1.0 + burstCurve * fish.speedAmp;
+    // Zusätzliche sanfte Welligkeit
+    const smoothMod =
+      1.0 + Math.sin(elapsed * fish.speedFreq * Math.PI * 2) * fish.speedAmp * 0.3;
+    const currentSpeed = fish.speed * Math.max(0.7, burstFactor * smoothMod);
+
+    // Lissajous-Orbit
+    fish.angle += currentSpeed * fish.direction * dt;
+    const angleX = fish.angle * fish.freqRatio;
+    const angleZ = fish.angle;
+    const px = cameraPos.x + Math.cos(angleX) * fish.radiusX;
+    const pz = cameraPos.z + Math.sin(angleZ) * fish.radiusZ;
 
     // Y relativ zur Kamera
     const targetY =
@@ -480,21 +530,20 @@ export class FishWorld {
       }
     }
 
-    // Yaw aus der Tangenten-Richtung + Yaw-Variation
-    const tangentX = -Math.sin(fish.angle) * fish.radiusX;
-    const tangentZ = Math.cos(fish.angle) * fish.radiusZ;
-    const baseYaw = Math.atan2(tangentX, tangentZ);
+    // Yaw aus der Lissajous-Tangente (Ableitung der Kurve)
+    const dX = -Math.sin(angleX) * fish.radiusX * fish.freqRatio * fish.direction;
+    const dZ = Math.cos(angleZ) * fish.radiusZ * fish.direction;
+    const baseYaw = Math.atan2(dX, dZ);
     const yawVar =
       Math.sin(elapsed * fish.yawFreq * Math.PI * 2) * fish.yawAmp;
     const targetYaw = baseYaw + yawVar + pushX * 0.02 + pushZ * 0.02;
 
-    // Pitch
+    // Pitch aus vertikaler Bewegung
     const targetPitch =
       Math.sin(elapsed * fish.pitchFreq * Math.PI * 2) * fish.pitchAmp;
 
-    // Roll aus der Kurvenfahrt
-    const targetRoll =
-      -Math.cos(fish.angle) * Math.sin(elapsed * 0.3) * 0.08;
+    // Roll: sanfte Neigung (max ±3.5°)
+    const targetRoll = Math.sin(elapsed * 0.3 + fish.angle) * 0.06;
 
     fish.currentYaw += (targetYaw - fish.currentYaw) * lerp;
     fish.currentPitch += (targetPitch - fish.currentPitch) * lerp;
