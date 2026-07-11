@@ -1,12 +1,11 @@
 ﻿/**
- * jellyWorld.ts – Mondquallen chunk-basiert wie die Fische.
+ * jellyWorld.ts – Mondquallen, reduziert auf 5 Stück mit großen Orbits.
  *
- * Jedes Territorium (FISCH-Chunk) enthält 5 Quallen:
- *   2 Einzel-Quallen (schwimmen allein auf kleinen Orbits)
- *   1 Gruppe aus 3 Quallen (orbites Gruppen-Zentrum + individueller Orbit)
+ * Änderung: Statt einem Territorium pro FISCH-Chunk gibt es genau
+ * 5 Quallen (2 Solo + 1 Dreier-Gruppe), die auf großen elliptischen
+ * Bahnen umherschwimmen und dabei immer wieder im Nebel verschwinden.
  *
- * Die Quallen werden prozedural gebaut (SphereGeometry + TubeGeometry)
- * und via Pool geklont – das ist günstiger als jedes Mal neu zu bauen.
+ * So wirkt es zufällig, wann und wo sie auftauchen – genau wie die Fische.
  */
 
 import * as THREE from "three/webgpu";
@@ -16,7 +15,6 @@ import {
   animateProceduralJelly,
   type ProceduralJelly,
 } from "../animationen/quallen/proceduralJelly";
-import type { ExclusionZone } from "./cityWorld";
 import type { EchoTarget } from "../sinne/echoortung/echolocationRings";
 
 // ---------------------------------------------------------------------------
@@ -33,35 +31,35 @@ const DEFAULT_CONFIG: JellyWorldConfig = {
   waterY: 15,
 };
 
-const UNLOAD_DIST = 90;
-const UNLOAD_DIST_SQ = UNLOAD_DIST * UNLOAD_DIST;
-
 // ---------------------------------------------------------------------------
-// Eine einzelne Qualle im Territorium
+// Eine einzelne Qualle mit großen Orbits
 // ---------------------------------------------------------------------------
 
 interface JellyMember {
   jelly: ProceduralJelly;
 
-  /** Heimat-Position (Chunk-Zentrum + Offset) */
-  homeX: number;
-  homeZ: number;
-  /** Basis-Y im Wasser */
+  /** Zentrum der großen Ellipse (Welt-Koordinaten) */
+  centerX: number;
+  centerZ: number;
+
+  /** Ellipsen-Radien für den grossen Orbit (30–50 Einheiten) */
+  orbitRadiusX: number;
+  orbitRadiusZ: number;
+
+  /** Geschwindigkeit auf dem grossen Orbit */
+  orbitSpeed: number;
+  /** Start-Winkel auf dem grossen Orbit */
+  orbitAngle: number;
+
+  /** Y-Basis */
   baseY: number;
 
-  /** Ist diese Qualle Teil der 3er-Gruppe? */
+  /** Teil der 3er-Gruppe? */
   isGrouped: boolean;
-  /** Wenn grouped: Winkel der Gruppe um das Territorium */
-  groupAngle: number;
-  /** Wenn grouped: Radius der Gruppe um das Territorium */
-  groupRadius: number;
-  /** Wenn grouped: Winkel dieser Qualle innerhalb der Gruppe */
-  memberAngle: number;
-
-  /** Wenn solo: eigener kleiner Orbit (Winkel, Radius, Geschwindigkeit) */
-  soloAngle: number;
-  soloOrbitRadius: number;
-  soloOrbitSpeed: number;
+  /** Radius innerhalb der Gruppe (nur grouped) */
+  groupMemberRadius: number;
+  /** Winkel innerhalb der Gruppe (nur grouped) */
+  groupMemberAngle: number;
 
   /** Animations-Phase (individuell) */
   animPhase: number;
@@ -72,18 +70,6 @@ interface JellyMember {
 }
 
 // ---------------------------------------------------------------------------
-// Ein Territorium = alle Quallen eines Chunks
-// ---------------------------------------------------------------------------
-
-interface JellyTerritory {
-  chunkX: number;
-  chunkZ: number;
-  centerX: number;
-  centerZ: number;
-  members: JellyMember[];
-}
-
-// ---------------------------------------------------------------------------
 // Hauptklasse
 // ---------------------------------------------------------------------------
 
@@ -91,17 +77,13 @@ export class JellyWorld {
   private scene: THREE.Scene;
   private config: JellyWorldConfig;
 
-  /** Alle Territorien, key = "chunkX,chunkZ" */
-  private _territories: Map<string, JellyTerritory> = new Map();
+  /** Alle 5 Quallen als flaches Array */
+  private _members: JellyMember[] = [];
 
-  /** Exklusionszonen (Stadt-Kuppeln) */
-  private _exclusionZones: ExclusionZone[] = [];
+  /** Pool fürs Klonen */
+  private _template: ProceduralJelly | null = null;
 
-  /** Pool: Einmal gebaute Quallen werden via cloneJelly() wiederverwendet */
-  private _jellyPool: ProceduralJelly[] = [];
-
-  /** Animations-Parameter (wie bisher) */
-  private readonly MOON_PARAMS = {
+  private readonly JELLY_PARAMS = {
     pulseSpeed: 0.9,
     liftStrength: 0.3,
     driftSpeed: 0.12,
@@ -118,161 +100,51 @@ export class JellyWorld {
   }
 
   // -----------------------------------------------------------------------
-  // Exklusionszonen
-  // -----------------------------------------------------------------------
-
-  setExclusionZones(zones: ExclusionZone[], _cameraPos?: THREE.Vector3): void {
-    this._exclusionZones = zones;
-  }
-
-  // -----------------------------------------------------------------------
-  // Echo-Targets für die Echoortung
+  // Echo-Targets
   // -----------------------------------------------------------------------
 
   getEchoTargets(): EchoTarget[] {
     this._cachedEchoTargets.length = 0;
-    for (const [, territory] of this._territories) {
-      for (const member of territory.members) {
-        this._cachedEchoTargets.push({
-          position: member.jelly.group.position,
-          onHit: () => {
-            member.glowIntensity = 1.0;
-          },
-        });
-      }
+    for (const member of this._members) {
+      this._cachedEchoTargets.push({
+        position: member.jelly.group.position,
+        onHit: () => {
+          member.glowIntensity = 1.0;
+        },
+      });
     }
     return this._cachedEchoTargets;
   }
 
   // -----------------------------------------------------------------------
-  // Initialisierung – baut den Quallen-Pool vor
+  // Init – baut genau 5 Quallen
   // -----------------------------------------------------------------------
 
   async init(_cameraPos?: THREE.Vector3): Promise<void> {
-    // 15 Quallen vorab bauen (reicht für 3 Territories à 5)
-    // Falls mehr gebraucht werden, bauen wir on-demand nach
-    for (let i = 0; i < 15; i++) {
-      this._jellyPool.push(buildMoonJelly());
-    }
-    console.log("🪼 JellyWorld bereit – wartet auf FISCH-Chunks");
-  }
+    this._template = buildMoonJelly();
 
-  // -----------------------------------------------------------------------
-  // WFC-Callback: Neues Territorium an einem FISCH-Chunk registrieren
-  // -----------------------------------------------------------------------
-
-  registerJellyAtChunk(cx: number, cz: number): void {
-    const key = `${cx},${cz}`;
-    if (this._territories.has(key)) return;
-
-    const cs = 16;
-    const worldX = cx * cs + cs / 2;
-    const worldZ = cz * cs + cs / 2;
-
-    const members: JellyMember[] = [];
-
-    // ═══ 2 Einzel-Quallen (solo) ═══
+    // ═══ 2 Einzel-Quallen ═══
     for (let i = 0; i < 2; i++) {
-      const jelly = this._getJellyFromPool();
-      const homeX = worldX + (Math.random() - 0.5) * 8;
-      const homeZ = worldZ + (Math.random() - 0.5) * 8;
-      const baseY =
-        this.config.floorY + 1.5 + Math.random() * (this.config.waterY - this.config.floorY - 3);
-
-      const origEmissive = jelly.bell.material instanceof THREE.MeshPhysicalMaterial
-        ? (jelly.bell.material.emissive?.clone() ?? new THREE.Color(0x000000))
-        : new THREE.Color(0x000000);
-
-      jelly.group.position.set(homeX, baseY, homeZ);
-      this.scene.add(jelly.group);
-
-      members.push({
-        jelly,
-        homeX,
-        homeZ,
-        baseY,
-        isGrouped: false,
-        groupAngle: 0,
-        groupRadius: 0,
-        memberAngle: 0,
-        soloAngle: Math.random() * Math.PI * 2,
-        soloOrbitRadius: 2 + Math.random() * 3,
-        soloOrbitSpeed: 0.08 + Math.random() * 0.08,
-        animPhase: Math.random() * Math.PI * 2,
-        glowIntensity: 0,
-        originalEmissive: origEmissive,
-      });
+      this._createSolo(i);
     }
 
     // ═══ 1 Gruppe aus 3 Quallen ═══
-    const groupCenterX = worldX + (Math.random() - 0.5) * 6;
-    const groupCenterZ = worldZ + (Math.random() - 0.5) * 6;
-    const groupBaseY =
-      this.config.floorY + 1.5 + Math.random() * (this.config.waterY - this.config.floorY - 3);
-    const groupRadius = 3 + Math.random() * 3;
-    const groupAngle = Math.random() * Math.PI * 2;
+    this._createGroup();
 
-    for (let i = 0; i < 3; i++) {
-      const jelly = this._getJellyFromPool();
-      const mAngle = (i / 3) * Math.PI * 2 + Math.random() * 0.5;
-      const oRadius = 0.8 + Math.random() * 1.2;
-      const yOffset = (Math.random() - 0.5) * 1.0;
-
-      const origEmissive = jelly.bell.material instanceof THREE.MeshPhysicalMaterial
-        ? (jelly.bell.material.emissive?.clone() ?? new THREE.Color(0x000000))
-        : new THREE.Color(0x000000);
-
-      jelly.group.position.set(
-        groupCenterX + Math.cos(mAngle) * oRadius,
-        groupBaseY + yOffset,
-        groupCenterZ + Math.sin(mAngle) * oRadius,
-      );
-      this.scene.add(jelly.group);
-
-      members.push({
-        jelly,
-        homeX: groupCenterX,
-        homeZ: groupCenterZ,
-        baseY: groupBaseY,
-        isGrouped: true,
-        groupAngle,
-        groupRadius,
-        memberAngle: mAngle,
-        soloAngle: 0,
-        soloOrbitRadius: oRadius,
-        soloOrbitSpeed: 0,
-        animPhase: Math.random() * Math.PI * 2,
-        glowIntensity: 0,
-        originalEmissive: origEmissive,
-      });
-    }
-
-    this._territories.set(key, {
-      chunkX: cx,
-      chunkZ: cz,
-      centerX: worldX,
-      centerZ: worldZ,
-      members,
-    });
+    console.log("🪼 5 Mondquallen gestartet (2 Solo + 1 Gruppe)");
   }
 
   // -----------------------------------------------------------------------
-  // Update – jeden Frame von scene.ts aufgerufen
+  // Update – jeden Frame
   // -----------------------------------------------------------------------
 
-  update(delta: number, elapsed: number, cameraPos: THREE.Vector3): void {
+  update(delta: number, elapsed: number, _cameraPos: THREE.Vector3): void {
     const dt = Math.min(delta, 0.05);
     const glowDecay = Math.exp(-3.0 * delta);
 
-    // Territories verwalten (laden/entladen)
-    this._manageLifecycle(cameraPos);
-
-    // Alle sichtbaren Quallen animieren
-    for (const [, territory] of this._territories) {
-      for (const member of territory.members) {
-        this._updateMember(member, dt, elapsed);
-        this._applyGlowDecay(member, glowDecay);
-      }
+    for (const member of this._members) {
+      this._updateMember(member, dt, elapsed);
+      this._applyGlowDecay(member, glowDecay);
     }
   }
 
@@ -281,152 +153,172 @@ export class JellyWorld {
   // -----------------------------------------------------------------------
 
   dispose(): void {
-    for (const [, territory] of this._territories) {
-      this._unloadTerritory(territory);
-    }
-    this._territories.clear();
-
-    // Pool leeren
-    for (const jelly of this._jellyPool) {
-      this._disposeJelly(jelly);
-    }
-    this._jellyPool.length = 0;
-  }
-
-  // -----------------------------------------------------------------------
-  // Private: Qualle aus dem Pool holen (oder nachbauen)
-  // -----------------------------------------------------------------------
-
-  private _getJellyFromPool(): ProceduralJelly {
-    if (this._jellyPool.length > 0) {
-      const template = this._jellyPool.pop()!;
-      return cloneJelly(template);
-    }
-    // Pool leer → neue Qualle bauen
-    return buildMoonJelly();
-  }
-
-  // -----------------------------------------------------------------------
-  // Private: Lebenszyklus der Territorien
-  // -----------------------------------------------------------------------
-
-  private _manageLifecycle(cameraPos: THREE.Vector3): void {
-    for (const [key, territory] of this._territories) {
-      const dx = territory.centerX - cameraPos.x;
-      const dz = territory.centerZ - cameraPos.z;
-      if (dx * dx + dz * dz > UNLOAD_DIST_SQ) {
-        this._unloadTerritory(territory);
-        this._territories.delete(key);
-      }
-    }
-  }
-
-  private _unloadTerritory(territory: JellyTerritory): void {
-    for (const member of territory.members) {
+    for (const member of this._members) {
       this.scene.remove(member.jelly.group);
       this._disposeJelly(member.jelly);
     }
-  }
+    this._members.length = 0;
 
-  /** Entsorgt die Geometrien und Materialien einer Qualle */
-  private _disposeJelly(jelly: ProceduralJelly): void {
-    jelly.bell.geometry?.dispose();
-    (jelly.bell.material as THREE.Material)?.dispose();
-
-    const disposeChildren = (obj: THREE.Object3D) => {
-      if (obj instanceof THREE.Mesh) {
-        obj.geometry?.dispose();
-        if (Array.isArray(obj.material)) {
-          for (const m of obj.material) m.dispose();
-        } else {
-          (obj.material as THREE.Material)?.dispose();
-        }
-      }
-      for (const child of obj.children) {
-        disposeChildren(child);
-      }
-    };
-    for (const root of jelly.tentacleRoots) disposeChildren(root);
-    for (const arm of jelly.oralArms) disposeChildren(arm);
-  }
-
-  // -----------------------------------------------------------------------
-  // Private: Exklusionszonen-Prüfung
-  // -----------------------------------------------------------------------
-
-  private _isInExclusionZone(x: number, z: number, margin: number = 0): boolean {
-    for (const zone of this._exclusionZones) {
-      const dx = x - zone.centerX;
-      const dz = z - zone.centerZ;
-      const effectiveRadius = zone.radius + margin;
-      if (dx * dx + dz * dz < effectiveRadius * effectiveRadius) return true;
+    if (this._template) {
+      this._disposeJelly(this._template);
+      this._template = null;
     }
-    return false;
+  }
+
+  // -----------------------------------------------------------------------
+  // Private: Qualle aus Template klonen
+  // -----------------------------------------------------------------------
+
+  private _makeJelly(): ProceduralJelly {
+    if (!this._template) {
+      this._template = buildMoonJelly();
+    }
+    const clone = cloneJelly(this._template);
+
+    // Skalieren: 35 % der Originalgröße (die Quallen waren zu groß)
+    clone.group.scale.setScalar(0.35);
+
+    return clone;
+  }
+
+  // -----------------------------------------------------------------------
+  // Private: 2 Einzel-Quallen mit grossem Orbit
+  // -----------------------------------------------------------------------
+
+  private _createSolo(index: number): void {
+    const jelly = this._makeJelly();
+
+    // Weit gestreute Zentren, damit sie nie alle gleichzeitig sichtbar sind
+    const centerAngle = (index / 2) * Math.PI + Math.random() * 0.5;
+    const centerDist = 8 + Math.random() * 8;
+    const centerX = Math.cos(centerAngle) * centerDist;
+    const centerZ = Math.sin(centerAngle) * centerDist;
+
+    const origEmissive =
+      jelly.bell.material instanceof THREE.MeshPhysicalMaterial
+        ? (jelly.bell.material.emissive?.clone() ?? new THREE.Color(0x000000))
+        : new THREE.Color(0x000000);
+
+    this.scene.add(jelly.group);
+
+    this._members.push({
+      jelly,
+      centerX,
+      centerZ,
+      orbitRadiusX: 30 + Math.random() * 25,
+      orbitRadiusZ: 30 + Math.random() * 25,
+      orbitSpeed: 0.04 + Math.random() * 0.04,
+      orbitAngle: Math.random() * Math.PI * 2,
+      baseY:
+        this.config.floorY +
+        1.5 +
+        Math.random() * (this.config.waterY - this.config.floorY - 3),
+      isGrouped: false,
+      groupMemberRadius: 0,
+      groupMemberAngle: 0,
+      animPhase: Math.random() * Math.PI * 2,
+      glowIntensity: 0,
+      originalEmissive: origEmissive,
+    });
+  }
+
+  // -----------------------------------------------------------------------
+  // Private: 1 Gruppe aus 3 Quallen
+  // -----------------------------------------------------------------------
+
+  private _createGroup(): void {
+    // Gruppen-Zentrum – nah am Ursprung, damit sie oft sichtbar sind
+    const centerX = (Math.random() - 0.5) * 6;
+    const centerZ = (Math.random() - 0.5) * 6;
+
+    for (let i = 0; i < 3; i++) {
+      const jelly = this._makeJelly();
+
+      const origEmissive =
+        jelly.bell.material instanceof THREE.MeshPhysicalMaterial
+          ? (jelly.bell.material.emissive?.clone() ?? new THREE.Color(0x000000))
+          : new THREE.Color(0x000000);
+
+      this.scene.add(jelly.group);
+
+      this._members.push({
+        jelly,
+        centerX,
+        centerZ,
+        orbitRadiusX: 25 + Math.random() * 15,
+        orbitRadiusZ: 25 + Math.random() * 15,
+        orbitSpeed: 0.03 + Math.random() * 0.03,
+        orbitAngle: (i / 3) * Math.PI * 2 + Math.random() * 0.3,
+        baseY:
+          this.config.floorY +
+          2 +
+          Math.random() * (this.config.waterY - this.config.floorY - 5),
+        isGrouped: true,
+        groupMemberRadius: 1.5 + Math.random() * 1.5,
+        groupMemberAngle: (i / 3) * Math.PI * 2 + Math.random() * 0.5,
+        animPhase: Math.random() * Math.PI * 2,
+        glowIntensity: 0,
+        originalEmissive: origEmissive,
+      });
+    }
   }
 
   // -----------------------------------------------------------------------
   // Private: Eine Qualle animieren
   // -----------------------------------------------------------------------
 
-  private _updateMember(member: JellyMember, delta: number, elapsed: number): void {
-    const { jelly, isGrouped, homeX, homeZ, baseY } = member;
+  private _updateMember(
+    member: JellyMember,
+    delta: number,
+    elapsed: number,
+  ): void {
+    const { jelly, centerX, centerZ, orbitRadiusX, orbitRadiusZ, orbitSpeed } =
+      member;
 
-    // ═══ Position berechnen ═══
-    let px: number;
-    let pz: number;
+    // ═══ Grosser Orbit ═══
+    member.orbitAngle += orbitSpeed * delta;
+    const orbitX = Math.cos(member.orbitAngle) * orbitRadiusX;
+    const orbitZ = Math.sin(member.orbitAngle) * orbitRadiusZ;
 
-    if (isGrouped) {
-      // Gruppe: Das Gruppen-Zentrum wandert langsam um das Chunk-Zentrum
-      const groupAng = member.groupAngle + elapsed * 0.03;
-      const gx = homeX + Math.cos(groupAng) * member.groupRadius;
-      const gz = homeZ + Math.sin(groupAng) * member.groupRadius;
+    let px = centerX + orbitX;
+    let pz = centerZ + orbitZ;
 
-      // Jede Qualle orbites das Gruppen-Zentrum
-      const memberAng = elapsed * 0.2 + member.memberAngle + member.animPhase * 0.3;
-      px = gx + Math.cos(memberAng) * member.soloOrbitRadius;
-      pz = gz + Math.sin(memberAng) * member.soloOrbitRadius;
-    } else {
-      // Solo: kleiner Orbit um die Heimat-Position
-      member.soloAngle += member.soloOrbitSpeed * delta;
-      px = homeX + Math.cos(member.soloAngle) * member.soloOrbitRadius;
-      pz = homeZ + Math.sin(member.soloAngle) * member.soloOrbitRadius;
+    // ═══ Gruppen-Offset (kleiner Orbit innerhalb der Gruppe) ═══
+    if (member.isGrouped) {
+      const ma = elapsed * 0.15 + member.groupMemberAngle;
+      px += Math.cos(ma) * member.groupMemberRadius;
+      pz += Math.sin(ma) * member.groupMemberRadius;
     }
 
-    // ═══ Exklusionszonen (Städte) – sanft wegdrücken ═══
-    if (this._exclusionZones.length > 0) {
-      for (const zone of this._exclusionZones) {
-        const dx = px - zone.centerX;
-        const dz = pz - zone.centerZ;
-        const distSq = dx * dx + dz * dz;
-        const effectRadius = zone.radius + 8;
-        if (distSq < effectRadius * effectRadius && distSq > 0.01) {
-          const dist = Math.sqrt(distSq);
-          const overlap = 1 - dist / effectRadius;
-          const push = overlap * overlap * 6;
-          px += (dx / dist) * push;
-          pz += (dz / dist) * push;
-        }
-      }
-    }
-
-    // ═══ X/Z setzen ═══
+    // ═══ Position setzen ═══
     jelly.group.position.x = px;
     jelly.group.position.z = pz;
 
     // ═══ Prozedurale Animation (Puls, Tentakel, Y-Lift) ═══
     const jellyElapsed = elapsed + member.animPhase;
-    animateProceduralJelly(jelly, jellyElapsed, delta, this.MOON_PARAMS, false);
+    animateProceduralJelly(
+      jelly,
+      jellyElapsed,
+      delta,
+      this.JELLY_PARAMS,
+      false,
+    );
 
-    // Y-Position: animateProceduralJelly setzt group.position.y auf lift + depthWave.
-    // Wir addieren baseY + kleine individuelle Variation
-    const yOffset = isGrouped ? 0 : (Math.random() - 0.5) * 0.3;
-    jelly.group.position.y += baseY + yOffset;
+    // Y: animateProceduralJelly setzt group.position.y auf lift + depthWave.
+    // Wir addieren baseY.
+    jelly.group.position.y += member.baseY;
 
     // Y-Begrenzung
     jelly.group.position.y = Math.max(
       this.config.floorY + 0.5,
       Math.min(this.config.waterY - 0.5, jelly.group.position.y),
     );
+
+    // ═══ Sanfte Rotation zur Bewegungsrichtung (nur grob) ═══
+    const dirX = -Math.sin(member.orbitAngle) * orbitRadiusX;
+    const dirZ = Math.cos(member.orbitAngle) * orbitRadiusZ;
+    const yaw = Math.atan2(dirX, dirZ);
+    jelly.group.rotation.y = yaw;
   }
 
   // -----------------------------------------------------------------------
@@ -448,5 +340,30 @@ export class JellyWorld {
       if (member.originalEmissive) mat.emissive.copy(member.originalEmissive);
       mat.emissiveIntensity = 0;
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // Private: Disposal
+  // -----------------------------------------------------------------------
+
+  private _disposeJelly(jelly: ProceduralJelly): void {
+    jelly.bell.geometry?.dispose();
+    (jelly.bell.material as THREE.Material)?.dispose();
+
+    const disposeChildren = (obj: THREE.Object3D) => {
+      if (obj instanceof THREE.Mesh) {
+        obj.geometry?.dispose();
+        if (Array.isArray(obj.material)) {
+          for (const m of obj.material) m.dispose();
+        } else {
+          (obj.material as THREE.Material)?.dispose();
+        }
+      }
+      for (const child of obj.children) {
+        disposeChildren(child);
+      }
+    };
+    for (const root of jelly.tentacleRoots) disposeChildren(root);
+    for (const arm of jelly.oralArms) disposeChildren(arm);
   }
 }

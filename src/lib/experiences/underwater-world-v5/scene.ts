@@ -330,12 +330,9 @@ export async function setup(
       }
       if (!nearCity) {
         fishWorld.registerFishAtChunk(cx, cz);
-        jellyWorld.registerJellyAtChunk(cx, cz);
-        // ★ Große Tiere (Delfine + Hai): Nur in ~40% der FISCH-Chunks,
-        //    damit sie seltener sind als die kleinen Fische.
-        if (Math.random() < 0.4) {
-          largeCreatureWorld.registerTerritory(cx, cz);
-        }
+        // ★ Quallen + große Tiere werden nicht mehr pro Chunk erzeugt –
+        //    genau 5 Quallen + 2 Delfine + 1 Hai schwimmen auf weiten
+        //    Orbits und tauchen immer wieder im Nebel auf/ab.
       }
     }
   });
@@ -526,7 +523,6 @@ export function tick(
   const exclusionZones = s.cityWorld.getExclusionZones();
   s.fishWorld.setExclusionZones(exclusionZones);
   s.largeCreatureWorld.setExclusionZones(exclusionZones);
-  s.jellyWorld.setExclusionZones(exclusionZones, rigPos);
   s.chunkManager.setExclusionZones(exclusionZones);
   s.coralReefWorld.setExclusionZones(exclusionZones);
 

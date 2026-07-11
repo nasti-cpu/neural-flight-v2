@@ -12,7 +12,97 @@
 import * as THREE from "three/webgpu";
 
 // ---------------------------------------------------------------------------
-// Gebäude einfärben
+// 5 Farbschemata für Gebäude + Fenster
+// ---------------------------------------------------------------------------
+
+export interface ColorTheme {
+  name: string;
+  buildings: number[];
+  windows: number[];
+  windowChance: number;
+  windowIntensity: number;
+}
+
+export const COLOR_THEMES: ColorTheme[] = [
+  {
+    name: "Standard",
+    buildings: [
+      0xe8dcc8, 0xddd0b8, 0xf0e8d8, 0xd4c8a8, 0xe8dcc0,
+      0xddd0b0, 0xf0e0c8, 0xf0ece0, 0xe8e4d8, 0xe0dcd0,
+      0xd8d4c8, 0xd0ccc0, 0xc8d8b8, 0xb8c8a8, 0xa8b898,
+      0x98a888, 0xb8c8a0, 0x889878, 0xd4b898, 0xc8a880,
+      0xb89870, 0xa08060, 0xd8a898, 0xc89080, 0xb07868,
+      0xe0c888, 0xd4b878, 0xc8a868, 0xb89858, 0xa8b8c8,
+      0x98a8b8, 0xb8c8b8, 0x8898a8,
+    ],
+    windows: [0xffeebb, 0xffeeaa, 0xffdd88, 0xffcc66, 0xaaddff, 0xbbddff],
+    windowChance: 0.75,
+    windowIntensity: 1.0,
+  },
+  {
+    name: "Eisblau",
+    buildings: [
+      0x98b8d0, 0xa8c0d8, 0x88a8c0, 0xb8d0e0, 0x78a0b8,
+      0xa0c0d0, 0x98b8c8, 0x88a8b8, 0xa8c4d4, 0xb8d0e0,
+      0x8098b0, 0x7090a8, 0x98b8cc, 0x88a8bc, 0xa8c8dc,
+      0xb8d8ec, 0x7898b0, 0x6888a0, 0x98b8d0, 0x88a8c0,
+      0xa8c8d8, 0xb8d8e8, 0x80a0b8, 0x7090a8, 0x98b8cc,
+      0xa8c8dc, 0x88a8c0, 0x8098b0, 0x7090a8, 0x98b8d0,
+      0xa8c0d8, 0x88a8c0, 0x78a0b8,
+    ],
+    windows: [0x88ccff, 0xaaddff, 0x66aadd, 0x4499cc, 0x99ddff, 0x77bbee],
+    windowChance: 0.8,
+    windowIntensity: 1.0,
+  },
+  {
+    name: "Terracotta",
+    buildings: [
+      0xdc9a78, 0xd08a68, 0xe0a888, 0xd49a7e, 0xc8886a,
+      0xdc9e7e, 0xe8ae8e, 0xd09272, 0xc89a82, 0xb88870,
+      0xac7a62, 0xa06e56, 0xd49a7a, 0xc8886c, 0xbc7c5e,
+      0xb07052, 0xdaa280, 0xce9674, 0xc28a66, 0xb67e5a,
+      0xaa7250, 0x9e6646, 0xd89a82, 0xcc8a6e, 0xbe7a5e,
+      0xe0a888, 0xd49a7a, 0xc88e6e, 0xbc8262, 0xdc9a78,
+      0xd08a68, 0xe0a888, 0xd49a7e,
+    ],
+    windows: [0xffdd88, 0xffcc77, 0xffeebb, 0xffbb66, 0xfff0d0, 0xffaa55],
+    windowChance: 0.8,
+    windowIntensity: 1.0,
+  },
+  {
+    name: "Nachtviolett",
+    buildings: [
+      0x8870a8, 0x7860a0, 0x9880b8, 0xa890c8, 0x6858a0,
+      0x8870a8, 0xa088c0, 0x584898, 0x8878a8, 0x7868a0,
+      0xa090c0, 0x9888b8, 0x8870a8, 0x7860a0, 0xa088c0,
+      0xb098d0, 0x6858a0, 0x584898, 0x8870b0, 0x7860a8,
+      0xa088c0, 0xb098d0, 0x7860a0, 0x685898, 0x8870a8,
+      0xa088c0, 0x7868a0, 0x685898, 0x584890, 0x8870a8,
+      0x7860a0, 0x9880b8, 0x6858a0,
+    ],
+    windows: [0xff88cc, 0xff66bb, 0xee55aa, 0xff99dd, 0xee77cc, 0xdd55aa],
+    windowChance: 0.85,
+    windowIntensity: 1.0,
+  },
+  {
+    name: "Smaragd",
+    buildings: [
+      0x68a868, 0x58a058, 0x78b878, 0x88c888, 0x50a050,
+      0x68b068, 0x78c078, 0x489848, 0x60b060, 0x50a850,
+      0x70c070, 0x60b860, 0x68b068, 0x58a858, 0x78c078,
+      0x88d088, 0x489848, 0x389038, 0x68b868, 0x58a858,
+      0x78c878, 0x88d888, 0x58a858, 0x48a048, 0x68b068,
+      0x78c078, 0x60a860, 0x50a050, 0x489848, 0x68a868,
+      0x58a058, 0x78b878, 0x50a050,
+    ],
+    windows: [0x88ffaa, 0x77ee99, 0x66dd88, 0x99ffbb, 0xaaffcc, 0x55cc77],
+    windowChance: 0.75,
+    windowIntensity: 1.0,
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Gebäude einfärben (Standard-zufällig)
 // ---------------------------------------------------------------------------
 
 const BUILDING_COLORS: number[] = [
@@ -34,6 +124,43 @@ const WINDOW_COLORS: number[] = [
  * ~75 % der Gebäude bekommen leuchtende Fenster (Emissive) – höhere
  * Intensität, damit Städte im Dunkeln wie lebendige Metropolen wirken.
  */
+/**
+ * Wendet ein Farbschema (Theme) auf bestehende Gebäude-Meshes an.
+ * Ändert color/emissive direkt, ohne neue Materialien zu erzeugen.
+ */
+export function applyTheme(
+  model: THREE.Object3D,
+  theme: ColorTheme,
+): void {
+  model.traverse((child) => {
+    if (child instanceof THREE.Mesh) {
+      const baseColor = new THREE.Color(
+        theme.buildings[Math.floor(Math.random() * theme.buildings.length)],
+      );
+      const hasLights = Math.random() < theme.windowChance;
+      let emissiveColor = new THREE.Color(0x000000);
+      let emissiveIntensity = 0;
+      if (hasLights) {
+        emissiveColor = new THREE.Color(
+          theme.windows[
+            Math.floor(Math.random() * theme.windows.length)
+          ],
+        );
+        emissiveIntensity = theme.windowIntensity + Math.random() * 0.5;
+      }
+      if (child.material instanceof THREE.MeshStandardMaterial) {
+        child.material.color.copy(baseColor);
+        child.material.emissive.copy(
+          hasLights ? emissiveColor : baseColor.clone().multiplyScalar(0.12),
+        );
+        child.material.emissiveIntensity = hasLights
+          ? emissiveIntensity
+          : 0.25;
+      }
+    }
+  });
+}
+
 export function colorBuildings(model: THREE.Object3D): void {
   model.traverse((child) => {
     if (child instanceof THREE.Mesh) {
