@@ -135,7 +135,7 @@ export class LargeCreatureWorld {
         8 + i * 2, 50, // radiusX=klein(8..10), radiusZ=gross(50)
         0.08, // langsam
         i * Math.PI + 0.3, // leichter Versatz untereinander
-        this.config.floorY + 3 + Math.random() * 3,
+        8 + Math.random() * 6, // baseY in der sicheren Mittelzone (8–14)
         i,
       );
       mesh.position.set(state.centerX + 8, state.baseY, state.centerZ);
@@ -155,7 +155,7 @@ export class LargeCreatureWorld {
         50, 6, // radiusX=gross(50), radiusZ=klein(6)
         0.05, // noch langsamer als Delfine
         Math.PI / 2, // 90° Phasenversatz zu den Delfinen
-        this.config.floorY + 1 + Math.random() * 2,
+        5 + Math.random() * 4, // baseY leicht unter den Delfinen (5–9)
       );
       mesh.position.set(state.centerX, state.baseY, state.centerZ);
       this.scene.add(mesh);
@@ -171,12 +171,12 @@ export class LargeCreatureWorld {
   // update
   // ---------------------------------------------------------------------------
 
-  update(delta: number, elapsed: number, _cameraPos: THREE.Vector3): void {
+  update(delta: number, elapsed: number, cameraPos: THREE.Vector3): void {
     const dt = Math.min(delta, 0.05);
     const glowDecay = Math.exp(-3.0 * delta);
 
     for (const creature of this._creatures) {
-      this._updateCreature(creature, dt, elapsed);
+      this._updateCreature(creature, dt, elapsed, cameraPos);
       creature.echoTarget.position.copy(creature.mesh.position);
       this._applyGlowDecay(creature, glowDecay);
     }
@@ -351,15 +351,15 @@ export class LargeCreatureWorld {
     creature: CreatureState,
     dt: number,
     elapsed: number,
+    cameraPos: THREE.Vector3,
   ): void {
-    const { mesh, type, centerX, centerZ, radiusX, radiusZ, speed, baseY } =
-      creature;
+    const { mesh, type, radiusX, radiusZ, speed, baseY } = creature;
 
     creature.angle += speed * dt;
 
-    // ── Position auf der Ellipse ──
-    const px = centerX + Math.cos(creature.angle) * radiusX;
-    const pz = centerZ + Math.sin(creature.angle) * radiusZ;
+    // ── Position auf der Ellipse (Orbit-Zentrum = Kamera) ──
+    const px = cameraPos.x + Math.cos(creature.angle) * radiusX;
+    const pz = cameraPos.z + Math.sin(creature.angle) * radiusZ;
 
     // ── Y + Rotation ──
     const lerpSpeed = 3.5;
@@ -395,9 +395,10 @@ export class LargeCreatureWorld {
       creature.currentY += (targetY - creature.currentY) * lerp;
     }
 
+    // Sicherheitsabstand: 4m vom Boden, 4m von der Oberfläche
     creature.currentY = Math.max(
-      this.config.floorY + 0.5,
-      Math.min(this.config.waterY - 0.3, creature.currentY),
+      this.config.floorY + 4,
+      Math.min(this.config.waterY - 4, creature.currentY),
     );
 
     // ── Yaw aus Tangenten-Richtung ──

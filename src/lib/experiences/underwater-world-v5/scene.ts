@@ -103,8 +103,8 @@ const WORLD_CONFIG = {
   renderDistance: 4, // 9×9 Quadrat, aber Circular = ~50 Chunks – immer genug um den Spieler herum
   seegrassCount: 10,
 
-  waterY: 22,
-  waterSize: 100,
+  waterY: 26,
+  waterSize: 300,
   waterSegments: 70,
 
   godRayCount: 0,
@@ -616,19 +616,11 @@ function _removeLoaderLights(scene: THREE.Scene): void {
   }
 }
 
-/** Wasseroberfläche folgt der Kamera sanft */
+/** Wasseroberfläche folgt der Kamera (snap – keine harten Kanten sichtbar) */
 function _updateWaterPosition(s: UnderwaterWorldV5State): void {
   const { camera, waterSurface } = s;
-  const distX = camera.position.x - waterSurface.position.x;
-  const distZ = camera.position.z - waterSurface.position.z;
-  const threshold = 2;
-
-  if (Math.abs(distX) > threshold) {
-    waterSurface.position.x += distX * 0.05;
-  }
-  if (Math.abs(distZ) > threshold) {
-    waterSurface.position.z += distZ * 0.05;
-  }
+  waterSurface.position.x = camera.position.x;
+  waterSurface.position.z = camera.position.z;
 }
 
 /** Partikel-Wrap-Around: Hält die Partikel um die Kamera herum */
