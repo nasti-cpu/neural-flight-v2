@@ -43,6 +43,7 @@ import { GuidanceSystem } from "./sinne/leitsystem/guidanceSystem";
 import { SubmarineSpotlight } from "./sinne/beleuchtung/spotlight";
 import { BioParticles } from "./sinne/beleuchtung/bioParticles";
 import { startBackgroundAudio } from "./sinne/backgroundAudio";
+import { LargeCreatureWorld } from "./world/largeCreatureWorld";
 
 // ---------------------------------------------------------------------------
 // Typen für den Experience-State
@@ -55,6 +56,7 @@ export interface UnderwaterWorldV5State extends ExperienceState {
   // WFC-Weltsysteme
   chunkManager: ChunkManager;
   fishWorld: FishWorld;
+  largeCreatureWorld: LargeCreatureWorld;
   jellyWorld: JellyWorld;
   cityWorld: CityWorld;
   coralReefWorld: CoralReefWorld;
@@ -242,53 +244,64 @@ export async function setup(
   const fishWorld = new FishWorld(ctx.scene, {
     floorY: WORLD_CONFIG.floorY,
     waterY: WORLD_CONFIG.waterY,
+    // Längeres Intervall: Echoortung startet seltener (10s statt 5s)
+    echolocationConfig: { ringInterval: 10 },
   });
   await fishWorld.init(player.camera.position);
 
   // =========================================================================
-  // 8. Quallen-System
+  // 8. Große Tiere (Delfine + Haie, chunk-basiert)
+  // =========================================================================
+  const largeCreatureWorld = new LargeCreatureWorld(ctx.scene, {
+    floorY: WORLD_CONFIG.floorY,
+    waterY: WORLD_CONFIG.waterY,
+  });
+  await largeCreatureWorld.init();
+
+  // =========================================================================
+  // 10. Quallen-System
   // =========================================================================
   const jellyWorld = new JellyWorld(ctx.scene, {
     floorY: WORLD_CONFIG.floorY,
     waterY: WORLD_CONFIG.waterY,
   });
-  await jellyWorld.init(player.camera.position);
+  await jellyWorld.init();
 
   // =========================================================================
-  // 9. Stadtmodelle
+  // 11. Stadtmodelle
   // =========================================================================
   const cityWorld = new CityWorld(ctx.scene, WORLD_CONFIG.floorY);
   await cityWorld.init();
 
   // =========================================================================
-  // 10. Korallenriffe
+  // 12. Korallenriffe
   // =========================================================================
   const coralReefWorld = new CoralReefWorld(ctx.scene, WORLD_CONFIG.floorY);
   await coralReefWorld.init();
 
   // =========================================================================
-  // 11. Leitsystem
+  // 13. Leitsystem
   // =========================================================================
   const guidanceSystem = new GuidanceSystem(ctx.scene, WORLD_CONFIG.floorY);
 
   // =========================================================================
-  // 12. Unterwasser-Scheinwerfer
+  // 14. Unterwasser-Scheinwerfer
   // =========================================================================
   const submarineSpotlight = new SubmarineSpotlight(ctx.scene);
 
   // =========================================================================
-  // 13. Biolumineszenz
+  // 15. Biolumineszenz
   // =========================================================================
   const bioParticles = new BioParticles(ctx.scene);
 
   // =========================================================================
-  // 14. Hintergrund-Atmo starten (sanft, leise, loop)
+  // 16. Hintergrund-Atmo starten (sanft, leise, loop)
   // =========================================================================
   // Falls das Laden fehlschlägt, ist audio = null – alles okay.
   const backgroundAudio = startBackgroundAudio();
 
   // =========================================================================
-  // 15. WFC-Callbacks registrieren:
+  // 17. WFC-Callbacks registrieren:
   //     Wenn ein Chunk kollabiert, werden CityWorld und CoralReefWorld
   //     benachrichtigt, damit sie Städte/Riffe an den richtigen Positionen platzieren
   // =========================================================================
@@ -317,15 +330,20 @@ export async function setup(
       }
       if (!nearCity) {
         fishWorld.registerFishAtChunk(cx, cz);
+        jellyWorld.registerJellyAtChunk(cx, cz);
+        // ★ Große Tiere (Delfine + Hai): Nur in ~40% der FISCH-Chunks,
+        //    damit sie seltener sind als die kleinen Fische.
+        if (Math.random() < 0.4) {
+          largeCreatureWorld.registerTerritory(cx, cz);
+        }
       }
     }
-    // QUALLE wird von JellyWorld selbstständig verwaltet
   });
 
   console.log("🌊 Underwater World V5 gestartet! (WFC-gesteuert)");
   console.log("   🧠 WFC bestimmt die Weltverteilung von Städten & Riffen");
   console.log("   🌫️  Dynamischer Tiefsee-Nebel + Beleuchtung");
-  console.log("   🐟 Fische + Schwärme | 🪼 Quallen | 🏙️ Städte | 🪸 Korallen");
+  console.log("   🐟 Fische + Schwärme | 🐬 Delfine + 🦈 Haie | 🪼 Quallen | 🏙️ Städte | 🪸 Korallen");
   console.log("   🧭 Leitsystem | 🔦 Scheinwerfer | ✨ Biolumineszenz");
 
   return {
@@ -334,6 +352,7 @@ export async function setup(
     audio: backgroundAudio,
     chunkManager,
     fishWorld,
+    largeCreatureWorld,
     jellyWorld,
     cityWorld,
     coralReefWorld,
@@ -506,19 +525,21 @@ export function tick(
   // =========================================================================
   const exclusionZones = s.cityWorld.getExclusionZones();
   s.fishWorld.setExclusionZones(exclusionZones);
+  s.largeCreatureWorld.setExclusionZones(exclusionZones);
   s.jellyWorld.setExclusionZones(exclusionZones, rigPos);
   s.chunkManager.setExclusionZones(exclusionZones);
   s.coralReefWorld.setExclusionZones(exclusionZones);
 
   // =========================================================================
-  // Fische + Quallen aktualisieren
+  // Fische + Quallen + Große Tiere aktualisieren
   // =========================================================================
-  s.fishWorld.update(
-    ctx.delta,
-    ctx.elapsed,
-    rigPos,
-    s.jellyWorld.getEchoTargets(),
-  );
+  // Echo-Targets von Quallen + großen Tieren für die Echoortung sammeln
+  const echoTargets = [
+    ...s.jellyWorld.getEchoTargets(),
+    ...s.largeCreatureWorld.getEchoTargets(),
+  ];
+  s.fishWorld.update(ctx.delta, ctx.elapsed, rigPos, echoTargets);
+  s.largeCreatureWorld.update(ctx.delta, ctx.elapsed, rigPos);
   s.jellyWorld.update(ctx.delta, ctx.elapsed, rigPos);
 
   // =========================================================================
@@ -547,6 +568,7 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 
   s.chunkManager.dispose();
   s.fishWorld.dispose();
+  s.largeCreatureWorld.dispose();
   s.jellyWorld.dispose();
   s.cityWorld.dispose();
   s.coralReefWorld.dispose();
