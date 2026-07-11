@@ -723,7 +723,6 @@ export class FishWorld {
       this._tmpColor
         .copy(school.originalEmissive)
         .lerp(this._glowColor, school.glowIntensity);
-      mat.emissive.copy(this._tmpColor);
       mat.emissiveIntensity = 0.2 + school.glowIntensity * 1.8;
     } else {
       mat.emissive.copy(school.originalEmissive);

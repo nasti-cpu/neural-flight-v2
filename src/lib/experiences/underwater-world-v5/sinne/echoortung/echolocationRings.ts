@@ -63,12 +63,8 @@ export class EcholocationRings {
   private _distCache: Float64Array = new Float64Array(0);
 
   /**
-   * Frame-Zähler für Kollisions-Check.
-   * Performance: Kollision nur alle 3 Frames prüfen, weil der Ring sich
-   * pro Frame nur ~0.13m bewegt (8 m/s × 16ms). Der HitRange von 3.5m
-   * erlaubt uns, jeden 3. Frame zu prüfen, ohne Treffer zu verpassen.
+   * (Kollision inzwischen instant bei Ring-Emission, daher kein Frame-Check mehr)
    */
-  private _collisionFrame: number = 0;
 
   constructor(scene: THREE.Scene, config?: Partial<EcholocationConfig>) {
     this.scene = scene;
@@ -140,17 +136,17 @@ export class EcholocationRings {
       ring.position.y = origin.y;
       ring.position.z = origin.z;
       (ring.material as THREE.MeshBasicMaterial).opacity = 0.6;
+
+      // ★ Sofort alle Targets treffen (kein Warten auf Ring-Expansion)
+      const maxDistSq = this.config.ringMaxRadius * this.config.ringMaxRadius;
+      for (let t = 0; t < targets.length; t++) {
+        if (this._distCache[t] <= maxDistSq) {
+          targets[t].onHit(1.0);
+        }
+      }
     }
 
-    // --- Jeden lebenden Ring animieren ---
-    // Performance: Kollisions-Check nur alle 3 Frames.
-    // Der Ring bewegt sich pro Frame nur ~0.13m, HitRange ist 3.5m –
-    // kein Target wird verpasst.
-    const doCollision = this._collisionFrame % 3 === 0;
-    this._collisionFrame++;
-
-    const hitRangeHalf = 3.5;
-
+    // --- Jeden lebenden Ring animieren (rein visuell) ---
     for (let i = 0; i < this.ringCount; i++) {
       const birthTime = this.ringBirthTimes[i];
       if (birthTime < 0) {
@@ -166,7 +162,6 @@ export class EcholocationRings {
       }
 
       const radius = age * this.config.ringSpeed;
-      const radiusSq = radius * radius;
 
       const ring = this.ringMeshes[i];
       ring.scale.set(radius, radius, 1);
@@ -179,30 +174,6 @@ export class EcholocationRings {
       const opacity =
         fadeProgress < 0.15 ? 0.6 : 0.6 * (1 - (fadeProgress - 0.15) / 0.85);
       (ring.material as THREE.MeshBasicMaterial).opacity = opacity;
-
-      if (!doCollision) continue;
-
-      // ------------------------------------------------
-      // Kollisions-Check mit Distanz-Vorfilter
-      // Performance: Nur Targets prüfen, deren Distanz
-      // innerhalb [radius - hitRange - 1m, radius + hitRange + 1m] liegt
-      // Spart ~80% der Checks, weil die meisten Fische
-      // außerhalb des aktiven Ringbereichs sind.
-      // ------------------------------------------------
-      const minDistSq = Math.max(0, radius - hitRangeHalf - 1) ** 2;
-      const maxDistSq = (radius + hitRangeHalf + 1) ** 2;
-
-      for (let t = 0; t < targets.length; t++) {
-        const distSq = this._distCache[t];
-
-        // Vorfilter: Distanz muss im aktiven Ringbereich liegen
-        if (distSq < minDistSq || distSq > maxDistSq) continue;
-
-        const diff = Math.abs(radiusSq - distSq) / (radius + Math.sqrt(distSq));
-        if (diff < hitRangeHalf) {
-          targets[t].onHit(1.0);
-        }
-      }
     }
   }
 
