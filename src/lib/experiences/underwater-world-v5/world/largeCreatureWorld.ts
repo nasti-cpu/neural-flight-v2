@@ -37,6 +37,9 @@ interface CreatureState {
   radiusZ: number;
   speed: number;
   angle: number;
+  /** Langsam rotierender Ellipsen-Winkel → kommt von allen Seiten */
+  orbitRot: number;
+  orbitRotSpeed: number;
 
   /** Y */
   baseY: number;
@@ -124,17 +127,16 @@ export class LargeCreatureWorld {
       }
     });
 
-    // ═══ 2 Delfine (phasengleich – schwimmen zusammen) ═══
+    // ═══ 2 Delfine ═══
+    const dolphinBaseAngle = Math.random() * Math.PI * 2;
     for (let i = 0; i < 2; i++) {
       const mesh = dolphinTemplate.clone(true);
-      // Delfin-Orbit: flache Ellipse (X nah, Z fern)
-      // Nahe an der x-Achse → tauchen kurz ins Sichtfeld
       const state = this._createDolphinState(
         mesh,
-        0, 0, // center (nah am Spieler-Start)
-        8 + i * 2, 50, // radiusX=klein(8..10), radiusZ=gross(50)
-        0.08, // langsam
-        i * Math.PI + 0.3, // leichter Versatz untereinander
+        0, 0,
+        8 + i * 2, 50,
+        0.08,
+        dolphinBaseAngle + i * Math.PI, // 180° Versatz untereinander
         8 + Math.random() * 6, // baseY in der sicheren Mittelzone (8–14)
         i,
       );
@@ -143,18 +145,15 @@ export class LargeCreatureWorld {
       this._creatures.push(state);
     }
 
-    // ═══ 1 Hai (Phasenversatz 180° zu den Delfinen) ═══
+    // ═══ 1 Hai (180° Phasenversatz zu den Delfinen) ═══
     {
       const mesh = sharkTemplate.clone(true);
-      // Hai-Orbit: vertauschte Achsen – wenn Delfine nah (X),
-      // ist der Hai fern (Z) und umgekehrt
-      // Zusätzlich 90° Phasenversatz → nie gleichzeitig sichtbar
       const state = this._createSharkState(
         mesh,
         0, 0,
-        50, 6, // radiusX=gross(50), radiusZ=klein(6)
-        0.05, // noch langsamer als Delfine
-        Math.PI / 2, // 90° Phasenversatz zu den Delfinen
+        50, 6,
+        0.05,
+        dolphinBaseAngle + Math.PI, // 180° weg von den Delfinen
         5 + Math.random() * 4, // baseY leicht unter den Delfinen (5–9)
       );
       mesh.position.set(state.centerX, state.baseY, state.centerZ);
@@ -257,13 +256,15 @@ export class LargeCreatureWorld {
       radiusX,
       radiusZ,
       speed,
-      angle,
-      baseY,
-      currentPitch: 0,
-      currentRoll: 0,
-      currentYaw: 0,
-      currentY: baseY,
-      porpoiseAmp: 2 + Math.random() * 1.5,
+        angle,
+        orbitRot: Math.random() * Math.PI * 2,
+        orbitRotSpeed: (Math.random() - 0.5) * 0.008,
+        baseY,
+        currentPitch: 0,
+        currentRoll: 0,
+        currentYaw: 0,
+        currentY: baseY,
+        porpoiseAmp: 2 + Math.random() * 1.5,
       porpoiseFreq: 0.08 + Math.random() * 0.04,
       yawAmp: 0,
       yawFreq: 0,
@@ -298,6 +299,8 @@ export class LargeCreatureWorld {
       radiusZ,
       speed,
       angle,
+      orbitRot: Math.random() * Math.PI * 2,
+      orbitRotSpeed: (Math.random() - 0.5) * 0.008,
       baseY,
       currentPitch: 0,
       currentRoll: 0,
@@ -363,10 +366,17 @@ export class LargeCreatureWorld {
     const { mesh, type, radiusX, radiusZ, speed, baseY } = creature;
 
     creature.angle += speed * dt;
+    creature.orbitRot += creature.orbitRotSpeed * dt;
 
-    // ── Position auf der Ellipse (Orbit-Zentrum = Kamera) ──
-    const px = cameraPos.x + Math.cos(creature.angle) * radiusX;
-    const pz = cameraPos.z + Math.sin(creature.angle) * radiusZ;
+    // ── Rotierte Ellipse: cos/sin der Ellipse werden um orbitRot gedreht ──
+    const cosA = Math.cos(creature.angle);
+    const sinA = Math.sin(creature.angle);
+    const cosRot = Math.cos(creature.orbitRot);
+    const sinRot = Math.sin(creature.orbitRot);
+    const rx = cosA * radiusX;
+    const rz = sinA * radiusZ;
+    const px = cameraPos.x + rx * cosRot - rz * sinRot;
+    const pz = cameraPos.z + rx * sinRot + rz * cosRot;
 
     // ── Y + Rotation ──
     const lerpSpeed = 3.5;
@@ -408,9 +418,11 @@ export class LargeCreatureWorld {
       Math.min(this.config.waterY - 4, creature.currentY),
     );
 
-    // ── Yaw aus Tangenten-Richtung ──
-    const tangentX = -Math.sin(creature.angle) * radiusX;
-    const tangentZ = Math.cos(creature.angle) * radiusZ;
+    // ── Yaw aus der rotierten Ellipsen-Tangente ──
+    const dRx = -sinA * radiusX;
+    const dRz = cosA * radiusZ;
+    const tangentX = dRx * cosRot - dRz * sinRot;
+    const tangentZ = dRx * sinRot + dRz * cosRot;
     const baseYaw = Math.atan2(tangentX, tangentZ);
 
     mesh.position.set(px, creature.currentY, pz);
