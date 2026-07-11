@@ -16,6 +16,11 @@
         isSettingsUpdate,
         isSpeedCommand,
     } from "$lib/ws/protocol";
+    import {
+        createIcarosHostIntegration,
+        getClientId,
+        type IcarosHostIntegration,
+    } from "$lib/icaros";
 
     let canvas: HTMLCanvasElement;
     let renderer: any;
@@ -26,13 +31,43 @@
     let hasOutputs = $state(false);
     let errorMessage = $state("");
     let lastProcessedTimestamp = 0;
+
+    // ── Lokaler WebSocket-Client (für lokales Controller-Verhalten) ──
     const ws = createWebSocketClient();
+
+    // ── ICAROS Host Integration (falls PUBLIC_ICAROS_HOST_ORIGIN gesetzt) ──
+    let icarosHost: IcarosHostIntegration | null = null;
+
     const clock = new THREE.Clock();
 
     let lastOrientation = { pitch: 0, roll: 0 };
     let lastSpeed = { accelerate: false, brake: false };
     let removeResizeListener: (() => void) | null = null;
     let fpsCounter: FpsCounter | null = null;
+
+    /**
+     * ICAROS Host-Integration starten, wenn PUBLIC_ICAROS_HOST_ORIGIN gesetzt ist.
+     *
+     * Verwendet die tatsächlich geladene Experience-ID und den Namen –
+     * NICHT den localStorage-Wert. Der localStorage kann einen alten
+     * Default enthalten, wenn die VR-Seite direkt (z. B. vom Host)
+     * geöffnet wird, ohne die Landing Page vorher besucht zu haben.
+     */
+    function startIcarosHost(experienceId: string, title: string): void {
+        icarosHost = createIcarosHostIntegration({
+            clientId: getClientId(),
+            experienceId,
+            title,
+            onOrientation: (input) => {
+                // ICAROS Host liefert pitch/roll – direkt in lastOrientation
+                lastOrientation = { pitch: input.pitch, roll: input.roll };
+            },
+        });
+
+        if (icarosHost.active) {
+            console.log("[ICAROS] Host-Integration aktiv – lokaler WS wird ignoriert");
+        }
+    }
 
     onMount(() => {
         scene = new THREE.Scene();
@@ -93,6 +128,10 @@
                 experienceName = exp.manifest.name;
                 hasOutputs = (exp.manifest.outputs?.length ?? 0) > 0;
 
+                // ICAROS Host-Integration starten mit der TATSÄCHLICH geladenen Experience
+                // (nicht aus localStorage – der könnte veraltet sein)
+                startIcarosHost(exp.manifest.id, exp.manifest.name);
+
                 const renderCamera =
                     (exp.state.camera as THREE.PerspectiveCamera | undefined) ??
                     dummyCamera;
@@ -119,6 +158,10 @@
 
                 renderer.setAnimationLoop(() => {
                     const delta = Math.min(clock.getDelta(), 0.1);
+
+                    // ── ICAROS Host-Orientierung wird über onOrientation-Callback
+                    //    direkt in lastOrientation geschrieben. Der lokale WS-Client
+                    //    wird nur verwendet, wenn kein Host aktiv ist.
 
                     const msg = ws.lastMessage;
                     if (msg && msg.timestamp > lastProcessedTimestamp) {
@@ -194,6 +237,8 @@
         renderer?.dispose();
         vrButton?.remove();
         ws.disconnect();
+        // ICAROS Host-Verbindungen sauber trennen
+        icarosHost?.destroy();
     });
 </script>
 
