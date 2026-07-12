@@ -37,7 +37,10 @@ const DEFAULTS: Required<GuidePathConfig> = {
 
 export class CityGuidePath {
   readonly group = new THREE.Group();
-  private active = false;
+  private _active = false;
+
+  /** Ob gerade ein Pfad aktiv (sichtbar) ist */
+  get isActive(): boolean { return this._active; }
   private glowTexture: THREE.CanvasTexture;
   private phases: number[] = [];
   private config: Required<GuidePathConfig>;
@@ -63,16 +66,16 @@ export class CityGuidePath {
     if (points.length < 2) return;
 
     this.buildGlowDashes(points);
-    this.active = true;
+    this._active = true;
   }
 
   clear(): void {
     this.disposeSprites();
-    this.active = false;
+    this._active = false;
   }
 
   update(elapsed: number): void {
-    if (!this.active) return;
+    if (!this._active) return;
 
     let idx = 0;
     for (const child of this.group.children) {

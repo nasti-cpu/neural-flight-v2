@@ -109,6 +109,11 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   const cityManager = new CityManager();
   const positions = cityManager.generatePositions(5, 80, 150);
   await cityManager.loadCities(positions, ctx.scene, grassManager);
+
+  // Alle Städte erstmal unsichtbar – nur die aktuelle Ziel-Stadt wird eingeblendet
+  for (const city of cityManager.cities) {
+    city.group.visible = false;
+  }
   console.log(`[City] ${cityManager.cities.length} Städte erzeugt`);
 
   // 10. GuidePath – direkt beim Start zur nächsten Stadt aktivieren
@@ -175,30 +180,25 @@ export function tick(
   // Wiese: Chunks laden/entladen + WFC-Cleanup (jeden Frame – VIEW_RADIUS=1 = nur 9 Chunks)
   s.grassManager.update(ctx.camera.position);
 
-  // Städte weiter als 100m unsichtbar schalten spart GPU
-  if (s.tickInterval % 6 === 0) {
-    for (const city of s.cityManager.cities) {
-      const d = ctx.camera.position.distanceTo(city.position);
-      city.group.visible = d < 100;
-    }
-  }
-
   // GuidePath: Prüfen ob aktuelle Ziel-Stadt erreicht wurde, dann zur nächsten
   const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);
   if (nearest) {
     const dist = ctx.camera.position.distanceTo(nearest.position);
 
+    // Ziel-Stadt sichtbar schalten (alle anderen unsichtbar)
+    for (const city of s.cityManager.cities) {
+      city.group.visible = city === nearest;
+    }
+
     // Stadt erreicht (< 15m) → als besucht markieren und Trail löschen
     if (dist < 15) {
       s.cityManager.markVisited(nearest);
       s.guidePath.clear();
-      console.log(`[City] Stadt ${nearest.index} entdeckt!`);
 
       // Nächste unentdeckte Stadt suchen und neuen Trail aktivieren
       const next = s.cityManager.getNearestUndiscovered(ctx.camera.position);
       if (next) {
         s.guidePath.setTarget(ctx.camera.position, next.position);
-        console.log(`[City] Neue Leitspur zu Stadt ${next.index}`);
       }
     }
   }
