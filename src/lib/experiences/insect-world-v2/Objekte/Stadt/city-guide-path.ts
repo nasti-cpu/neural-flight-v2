@@ -1,10 +1,11 @@
 /**
  * insect-world-v2 — City Guide Path.
  * Ein leuchtender Neon-Pfad (gestrichelt, Glow-Sprites),
- * der vom Startpunkt (0, 2, 0) zur Stadt führt und dem Gelände folgt.
+ * der vom Startpunkt zur Stadt führt und dem Gelände folgt.
  *
  * Nutzt THREE.Sprite (nicht Points – Points rendert map in WebGPU nicht).
- * Pfad auf 150m begrenzt (dahinter alles im Nebel).
+ * maxDist begrenzt die Pfad-Länge (Default 150m) – wird von scene.ts
+ * an die tatsächliche Stadt-Entfernung angepasst.
  *
  * WebGPU-konform.
  */
@@ -22,6 +23,12 @@ export interface GuidePathConfig {
   spriteSizeMin?: number;
   spriteSizeMax?: number;
   spritesPerDash?: number;
+  /**
+   * Maximale Pfad-Länge in Metern.
+   * Wird von scene.ts an die Stadt-Entfernung angepasst (400m).
+   * Default 150m für Abwärtskompatibilität.
+   */
+  maxDist?: number;
 }
 
 const DEFAULTS: Required<GuidePathConfig> = {
@@ -33,6 +40,7 @@ const DEFAULTS: Required<GuidePathConfig> = {
   spriteSizeMin: 0.6,
   spriteSizeMax: 1.2,
   spritesPerDash: 3,
+  maxDist: 150,
 };
 
 export class CityGuidePath {
@@ -53,12 +61,18 @@ export class CityGuidePath {
   setTarget(from: THREE.Vector3, to: THREE.Vector3): void {
     this.clear();
 
-    // Pfad auf 150m begrenzen (Nebel-Sichtweite ~80m)
+    // Dynamische Pfad-Länge:
+    // - Reicht bis 15m vor die Stadt (dann ist die Stadt klar sichtbar)
+    // - Mindestens config.maxDist (Default 150m)
+    // - Maximal 350m (= ~875 Sprites, Performance-Obergrenze)
     const _dir = new THREE.Vector3().copy(to).sub(from);
     const dist = _dir.length();
-    const maxDist = 150;
-    if (dist > maxDist) {
-      _dir.normalize().multiplyScalar(maxDist);
+    const hardMax = 350;
+    const visibilityBuffer = 15;
+    const idealMax = Math.max(this.config.maxDist, dist - visibilityBuffer);
+    const actualMax = Math.min(idealMax, hardMax);
+    if (dist > actualMax) {
+      _dir.normalize().multiplyScalar(actualMax);
       to = new THREE.Vector3().copy(from).add(_dir);
     }
 

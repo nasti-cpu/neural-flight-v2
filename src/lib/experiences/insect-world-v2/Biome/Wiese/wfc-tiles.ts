@@ -39,9 +39,8 @@ export enum TileType {
  * in A's Erlaubnis-Liste sein (symmetrische Regel).
  */
 export const ADJACENCY_RULES: Record<TileType, TileType[]> = {
-  [TileType.EMPTY]: [TileType.EMPTY, TileType.MEADOW, TileType.TALL_GRASS],
+  [TileType.EMPTY]: [TileType.EMPTY, TileType.TALL_GRASS],
   [TileType.MEADOW]: [
-    TileType.EMPTY,
     TileType.MEADOW,
     TileType.FLOWERS_SPARSE,
     TileType.TALL_GRASS,
@@ -62,7 +61,7 @@ export const ADJACENCY_RULES: Record<TileType, TileType[]> = {
  * ausgewählt wird. Höheres Gewicht = häufigeres Vorkommen.
  */
 export const TILE_WEIGHTS: Record<TileType, number> = {
-  [TileType.EMPTY]: 2,
+  [TileType.EMPTY]: 1,
   [TileType.MEADOW]: 8,
   [TileType.FLOWERS_SPARSE]: 5,
   [TileType.FLOWERS_DENSE]: 2,
@@ -97,10 +96,10 @@ export const TILE_CONTENT: Record<TileType, TileContent> = {
   // Aus ~40k/Chunk → ~14k/Chunk. Optisch kein Unterschied
   // (Nebel + Insektenperspektive), aber ~60% weniger GPU-Last.
   [TileType.EMPTY]: {
-    grassCount: 1800,
+    grassCount: 8000,
     flowerCount: 0,
-    grassMinHeight: 0.1,
-    grassMaxHeight: 0.3,
+    grassMinHeight: 0.3,
+    grassMaxHeight: 0.6,
   },
   [TileType.MEADOW]: {
     grassCount: 15000,

@@ -31,7 +31,8 @@ import type { PreloadedFlower } from "../../Objekte/Blumen/blumen";
 
 // ── Konstanten ──
 
-const CHUNK_SIZE = 40; // Größe eines Chunks in Metern (80→40: halbe Kantenlänge = 4× dichteres Gras)
+/** Chunk-Grösse in Metern (exportiert für Stadt-Position → Chunk-Koordinaten) */
+export const CHUNK_SIZE = 40;
 const VIEW_RADIUS = 1; // Wie viele Chunks um den Spieler herum geladen werden (1 = 3×3 = 9 Chunks)
 // VIEW_RADIUS=1 lädt Chunks bis 40m Entfernung. Der Nebel (FogExp2, density 0.04)
 // verdeckt bei 40m bereits ~80% → Chunks erscheinen/verschwinden unsichtbar.
@@ -197,6 +198,15 @@ export class GrassManager {
     this.active.clear();
     this.flowerTargets.length = 0;
     this.wfc.reset();
+  }
+
+  /**
+   * Erzwingt einen WFC-Tile-Typ für einen bestimmten Chunk.
+   * Wird vor dem ersten Laden des Chunks aufgerufen (z. B. für Stadt-Positionen).
+   * Verhindert, dass eine Stadt zufällig in einem EMPTY-Chunk landet.
+   */
+  forceTileType(gx: number, gz: number, tile: TileType): void {
+    this.wfc.preSeed(gx, gz, tile);
   }
 
   /**

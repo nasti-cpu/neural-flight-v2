@@ -12,8 +12,9 @@
 import * as THREE from "three/webgpu";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { CITY_CONFIG } from "./city";
-import { getWorldHeight } from "../../Biome/Wiese/grass-manager";
+import { getWorldHeight, CHUNK_SIZE } from "../../Biome/Wiese/grass-manager";
 import type { GrassManager } from "../../Biome/Wiese/grass-manager";
+import { TileType } from "../../Biome/Wiese/wfc-tiles";
 
 export interface CityInstance {
   position: THREE.Vector3;
@@ -123,6 +124,11 @@ export class CityManager {
         CITY_CONFIG.CLEAR_RADIUS,
       );
 
+      // WFC-Tile für diesen Chunk auf MEADOW zwingen (kein EMPTY unter der Stadt!)
+      const chunkGX = Math.floor(pos.x / CHUNK_SIZE);
+      const chunkGZ = Math.floor(pos.z / CHUNK_SIZE);
+      grassManager.forceTileType(chunkGX, chunkGZ, TileType.MEADOW);
+
       this.cities.push({
         position: new THREE.Vector3(pos.x, groundY, pos.z),
         visited: false,
@@ -167,9 +173,10 @@ export class CityManager {
     return nearest;
   }
 
-  /** Markiert eine Stadt als besucht. */
+  /** Markiert eine Stadt als besucht + speichert sie als lastVisitedCity. */
   markVisited(city: CityInstance): void {
     city.visited = true;
+    this.lastVisitedCity = city;
   }
 
   /** Anzahl der entdeckten Städte. */
