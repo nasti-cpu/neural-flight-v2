@@ -21,6 +21,8 @@ import { CITY_CONFIG } from "./Objekte/Stadt/city";
 import { CityGuidePath } from "./Objekte/Stadt/city-guide-path";
 import beeGlbUrl from "./Objekte/Bienen/Bee.glb?url";
 import butterflyGlbUrl from "./Objekte/Schmetterlinge/Beautiful Butterfly.glb?url";
+import bgAudioUrl from "./Meadow-Sound.mp3?url";
+import { loadBackgroundAudio } from "../../three/audio-manager";
 
 /** Eigenes State-Interface für insect-world-v2 */
 interface InsectWorldV2State extends ExperienceState {
@@ -34,6 +36,8 @@ interface InsectWorldV2State extends ExperienceState {
   groundPlane: THREE.Mesh;
   cityManager: CityManager;
   guidePath: CityGuidePath;
+  /** Hintergrund-Sound (Loop) */
+  bgAudio: THREE.Audio;
   /** Startposition des Spielers (für verzögerte Leitspur) */
   startPosition: THREE.Vector3;
   /** Wurde die erste Leitspur bereits aktiviert? */
@@ -161,6 +165,9 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   const camera = ctx.camera;
   camera.position.set(0, 2, 0);
 
+  // 12. Hintergrund-Sound laden und starten (Dauerschleife)
+  const bgAudio = await loadBackgroundAudio(camera, bgAudioUrl);
+
   const startPosition = new THREE.Vector3(0, 2, 0);
 
   return {
@@ -171,6 +178,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     pheromones,
     cityManager,
     guidePath,
+    bgAudio,
     sky,
     groundPlane,
     startPosition,
@@ -278,6 +286,10 @@ export function tick(
 
 export function dispose(state: ExperienceState, _scene: THREE.Scene): void {
   const s = state as InsectWorldV2State;
+
+  // Hintergrund-Sound stoppen und Listener entfernen
+  s.bgAudio.stop();
+  s.bgAudio.listener.removeFromParent();
 
   s.bees.dispose();
   s.butterflies.dispose();
