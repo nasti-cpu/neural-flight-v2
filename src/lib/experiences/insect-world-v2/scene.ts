@@ -17,6 +17,7 @@ import {
 } from "./Objekte/Schmetterlinge/schmetterlinge";
 import { PheromoneSystem } from "./Sinne/Pheromonspuren/pheromonspuren";
 import { CityManager } from "./Objekte/Stadt/city-manager";
+import { CITY_CONFIG } from "./Objekte/Stadt/city";
 import { CityGuidePath } from "./Objekte/Stadt/city-guide-path";
 import beeGlbUrl from "./Objekte/Bienen/Bee.glb?url";
 import butterflyGlbUrl from "./Objekte/Schmetterlinge/Beautiful Butterfly.glb?url";
@@ -105,9 +106,13 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   pheromones.addTrails(pheromoneTargets, ctx.camera.position);
   ctx.scene.add(pheromones.group);
 
-  // 9. Städte (prozedural, 80-150m entfernt)
+  // 9. Städte (prozedural, 250-400m entfernt, nur 3 Stück)
   const cityManager = new CityManager();
-  const positions = cityManager.generatePositions(5, 80, 150);
+  const positions = cityManager.generatePositions(
+    CITY_CONFIG.CITY_COUNT,
+    CITY_CONFIG.MIN_DISTANCE,
+    CITY_CONFIG.MAX_DISTANCE,
+  );
   await cityManager.loadCities(positions, ctx.scene, grassManager);
 
   // Das Modell ist im modelPivot und wird erst per setActiveCity() sichtbar
@@ -178,24 +183,46 @@ export function tick(
   // Wiese: Chunks laden/entladen + WFC-Cleanup (jeden Frame – VIEW_RADIUS=1 = nur 9 Chunks)
   s.grassManager.update(ctx.camera.position);
 
-  // GuidePath: Prüfen ob aktuelle Ziel-Stadt erreicht wurde, dann zur nächsten
+  // ── Stadt- & Leitsystem (ohne Sofort-Redirect) ──
   const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);
+  const last = s.cityManager.lastVisitedCity;
+
   if (nearest) {
-    const dist = ctx.camera.position.distanceTo(nearest.position);
+    const distToNearest = ctx.camera.position.distanceTo(nearest.position);
+    const distFromLast = last
+      ? ctx.camera.position.distanceTo(last.position)
+      : Infinity;
 
-    // Einziges Stadt-Modell an die aktive Ziel-Stadt verschieben
-    // (spart ~80% GPU-Last gegenüber 5 Klonen)
-    s.cityManager.setActiveCity(nearest);
+    // 1. Modell-Steuerung: Zeige die Stadt, wenn nah dran,
+    //    sonst das Modell an der zuletzt besuchten Stadt lassen.
+    if (distToNearest < CITY_CONFIG.VISIBILITY_RANGE) {
+      // Unbesuchte Stadt in Sichtweite → Modell dorthin schalten
+      s.cityManager.setActiveCity(nearest);
+    } else if (last) {
+      // Weit weg von unbesuchten Städten → Modell an letzter besuchter Stadt
+      s.cityManager.setActiveCity(last);
+    } else {
+      // Ganz am Start → Modell an erster Stadt (auch wenn im Nebel)
+      s.cityManager.setActiveCity(nearest);
+    }
 
-    // Stadt erreicht (< 15m) → als besucht markieren und Trail löschen
-    if (dist < 15) {
+    // 2. Ankunft an einer Stadt (→ besucht markieren, Trail löschen,
+    //    KEIN Redirect zur nächsten Stadt!)
+    if (distToNearest < CITY_CONFIG.ARRIVAL_DISTANCE && !nearest.visited) {
       s.cityManager.markVisited(nearest);
       s.guidePath.clear();
+      console.log(`[City] Stadt ${nearest.index} erreicht`);
+    }
+  }
 
-      // Nächste unentdeckte Stadt suchen und neuen Trail aktivieren
+  // 3. GuidePath reaktivieren (erst nach ausreichender Erkundung)
+  if (!s.guidePath.isActive && last) {
+    const distFromLast = ctx.camera.position.distanceTo(last.position);
+    if (distFromLast > CITY_CONFIG.ACTIVATION_DISTANCE) {
       const next = s.cityManager.getNearestUndiscovered(ctx.camera.position);
       if (next) {
         s.guidePath.setTarget(ctx.camera.position, next.position);
+        console.log(`[City] Leitspur zu Stadt ${next.index} aktiviert`);
       }
     }
   }

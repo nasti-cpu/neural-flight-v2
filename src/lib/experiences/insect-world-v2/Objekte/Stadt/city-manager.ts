@@ -25,6 +25,8 @@ export interface CityInstance {
 
 export class CityManager {
   readonly cities: CityInstance[] = [];
+  /** Zuletzt besuchte Stadt – das Modell bleibt dort sichtbar, bis die nächste erreicht wird */
+  lastVisitedCity: CityInstance | null = null;
   private modelPromise: Promise<THREE.Group | null> | null = null;
   /** Einmal geladenes, zentriertes, skaliertes Stadt-Modell (wird nicht geklont) */
   private sharedModel: THREE.Group | null = null;
