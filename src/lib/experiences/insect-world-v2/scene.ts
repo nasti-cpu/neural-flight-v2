@@ -119,16 +119,15 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   console.log(`[City] ${cityManager.cities.length} Städte erzeugt`);
 
   // 10. GuidePath – direkt beim Start zur nächsten Stadt aktivieren
-  // Große Sprites (1.0-1.8) damit die Spur durch den Nebel sichtbar ist
-  // GuidePath: maxDist so gewählt, dass der Pfad bis in Sichtweite der Stadt reicht
-  // (200m → ~750 Sprites, kein Performance-Problem)
+  // Optimierte Spur: spritesPerDash=1 + größere Sprites (1.4–2.2)
+  // Spart ~50% Draw Calls (~438 statt ~875 Sprites) bei gleicher Sichtbarkeit.
   const guidePath = new CityGuidePath({
     neonColor: 0x44ffff,
     dashLength: 0.5,
     gapLength: 0.3,
-    spriteSizeMin: 1.0,
-    spriteSizeMax: 1.8,
-    spritesPerDash: 2,
+    spriteSizeMin: 1.4,
+    spriteSizeMax: 2.2,
+    spritesPerDash: 1,
     maxDist: 200,
   });
   const firstCity = cityManager.getNearestUndiscovered(new THREE.Vector3(0, 2, 0));
