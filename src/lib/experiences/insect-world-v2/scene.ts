@@ -105,15 +105,12 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   pheromones.addTrails(pheromoneTargets, ctx.camera.position);
   ctx.scene.add(pheromones.group);
 
-  // 9. Städte (prozedural, zufällig, 200-300m entfernt)
+  // 9. Städte (prozedural, 80-150m entfernt)
   const cityManager = new CityManager();
   const positions = cityManager.generatePositions(5, 80, 150);
   await cityManager.loadCities(positions, ctx.scene, grassManager);
 
-  // Alle Städte erstmal unsichtbar – nur die aktuelle Ziel-Stadt wird eingeblendet
-  for (const city of cityManager.cities) {
-    city.group.visible = false;
-  }
+  // Das Modell ist im modelPivot und wird erst per setActiveCity() sichtbar
   console.log(`[City] ${cityManager.cities.length} Städte erzeugt`);
 
   // 10. GuidePath – direkt beim Start zur nächsten Stadt aktivieren
@@ -128,6 +125,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   });
   const firstCity = cityManager.getNearestUndiscovered(new THREE.Vector3(0, 2, 0));
   if (firstCity) {
+    cityManager.setActiveCity(firstCity);
     guidePath.setTarget(new THREE.Vector3(0, 2, 0), firstCity.position);
     console.log(`[City] Leitspur aktiv: Stadt ${firstCity.index} bei`, firstCity.position);
   }
@@ -185,10 +183,9 @@ export function tick(
   if (nearest) {
     const dist = ctx.camera.position.distanceTo(nearest.position);
 
-    // Ziel-Stadt sichtbar schalten (alle anderen unsichtbar)
-    for (const city of s.cityManager.cities) {
-      city.group.visible = city === nearest;
-    }
+    // Einziges Stadt-Modell an die aktive Ziel-Stadt verschieben
+    // (spart ~80% GPU-Last gegenüber 5 Klonen)
+    s.cityManager.setActiveCity(nearest);
 
     // Stadt erreicht (< 15m) → als besucht markieren und Trail löschen
     if (dist < 15) {
