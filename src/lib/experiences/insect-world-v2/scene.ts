@@ -183,8 +183,12 @@ export function tick(
   // Pheromon-Spuren-Animation (jeden Frame – nur opacity, billig)
   s.pheromones.update(ctx.elapsed);
 
-  // Wiese: Chunks laden/entladen + WFC-Cleanup (jeden Frame – VIEW_RADIUS=1 = nur 9 Chunks)
-  s.grassManager.update(ctx.camera.position);
+  // Wiese: Chunks laden/entladen + WFC-Cleanup (nur jeden 3. Frame)
+  // In 3 Frames (~50ms bei 60fps) kann man keine 40m-Chunk-Grenze überschreiten.
+  // Spart ~66% CPU-Last für Chunk-Verwaltung ohne sichtbaren Unterschied.
+  if (s.tickInterval % 3 === 0) {
+    s.grassManager.update(ctx.camera.position);
+  }
 
   // ── Stadt- & Leitsystem (ohne Sofort-Redirect) ──
   const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);
@@ -230,8 +234,11 @@ export function tick(
     }
   }
 
-  // GuidePath animieren (pulsierende Sprites)
-  s.guidePath.update(ctx.elapsed);
+  // GuidePath animieren (pulsierende Sprites – nur jeden 2. Frame)
+  // Sinus-Puls bei 30Hz vs 60Hz ist visuell identisch, spart 50% CPU.
+  if (s.tickInterval % 2 === 0) {
+    s.guidePath.update(ctx.elapsed);
+  }
 
   return {
     state: s,

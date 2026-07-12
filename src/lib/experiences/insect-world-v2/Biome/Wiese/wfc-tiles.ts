@@ -96,7 +96,7 @@ export const TILE_CONTENT: Record<TileType, TileContent> = {
   // Aus ~40k/Chunk → ~14k/Chunk. Optisch kein Unterschied
   // (Nebel + Insektenperspektive), aber ~60% weniger GPU-Last.
   [TileType.EMPTY]: {
-    grassCount: 8000,
+    grassCount: 500,
     flowerCount: 0,
     grassMinHeight: 0.3,
     grassMaxHeight: 0.6,

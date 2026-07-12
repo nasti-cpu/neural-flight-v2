@@ -101,6 +101,14 @@ export class CityGuidePath {
     }
   }
 
+  /**
+   * Ersetzt die Konfiguration (für A/B-Vergleich im Test).
+   * Nach setConfig() muss setTarget() aufgerufen werden, um den Pfad neu zu bauen.
+   */
+  setConfig(config: GuidePathConfig): void {
+    this.config = { ...DEFAULTS, ...config };
+  }
+
   dispose(): void {
     this.clear();
     this.glowTexture.dispose();

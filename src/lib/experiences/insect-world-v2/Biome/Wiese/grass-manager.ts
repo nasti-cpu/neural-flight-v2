@@ -375,8 +375,23 @@ export class GrassManager {
     const tileType = this.wfc.getTileType(gx, gz);
     const content = TILE_CONTENT[tileType];
 
+    // Prüfen, ob Clear-Regionen (Städte) nahe genug sind, um diesen Chunk zu beeinflussen.
+    // Nur dann müssen einzelne Halme/Blumen gegen Clear-Regionen geprüft werden.
+    const chunkHalfDiag = CHUNK_SIZE * 0.71;
+    const needsClearCheck =
+      this.circleClearRegions.some((r) => {
+        const dx = worldX - r.cx;
+        const dz = worldZ - r.cz;
+        return Math.sqrt(dx * dx + dz * dz) < r.radius + r.border + chunkHalfDiag;
+      }) ||
+      this.clearRegions.some((r) => {
+        const dx = Math.abs(worldX - r.cx);
+        const dz = Math.abs(worldZ - r.cz);
+        return dx < r.hw + r.border + chunkHalfDiag && dz < r.hd + r.border + chunkHalfDiag;
+      });
+
     // ── Grashalme ──
-    const mesh = this.createChunkGrass(gx, gz, content);
+    const mesh = this.createChunkGrass(gx, gz, content, needsClearCheck);
     group.add(mesh);
 
     // ── Blumen generieren ──
@@ -391,6 +406,7 @@ export class GrassManager {
         group,
         flowerMeshes,
         flowerPositions,
+        needsClearCheck,
       );
     }
 
@@ -417,6 +433,7 @@ export class GrassManager {
     group: THREE.Group,
     flowerMeshesOut: THREE.InstancedMesh[],
     flowerPositionsOut: THREE.Vector3[],
+    checkClear: boolean,
   ): void {
     const dummy = new THREE.Object3D();
     const MIN_FLOWER_DIST = 1.0; // Mindestabstand 1m zwischen Blumen (nie ineinander)
@@ -439,7 +456,8 @@ export class GrassManager {
         const z = worldZ + (Math.random() - 0.5) * CHUNK_SIZE;
 
         // Überspringen, wenn Position in Clear-Region liegt (z.B. Stadt)
-        if (this.isPositionCleared(x, z)) {
+        // Nur prüfen, wenn Clear-Regionen in der Nähe sind
+        if (checkClear && this.isPositionCleared(x, z)) {
           continue;
         }
 
@@ -515,6 +533,7 @@ export class GrassManager {
       grassMinHeight: number;
       grassMaxHeight: number;
     },
+    checkClear: boolean,
   ): THREE.InstancedMesh {
     const worldX = gx * CHUNK_SIZE;
     const worldZ = gz * CHUNK_SIZE;
@@ -545,7 +564,8 @@ export class GrassManager {
       const baseY = worldGroundHeight(x, z);
 
       // Instanz-Matrix setzen (unter die Erde, wenn in Clear-Region)
-      if (this.isPositionCleared(x, z)) {
+      // isPositionCleared wird nur geprüft, wenn Clear-Regionen in der Nähe sind
+      if (checkClear && this.isPositionCleared(x, z)) {
         dummy.position.set(x, -100, z);
         dummy.scale.setScalar(0);
       } else {
