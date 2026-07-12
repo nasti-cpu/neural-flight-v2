@@ -30,8 +30,14 @@ interface InsectWorldV2State extends ExperienceState {
   butterflies: ButterflySwarm;
   pheromones: PheromoneSystem;
   sky: THREE.Mesh;
+  /** Statische Grundplatte (verhindert leere Welt beim Umdrehen) */
+  groundPlane: THREE.Mesh;
   cityManager: CityManager;
   guidePath: CityGuidePath;
+  /** Startposition des Spielers (für verzögerte Leitspur) */
+  startPosition: THREE.Vector3;
+  /** Wurde die erste Leitspur bereits aktiviert? */
+  firstPathActivated: boolean;
   /** Zählt Frames für verzögertes Update (Bienen/Schmetterlinge/WFC) */
   tickInterval: number;
 }
@@ -41,10 +47,20 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   const sky = createSky();
   ctx.scene.add(sky);
 
-  // 2. Blumen vorladen (einmalig, wird von GrassManager wiederverwendet)
+  // 2. Statische Grundplatte (verhindert leere Welt beim Umdrehen)
+  // Liegt unter den per-Chunk-Bodenplatten und ist immer sichtbar.
+  const groundPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(500, 500),
+    new THREE.MeshBasicMaterial({ color: 0x3a6028 }),
+  );
+  groundPlane.rotation.x = -Math.PI / 2;
+  groundPlane.position.y = -5; // tief genug, nie über der Terrain-Oberfläche
+  ctx.scene.add(groundPlane);
+
+  // 3. Blumen vorladen (einmalig, wird von GrassManager wiederverwendet)
   const preloadedFlowers = await preloadFlowers();
 
-  // 3. Wiese (Chunk-basiert, unendlich + WFC)
+  // 4. Wiese (Chunk-basiert, unendlich + WFC)
   const grassManager = new GrassManager(
     {
       fieldSize: 60,
@@ -61,13 +77,13 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   );
   ctx.scene.add(grassManager.group);
 
-  // 4. Spawn-Chunk vorbereiten
+  // 5. Spawn-Chunk vorbereiten
   grassManager.preSeedSpawn();
 
-  // 5. Ersten Chunk-Ladevorgang anstoßen
+  // 6. Ersten Chunk-Ladevorgang anstoßen
   grassManager.update(new THREE.Vector3(0, 2, 0));
 
-  // 6. Bienen (langsam, zufällige Wegpunkte, +10cm höher)
+  // 7. Bienen (langsam, zufällige Wegpunkte, +10cm höher)
   const bees = await createBees(beeGlbUrl, {
     count: 10,
     scale: 0.04,
@@ -82,7 +98,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   });
   ctx.scene.add(bees.group);
 
-  // 7. Schmetterlinge (langsam, zufällige Wegpunkte, +10cm höher)
+  // 8. Schmetterlinge (langsam, zufällige Wegpunkte, +10cm höher)
   const butterflies = await createButterflies(butterflyGlbUrl, {
     count: 6,
     scale: 0.036,
@@ -97,7 +113,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   });
   ctx.scene.add(butterflies.group);
 
-  // 8. Pheromon-Spuren
+  // 9. Pheromon-Spuren
   const pheromones = new PheromoneSystem();
   const pheromoneTargets = grassManager.flowerTargets.map((pos, i) => ({
     position: pos,
@@ -106,7 +122,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   pheromones.addTrails(pheromoneTargets, ctx.camera.position);
   ctx.scene.add(pheromones.group);
 
-  // 9. Städte (prozedural, 250-400m entfernt, nur 3 Stück)
+  // 10. Städte (prozedural, 250-400m entfernt, nur 3 Stück)
   const cityManager = new CityManager();
   const positions = cityManager.generatePositions(
     CITY_CONFIG.CITY_COUNT,
@@ -118,9 +134,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   // Das Modell ist im modelPivot und wird erst per setActiveCity() sichtbar
   console.log(`[City] ${cityManager.cities.length} Städte erzeugt`);
 
-  // 10. GuidePath – direkt beim Start zur nächsten Stadt aktivieren
-  // Optimierte Spur: spritesPerDash=1 + größere Sprites (1.4–2.2)
-  // Spart ~50% Draw Calls (~438 statt ~875 Sprites) bei gleicher Sichtbarkeit.
+  // 11. GuidePath – erst nach 30m Erkundung aktiv (verzögertes Erscheinen)
   const guidePath = new CityGuidePath({
     neonColor: 0x44ffff,
     dashLength: 0.5,
@@ -132,9 +146,9 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   });
   const firstCity = cityManager.getNearestUndiscovered(new THREE.Vector3(0, 2, 0));
   if (firstCity) {
+    // Stadt-Modell positionieren, aber Leitspur noch nicht aktivieren
     cityManager.setActiveCity(firstCity);
-    guidePath.setTarget(new THREE.Vector3(0, 2, 0), firstCity.position);
-    console.log(`[City] Leitspur aktiv: Stadt ${firstCity.index} bei`, firstCity.position);
+    console.log(`[City] Erste Stadt ${firstCity.index} bei`, firstCity.position);
   }
   ctx.scene.add(guidePath.group);
 
@@ -147,6 +161,8 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   const camera = ctx.camera;
   camera.position.set(0, 2, 0);
 
+  const startPosition = new THREE.Vector3(0, 2, 0);
+
   return {
     camera,
     grassManager,
@@ -156,6 +172,9 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     cityManager,
     guidePath,
     sky,
+    groundPlane,
+    startPosition,
+    firstPathActivated: false,
     tickInterval: 0,
   };
 }
@@ -221,8 +240,21 @@ export function tick(
     }
   }
 
-  // 3. GuidePath reaktivieren (erst nach ausreichender Erkundung)
-  if (!s.guidePath.isActive && last) {
+  // 3. Erste Leitspur aktivieren (nach 30m Erkundung, nicht sofort beim Start)
+  if (!s.guidePath.isActive && !s.firstPathActivated) {
+    const distFromStart = ctx.camera.position.distanceTo(s.startPosition);
+    if (distFromStart > 30) {
+      const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);
+      if (nearest) {
+        s.guidePath.setTarget(ctx.camera.position, nearest.position);
+        s.firstPathActivated = true;
+        console.log(`[City] Erste Leitspur zu Stadt ${nearest.index} aktiviert`);
+      }
+    }
+  }
+
+  // 4. GuidePath reaktivieren (nach Stadtbesuch, erst nach ausreichender Erkundung)
+  if (!s.guidePath.isActive && s.firstPathActivated && last) {
     const distFromLast = ctx.camera.position.distanceTo(last.position);
     if (distFromLast > CITY_CONFIG.ACTIVATION_DISTANCE) {
       const next = s.cityManager.getNearestUndiscovered(ctx.camera.position);
@@ -256,6 +288,9 @@ export function dispose(state: ExperienceState, _scene: THREE.Scene): void {
   _scene.remove(s.sky);
   (s.sky.geometry as THREE.BufferGeometry).dispose();
   (s.sky.material as THREE.Material).dispose();
+  _scene.remove(s.groundPlane);
+  (s.groundPlane.geometry as THREE.BufferGeometry).dispose();
+  (s.groundPlane.material as THREE.Material).dispose();
   _scene.remove(s.grassManager.group);
   _scene.remove(s.bees.group);
   _scene.remove(s.butterflies.group);

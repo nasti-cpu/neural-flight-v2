@@ -43,6 +43,7 @@ export const ADJACENCY_RULES: Record<TileType, TileType[]> = {
   [TileType.MEADOW]: [
     TileType.MEADOW,
     TileType.FLOWERS_SPARSE,
+    TileType.FLOWERS_DENSE,
     TileType.TALL_GRASS,
   ],
   [TileType.FLOWERS_SPARSE]: [
@@ -62,9 +63,9 @@ export const ADJACENCY_RULES: Record<TileType, TileType[]> = {
  */
 export const TILE_WEIGHTS: Record<TileType, number> = {
   [TileType.EMPTY]: 1,
-  [TileType.MEADOW]: 8,
-  [TileType.FLOWERS_SPARSE]: 5,
-  [TileType.FLOWERS_DENSE]: 2,
+  [TileType.MEADOW]: 6,
+  [TileType.FLOWERS_SPARSE]: 7,
+  [TileType.FLOWERS_DENSE]: 3,
   [TileType.TALL_GRASS]: 4,
 };
 
@@ -109,13 +110,13 @@ export const TILE_CONTENT: Record<TileType, TileContent> = {
   },
   [TileType.FLOWERS_SPARSE]: {
     grassCount: 10000,
-    flowerCount: 12,
+    flowerCount: 15,
     grassMinHeight: 0.6,
     grassMaxHeight: 1.8,
   },
   [TileType.FLOWERS_DENSE]: {
     grassCount: 6500,
-    flowerCount: 30,
+    flowerCount: 36,
     grassMinHeight: 0.6,
     grassMaxHeight: 1.8,
   },
