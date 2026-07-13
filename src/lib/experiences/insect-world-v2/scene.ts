@@ -210,6 +210,15 @@ export function tick(
   }
   // Pheromon-Spuren-Animation (jeden Frame – nur opacity, billig)
   s.pheromones.update(ctx.elapsed);
+  // Pheromon-Spuren regelmäßig mit neuen Blumen-Zielen aktualisieren
+  // (alle 300 Frames ≈ 5s, damit neu geladene Chunks auch Spuren bekommen)
+  if (s.tickInterval % 300 === 0) {
+    const targets = s.grassManager.flowerTargets.map((pos, i) => ({
+      position: pos,
+      color: s.grassManager.flowerColors[i] ?? new THREE.Color(0xffffff),
+    }));
+    s.pheromones.rebuild(targets, ctx.camera.position);
+  }
 
   // Wiese: Chunks laden/entladen + WFC-Cleanup (nur jeden 3. Frame)
   // In 3 Frames (~50ms bei 60fps) kann man keine 40m-Chunk-Grenze überschreiten.
