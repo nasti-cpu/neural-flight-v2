@@ -44,8 +44,6 @@ interface InsectWorldV2State extends ExperienceState {
   firstPathActivated: boolean;
   /** Zählt Frames für verzögertes Update (Bienen/Schmetterlinge/WFC) */
   tickInterval: number;
-  /** Letzte bekannte Blumen-Anzahl (für Pheromon-Rebuild) */
-  lastFlowerCount: number;
 }
 
 export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
@@ -188,7 +186,6 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     startPosition,
     firstPathActivated: false,
     tickInterval: 0,
-    lastFlowerCount: 0,
   };
 }
 
@@ -213,17 +210,6 @@ export function tick(
   }
   // Pheromon-Spuren-Animation (jeden Frame – nur opacity, billig)
   s.pheromones.update(ctx.elapsed);
-  // Pheromon-Spuren nur neu bauen wenn neue Blumen dazukamen
-  // (mit fixer Referenzposition statt Kamera → keine zuckenden Spuren)
-  const fc = s.grassManager.flowerTargets.length;
-  if (fc !== s.lastFlowerCount) {
-    s.lastFlowerCount = fc;
-    const targets = s.grassManager.flowerTargets.map((pos, i) => ({
-      position: pos,
-      color: s.grassManager.flowerColors[i] ?? new THREE.Color(0xffffff),
-    }));
-    s.pheromones.rebuild(targets, s.startPosition);
-  }
 
   // Wiese: Chunks laden/entladen + WFC-Cleanup (nur jeden 3. Frame)
   // In 3 Frames (~50ms bei 60fps) kann man keine 40m-Chunk-Grenze überschreiten.
