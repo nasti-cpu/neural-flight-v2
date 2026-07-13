@@ -2,7 +2,7 @@
  * insect-world-v2 — Bienen.
  *
  * Lädt ein Bienen-GLB einmalig und erzeugt mehrere Bienen.
- * Jede Biene schwebt mit einer Wander-Steuerung umher und
+ * Jede Biene folgt sanft gekurvten Wegpunkten und
  * bleibt immer sichtbar (kein Ein-/Ausblenden mehr).
  *
  * Keine "new THREE.Vector3()" im Update-Loop (Pool-Nutzung).
@@ -50,8 +50,13 @@ interface BeeState {
   tiltSpeed: number;
   originalScale: number;
   phase: number;
-  // Flugrichtung (sanftes Umherschweben, keine Wegpunkte)
+  // Flugrichtung und Wegpunkt-Folge (sanfte Kurven)
   heading: number;
+  targetX: number;
+  targetY: number;
+  targetZ: number;
+  turnSpeed: number;
+  targetTimer: number;
 }
 
 export interface BeeSwarm {
@@ -116,6 +121,13 @@ export async function createBees(
 
     group.add(beeGroup);
 
+    // Erstes Wegpunkt-Ziel für natürliche Routen
+    const tAngle = Math.random() * Math.PI * 2;
+    const tDist = Math.random() * flyRadius;
+    const tX = cx + Math.cos(tAngle) * tDist;
+    const tZ = cz + Math.sin(tAngle) * tDist;
+    const tY = heightBase + (Math.random() - 0.5) * heightRange;
+
     bees.push({
       group: beeGroup,
       centerX: cx,
@@ -128,31 +140,44 @@ export async function createBees(
       originalScale: config.scale,
       phase: Math.random() * Math.PI * 2,
       heading,
+      targetX: tX,
+      targetY: tY,
+      targetZ: tZ,
+      turnSpeed: 0.5 + Math.random() * 0.5,
+      targetTimer: Math.random() * 3,
     });
   }
 
   function update(time: number, delta: number): void {
     for (const bee of bees) {
-      // ── Wander-Steuerung (sanftes Umherschweben) ──
-      // Statt Kreisbahn oder Wegpunkten: Die Biene ändert ihre
-      // Flugrichtung zufällig und lenkt sanft zum Zentrum zurück.
-      // Das ergibt fließende, natürliche Bahnen ohne ruckartige
-      // Richtungswechsel.
+      // ── Wegpunkt-Folge mit sanften Kurven ──
+      // Die Biene fliegt zu zufälligen Wegpunkten, dreht aber
+      // langsam mit begrenztem Lenkwinkel → fließende Bögen,
+      // keine ruckartigen Richtungswechsel.
 
-      // Zufällige Richtungsänderung (sanftes Abdriften)
-      bee.heading += (Math.random() - 0.5) * 1.0 * delta;
+      bee.targetTimer -= delta;
+      const dx = bee.targetX - bee.group.position.x;
+      const dz = bee.targetZ - bee.group.position.z;
+      const distSq = dx * dx + dz * dz;
 
-      // Zu weit vom Zentrum? → sanft zurück lenken
-      const dxC = bee.group.position.x - bee.centerX;
-      const dzC = bee.group.position.z - bee.centerZ;
-      const distCenterSq = dxC * dxC + dzC * dzC;
-      const maxDist = bee.flyRadius * 0.7;
+      // Neues Ziel: wenn nah genug oder Timer abgelaufen
+      if (bee.targetTimer <= 0 || distSq < 2.0) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * bee.flyRadius;
+        bee.targetX = bee.centerX + Math.cos(angle) * radius;
+        bee.targetZ = bee.centerZ + Math.sin(angle) * radius;
+        bee.targetY =
+          bee.heightBase + (Math.random() - 0.5) * bee.heightRange * 2;
+        bee.targetTimer = 4 + Math.random() * 6;
+      }
 
-      if (distCenterSq > maxDist * maxDist) {
-        const angleToCenter = Math.atan2(-dxC, -dzC);
-        let diff = angleToCenter - bee.heading;
+      // Sanft in Richtung Ziel drehen (maxTurn begrenzt den Winkel)
+      if (distSq > 0.001) {
+        const targetAngle = Math.atan2(dx, dz);
+        let diff = targetAngle - bee.heading;
         diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-        bee.heading += diff * 0.3 * delta;
+        const maxTurn = bee.turnSpeed * delta;
+        bee.heading += Math.max(-maxTurn, Math.min(maxTurn, diff));
       }
 
       // Vorwärts in Flugrichtung bewegen
@@ -160,11 +185,9 @@ export async function createBees(
       bee.group.position.x += Math.sin(bee.heading) * step;
       bee.group.position.z += Math.cos(bee.heading) * step;
 
-      // Vertikales Schweben (sanfte Sinus-Welle)
-      const targetY =
-        bee.heightBase +
-        Math.sin(time * 2.0 + bee.phase) * bee.heightRange * 0.5;
-      bee.group.position.y += (targetY - bee.group.position.y) * 0.1;
+      // Vertikale Bewegung (sanftes Folgen des Ziel-Y)
+      bee.group.position.y +=
+        (bee.targetY - bee.group.position.y) * 0.03;
 
       // Rotation = Flugrichtung (+PI weil Bee.glb nach +Z zeigt)
       bee.group.rotation.y = bee.heading + Math.PI;

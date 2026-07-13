@@ -2,7 +2,7 @@
  * insect-world-v2 — Schmetterlinge.
  *
  * Lädt ein Schmetterlings-GLB einmalig und erzeugt mehrere Exemplare.
- * Jeder Schmetterling schwebt mit einer Wander-Steuerung umher
+ * Jeder Schmetterling folgt sanft gekurvten Wegpunkten
  * und bleibt immer sichtbar (kein Ein-/Ausblenden mehr).
  *
  * Keine "new THREE.Vector3()" im Update-Loop.
@@ -49,8 +49,13 @@ interface ButterflyState {
   tiltSpeed: number;
   originalScale: number;
   phase: number;
-  // Flugrichtung (sanftes Umherschweben, keine Wegpunkte)
+  // Flugrichtung und Wegpunkt-Folge (sanfte Kurven)
   heading: number;
+  targetX: number;
+  targetY: number;
+  targetZ: number;
+  turnSpeed: number;
+  targetTimer: number;
 }
 
 export interface ButterflySwarm {
@@ -112,6 +117,13 @@ export async function createButterflies(
 
     group.add(bGroup);
 
+    // Erstes Wegpunkt-Ziel für natürliche Routen
+    const tAngle = Math.random() * Math.PI * 2;
+    const tDist = Math.random() * flyRadius;
+    const tX = cx + Math.cos(tAngle) * tDist;
+    const tZ = cz + Math.sin(tAngle) * tDist;
+    const tY = heightBase + (Math.random() - 0.5) * heightRange;
+
     butterflies.push({
       group: bGroup,
       centerX: cx,
@@ -124,26 +136,40 @@ export async function createButterflies(
       originalScale: config.scale,
       phase: Math.random() * Math.PI * 2,
       heading,
+      targetX: tX,
+      targetY: tY,
+      targetZ: tZ,
+      turnSpeed: 0.7 + Math.random() * 0.8,
+      targetTimer: Math.random() * 3,
     });
   }
 
   function update(time: number, delta: number): void {
     for (const b of butterflies) {
-      // ── Wander-Steuerung (sanftes Umherschweben) ──
-      // Zufällige Richtungsänderung
-      b.heading += (Math.random() - 0.5) * 1.2 * delta;
+      // ── Wegpunkt-Folge mit sanften Kurven ──
+      b.targetTimer -= delta;
+      const dx = b.targetX - b.group.position.x;
+      const dz = b.targetZ - b.group.position.z;
+      const distSq = dx * dx + dz * dz;
 
-      // Zu weit vom Zentrum? → sanft zurück lenken
-      const dxC = b.group.position.x - b.centerX;
-      const dzC = b.group.position.z - b.centerZ;
-      const distCenterSq = dxC * dxC + dzC * dzC;
-      const maxDist = b.flyRadius * 0.7;
+      // Neues Ziel: wenn nah genug oder Timer abgelaufen
+      if (b.targetTimer <= 0 || distSq < 2.0) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = Math.random() * b.flyRadius;
+        b.targetX = b.centerX + Math.cos(angle) * radius;
+        b.targetZ = b.centerZ + Math.sin(angle) * radius;
+        b.targetY =
+          b.heightBase + (Math.random() - 0.5) * b.heightRange * 2;
+        b.targetTimer = 3 + Math.random() * 5;
+      }
 
-      if (distCenterSq > maxDist * maxDist) {
-        const angleToCenter = Math.atan2(-dxC, -dzC);
-        let diff = angleToCenter - b.heading;
+      // Sanft in Richtung Ziel drehen (maxTurn begrenzt den Winkel)
+      if (distSq > 0.001) {
+        const targetAngle = Math.atan2(dx, dz);
+        let diff = targetAngle - b.heading;
         diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-        b.heading += diff * 0.3 * delta;
+        const maxTurn = b.turnSpeed * delta;
+        b.heading += Math.max(-maxTurn, Math.min(maxTurn, diff));
       }
 
       // Vorwärts in Flugrichtung bewegen
@@ -151,11 +177,8 @@ export async function createButterflies(
       b.group.position.x += Math.sin(b.heading) * step;
       b.group.position.z += Math.cos(b.heading) * step;
 
-      // Vertikales Schweben (sanfte Sinus-Welle)
-      const targetY =
-        b.heightBase +
-        Math.sin(time * 2.0 + b.phase) * b.heightRange * 0.5;
-      b.group.position.y += (targetY - b.group.position.y) * 0.1;
+      // Vertikale Bewegung (sanftes Folgen des Ziel-Y)
+      b.group.position.y += (b.targetY - b.group.position.y) * 0.03;
 
       b.group.rotation.y = b.heading + Math.PI;
 
