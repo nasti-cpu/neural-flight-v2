@@ -95,6 +95,8 @@ export class PheromoneSystem {
   private trails: Trail[] = [];
   private variantIndex = 0; // 0 = Glühwürmchen
   private glowTexture: THREE.CanvasTexture;
+  /** Welche Blumen-Positionen bereits eine Spur haben (Object-Referenzen) */
+  private trailedPositions = new Set<THREE.Vector3>();
 
   constructor() {
     this.glowTexture = createGlowTexture();
@@ -121,9 +123,11 @@ export class PheromoneSystem {
     playerPosition: THREE.Vector3 = new THREE.Vector3(0, 2, 0),
   ): void {
     this.clearTrails();
+    this.trailedPositions.clear();
     const v = VARIANTS[this.variantIndex];
     for (let i = PHEROMON.EVERY_NTH_FLOWER - 1; i < flowers.length; i += PHEROMON.EVERY_NTH_FLOWER) {
       this.addTrail(flowers[i], v, playerPosition);
+      this.trailedPositions.add(flowers[i].position);
     }
   }
 
@@ -132,6 +136,20 @@ export class PheromoneSystem {
     playerPosition: THREE.Vector3 = new THREE.Vector3(0, 2, 0),
   ): void {
     this.addTrails(flowers, playerPosition);
+  }
+
+  /** Fügt Spuren für Blumen hinzu, die noch keine haben (löscht nichts). */
+  addMissingTrails(
+    flowers: FlowerTarget[],
+    playerPosition: THREE.Vector3 = new THREE.Vector3(0, 2, 0),
+  ): void {
+    const v = VARIANTS[this.variantIndex];
+    for (let i = PHEROMON.EVERY_NTH_FLOWER - 1; i < flowers.length; i += PHEROMON.EVERY_NTH_FLOWER) {
+      if (!this.trailedPositions.has(flowers[i].position)) {
+        this.addTrail(flowers[i], v, playerPosition);
+        this.trailedPositions.add(flowers[i].position);
+      }
+    }
   }
 
   private addTrail(
@@ -149,7 +167,7 @@ export class PheromoneSystem {
     const dist = v.trailLengthMin + Math.random() * (v.trailLengthMax - v.trailLengthMin);
     const startX = flower.position.x + dirToPlayer.x * dist;
     const startZ = flower.position.z + dirToPlayer.z * dist;
-    const startY = 0.8 + Math.random() * 0.7;
+    const startY = flower.position.y + 1.0 + Math.random() * 0.7;
 
     const steps = 80;
     const curve: THREE.Vector3[] = [];

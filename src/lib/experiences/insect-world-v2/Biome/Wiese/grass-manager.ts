@@ -722,6 +722,7 @@ export class GrassManager {
       const idx = this.flowerTargets.indexOf(pos);
       if (idx !== -1) {
         this.flowerTargets.splice(idx, 1);
+        this.flowerColors.splice(idx, 1);
       }
     }
 
