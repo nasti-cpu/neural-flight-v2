@@ -89,33 +89,33 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   // Fade erst NACH dem ersten Update aktivieren → nur Bewegungslade-Chunks fade
   grassManager.setFadeDuration(0.5);
 
-  // 7. Bienen (langsam, zufällige Wegpunkte, +10cm höher)
+  // 7. Bienen (Wander-Steuerung, +10cm höher)
   const bees = await createBees(beeGlbUrl, {
     count: 10,
     scale: 0.04,
     fieldRadius: 200,
-    flyRadiusMin: 1,
-    flyRadiusMax: 3,
-    speedMin: 1.2,
-    speedMax: 2.5,
+    flyRadiusMin: 3,
+    flyRadiusMax: 10,
+    speedMin: 2.0,
+    speedMax: 4.0,
     heightBaseMin: 0.9,
     heightBaseMax: 1.6,
-    heightRange: 0.2,
+    heightRange: 0.4,
   });
   ctx.scene.add(bees.group);
 
-  // 8. Schmetterlinge (langsam, zufällige Wegpunkte, +10cm höher)
+  // 8. Schmetterlinge (Wander-Steuerung, +10cm höher)
   const butterflies = await createButterflies(butterflyGlbUrl, {
     count: 6,
     scale: 0.036,
     fieldRadius: 200,
-    flyRadiusMin: 1,
-    flyRadiusMax: 4,
-    speedMin: 0.8,
-    speedMax: 1.8,
+    flyRadiusMin: 3,
+    flyRadiusMax: 12,
+    speedMin: 1.5,
+    speedMax: 3.0,
     heightBaseMin: 1.3,
     heightBaseMax: 2.3,
-    heightRange: 0.4,
+    heightRange: 0.6,
   });
   ctx.scene.add(butterflies.group);
 

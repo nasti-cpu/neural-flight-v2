@@ -2,8 +2,8 @@
  * insect-world-v2 — Schmetterlinge.
  *
  * Lädt ein Schmetterlings-GLB einmalig und erzeugt mehrere Exemplare.
- * Gleiches Flug- und Nebel-Verhalten wie die Bienen:
- * zufällige Sinus-Bahnen + Ein-/Ausblenden im Nebel.
+ * Jeder Schmetterling schwebt mit einer Wander-Steuerung umher
+ * und bleibt immer sichtbar (kein Ein-/Ausblenden mehr).
  *
  * Keine "new THREE.Vector3()" im Update-Loop.
  *
@@ -29,13 +29,13 @@ const DEFAULT_CONFIG: ButterflyConfig = {
   count: 12,
   scale: 0.036,
   fieldRadius: 200,
-  flyRadiusMin: 1,
-  flyRadiusMax: 4,
-  speedMin: 0.8,
-  speedMax: 1.8,
+  flyRadiusMin: 3,
+  flyRadiusMax: 12,
+  speedMin: 1.5,
+  speedMax: 3.0,
   heightBaseMin: 1.3,
   heightBaseMax: 2.3,
-  heightRange: 0.4,
+  heightRange: 0.6,
 };
 
 interface ButterflyState {
@@ -44,16 +44,13 @@ interface ButterflyState {
   centerZ: number;
   flyRadius: number;
   speed: number;
-  phase: number;
-  phase2: number;
-  freqY: number;
   heightBase: number;
   heightRange: number;
   tiltSpeed: number;
   originalScale: number;
-  isVisible: boolean;
-  fadeProgress: number;
-  fadeTimer: number;
+  phase: number;
+  // Flugrichtung (sanftes Umherschweben, keine Wegpunkte)
+  heading: number;
 }
 
 export interface ButterflySwarm {
@@ -89,6 +86,7 @@ export async function createButterflies(
     bGroup.add(template.clone(true));
     bGroup.scale.setScalar(config.scale);
 
+    // Zufällige Startposition und Kenngrößen
     const angle = Math.random() * Math.PI * 2;
     const dist = Math.random() * config.fieldRadius;
     const cx = Math.cos(angle) * dist;
@@ -96,9 +94,21 @@ export async function createButterflies(
     const cy =
       config.heightBaseMin +
       Math.random() * (config.heightBaseMax - config.heightBaseMin);
+    const flyRadius =
+      config.flyRadiusMin +
+      Math.random() * (config.flyRadiusMax - config.flyRadiusMin);
+    const speed =
+      config.speedMin + Math.random() * (config.speedMax - config.speedMin);
+    const heightBase =
+      config.heightBaseMin +
+      Math.random() * (config.heightBaseMax - config.heightBaseMin);
+    const heightRange = config.heightRange * (0.5 + Math.random() * 0.5);
+
+    // Zufällige Anfangs-Flugrichtung (sanftes Schweben)
+    const heading = Math.random() * Math.PI * 2;
 
     bGroup.position.set(cx, cy, cz);
-    bGroup.rotation.y = Math.random() * Math.PI * 2;
+    bGroup.rotation.y = heading + Math.PI;
 
     group.add(bGroup);
 
@@ -106,80 +116,54 @@ export async function createButterflies(
       group: bGroup,
       centerX: cx,
       centerZ: cz,
-      flyRadius:
-        config.flyRadiusMin +
-        Math.random() * (config.flyRadiusMax - config.flyRadiusMin),
-      speed:
-        config.speedMin + Math.random() * (config.speedMax - config.speedMin),
-      phase: Math.random() * Math.PI * 2,
-      phase2: Math.random() * Math.PI * 2,
-      freqY: 1.0 + Math.random() * 1.0,
-      heightBase:
-        config.heightBaseMin +
-        Math.random() * (config.heightBaseMax - config.heightBaseMin),
-      heightRange: config.heightRange * (0.5 + Math.random() * 0.5),
+      flyRadius,
+      speed,
+      heightBase,
+      heightRange,
       tiltSpeed: 1.5 + Math.random() * 1.5,
       originalScale: config.scale,
-      isVisible: true,
-      fadeProgress: 1,
-      fadeTimer: 4 + Math.random() * 8,
+      phase: Math.random() * Math.PI * 2,
+      heading,
     });
   }
 
   function update(time: number, delta: number): void {
     for (const b of butterflies) {
-      b.fadeTimer -= delta;
-      if (b.fadeTimer <= 0) {
-        b.isVisible = !b.isVisible;
-        b.fadeTimer = b.isVisible
-          ? 4 + Math.random() * 8
-          : 2 + Math.random() * 4;
+      // ── Wander-Steuerung (sanftes Umherschweben) ──
+      // Zufällige Richtungsänderung
+      b.heading += (Math.random() - 0.5) * 1.2 * delta;
+
+      // Zu weit vom Zentrum? → sanft zurück lenken
+      const dxC = b.group.position.x - b.centerX;
+      const dzC = b.group.position.z - b.centerZ;
+      const distCenterSq = dxC * dxC + dzC * dzC;
+      const maxDist = b.flyRadius * 0.7;
+
+      if (distCenterSq > maxDist * maxDist) {
+        const angleToCenter = Math.atan2(-dxC, -dzC);
+        let diff = angleToCenter - b.heading;
+        diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+        b.heading += diff * 0.3 * delta;
       }
 
-      if (b.isVisible) {
-        b.fadeProgress = Math.min(1, b.fadeProgress + delta * 1.25);
-      } else {
-        b.fadeProgress = Math.max(0, b.fadeProgress - delta * 1.25);
-        if (b.fadeProgress <= 0) {
-          const a = Math.random() * Math.PI * 2;
-          const d = Math.random() * config.fieldRadius;
-          b.centerX = Math.cos(a) * d;
-          b.centerZ = Math.sin(a) * d;
-        }
-      }
+      // Vorwärts in Flugrichtung bewegen
+      const step = b.speed * delta;
+      b.group.position.x += Math.sin(b.heading) * step;
+      b.group.position.z += Math.cos(b.heading) * step;
 
-      const s = b.fadeProgress * b.originalScale;
-      b.group.scale.setScalar(s);
+      // Vertikales Schweben (sanfte Sinus-Welle)
+      const targetY =
+        b.heightBase +
+        Math.sin(time * 2.0 + b.phase) * b.heightRange * 0.5;
+      b.group.position.y += (targetY - b.group.position.y) * 0.1;
 
-      if (b.fadeProgress > 0) {
-        const t = time * b.speed;
+      b.group.rotation.y = b.heading + Math.PI;
 
-        const cx1 = Math.cos(t + b.phase) * b.flyRadius;
-        const cz1 = Math.sin(t + b.phase) * b.flyRadius;
-        const cx2 = Math.cos(t * 0.7 + b.phase2) * b.flyRadius * 0.3;
-        const cz2 = Math.sin(t * 0.5 + b.phase2) * b.flyRadius * 0.3;
-
-        const x = b.centerX + cx1 + cx2;
-        const z = b.centerZ + cz1 + cz2;
-        const y =
-          b.heightBase +
-          Math.sin(t * b.freqY + b.phase) * b.heightRange;
-
-        const dx = x - b.group.position.x;
-        const dz = z - b.group.position.z;
-
-        b.group.position.set(x, y, z);
-
-        if (Math.abs(dx) > 0.001 || Math.abs(dz) > 0.001) {
-          b.group.rotation.y = Math.atan2(dx, dz) + Math.PI;
-        }
-
-        b.group.rotation.z =
-          Math.sin(t * b.tiltSpeed + b.phase) * 0.08;
-        b.group.rotation.x =
-          Math.sin(t * 1.5 + b.phase2) * 0.05 +
-          Math.sin(t * 0.5 + b.phase) * 0.03;
-      }
+      b.group.rotation.z =
+        Math.sin(time * b.tiltSpeed + b.phase) * 0.08;
+      b.group.rotation.x =
+        Math.sin(time * 1.5) * 0.05 +
+        Math.sin(time * 0.5 + b.phase) * 0.03;
     }
   }
 
