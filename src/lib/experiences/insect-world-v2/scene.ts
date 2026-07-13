@@ -84,8 +84,10 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   // 5. Spawn-Chunk vorbereiten
   grassManager.preSeedSpawn();
 
-  // 6. Ersten Chunk-Ladevorgang anstoßen
+  // 6. Ersten Chunk-Ladevorgang anstoßen (initial 9 Chunks ohne Fade)
   grassManager.update(new THREE.Vector3(0, 2, 0));
+  // Fade erst NACH dem ersten Update aktivieren → nur Bewegungslade-Chunks fade
+  grassManager.setFadeDuration(0.5);
 
   // 7. Bienen (langsam, zufällige Wegpunkte, +10cm höher)
   const bees = await createBees(beeGlbUrl, {
@@ -212,8 +214,9 @@ export function tick(
   // Wiese: Chunks laden/entladen + WFC-Cleanup (nur jeden 3. Frame)
   // In 3 Frames (~50ms bei 60fps) kann man keine 40m-Chunk-Grenze überschreiten.
   // Spart ~66% CPU-Last für Chunk-Verwaltung ohne sichtbaren Unterschied.
+  // delta * 3, weil wir 2 von 3 Frames überspringen (Fade läuft trotzdem korrekt)
   if (s.tickInterval % 3 === 0) {
-    s.grassManager.update(ctx.camera.position);
+    s.grassManager.update(ctx.camera.position, ctx.delta * 3);
   }
 
   // ── Stadt- & Leitsystem (ohne Sofort-Redirect) ──

@@ -74,6 +74,8 @@ interface GrassChunk {
   flowerMeshes: THREE.InstancedMesh[];
   /** Blumen-Positionen in diesem Chunk (für Target-Tracking) */
   flowerPositions: THREE.Vector3[];
+  /** Vergangene Zeit seit Start des Fade-In (Sekunden) */
+  fadeElapsed: number;
 }
 
 // ── Welthöhen-Funktion (exportiert für Blumen/Pheromone) ──
@@ -97,6 +99,9 @@ export class GrassManager {
   public readonly flowerTargets: THREE.Vector3[] = [];
   /** Globale Liste aller Blumen-Farben (parallel zu flowerTargets, für Pheromon-Spuren) */
   public readonly flowerColors: THREE.Color[] = [];
+
+  /** Dauer des Fade-In für neue Chunks (0 = kein Fade) */
+  private fadeDuration = 0;
 
   /** Zählt Updates für verzögertes WFC-Cleanup (nur alle 10 Frames) */
   private cleanupCounter = 0;
@@ -129,6 +134,17 @@ export class GrassManager {
   }
 
   /**
+   * Aktiviert den sanften Fade-In für neu geladene Chunks.
+   * Sollte erst NACH dem ersten update()-Aufruf gesetzt werden,
+   * damit die initialen 9 Chunks ohne Fade erscheinen.
+   *
+   * @param duration - Dauer des Fade-In in Sekunden (z.B. 0.5)
+   */
+  setFadeDuration(duration: number): void {
+    this.fadeDuration = duration;
+  }
+
+  /**
    * Stellt sicher, dass der Spawn-Chunk (0,0) garantiert Blumen hat.
    *
    * Problem ohne diesen Aufruf:
@@ -138,7 +154,7 @@ export class GrassManager {
    *
    * Lösung:
    * - Wir sagen der WFC-Engine: "Chunk (0,0) = FLOWERS_DENSE"
-    * - Das sind 30 Blumen auf 40×40m, direkt beim Start sichtbar
+   * - Das sind 30 Blumen auf 40×40m, direkt beim Start sichtbar
    * - Die umliegenden Chunks passen sich automatisch an (WFC-Propagation)
    */
   preSeedSpawn(): void {
@@ -148,11 +164,15 @@ export class GrassManager {
   }
 
   /**
-   * Wird jeden Frame aufgerufen.
+   * Wird jeden Frame (oder jeden N-ten Frame) aufgerufen.
    * Berechnet, welche Chunks um den Spieler herum sichtbar sein müssen,
    * erzeugt neue und entfernt alte.
+   * Wenn `delta` übergeben wird, werden neu geladene Chunks sanft eingeblendet.
+   *
+   * @param delta - Vergangene Zeit seit dem letzten Aufruf in Sekunden
+   *                (optional – für Fade-Animation)
    */
-  update(playerPosition: THREE.Vector3): void {
+  update(playerPosition: THREE.Vector3, delta?: number): void {
     // Aktuelle Chunk-Koordinaten des Spielers
     const cx = Math.floor(playerPosition.x / CHUNK_SIZE);
     const cz = Math.floor(playerPosition.z / CHUNK_SIZE);
@@ -179,6 +199,33 @@ export class GrassManager {
         this.group.remove(chunk.group);
         this.disposeChunk(chunk);
         this.active.delete(key);
+      }
+    }
+
+    // ── Fade-Animation für neu geladene Chunks ──
+    if (delta !== undefined && this.fadeDuration > 0) {
+      for (const [, chunk] of this.active) {
+        // Nur Chunks mit geklontem Material (Fade aktiv)
+        if (chunk.mesh.material === this.bladeMat) continue;
+
+        const meshMat = chunk.mesh.material as THREE.MeshBasicNodeMaterial;
+        const groundMat = chunk.ground.material as THREE.MeshBasicNodeMaterial;
+
+        chunk.fadeElapsed += delta;
+
+        if (chunk.fadeElapsed >= this.fadeDuration) {
+          // Fade abgeschlossen → transparent deaktivieren (opaque pass = performant)
+          meshMat.transparent = false;
+          groundMat.transparent = false;
+          meshMat.opacity = 1;
+          groundMat.opacity = 1;
+        } else {
+          // Smoothstep-Interpolation: weicher Ein- und Auslauf
+          const t = chunk.fadeElapsed / this.fadeDuration;
+          const smooth = t * t * (3 - 2 * t);
+          meshMat.opacity = smooth;
+          groundMat.opacity = smooth;
+        }
       }
     }
 
@@ -410,6 +457,22 @@ export class GrassManager {
       );
     }
 
+    // ── Material-Klon für sanften Fade-In ──
+    // Nur wenn Fade aktiv ist (fadeDuration > 0).
+    // Die initialen 9 Chunks laden OHNE Fade, weil setFadeDuration()
+    // erst nach dem ersten update()-Aufruf gesetzt wird.
+    if (this.fadeDuration > 0) {
+      const fadeBlade = this.bladeMat.clone();
+      fadeBlade.transparent = true;
+      fadeBlade.opacity = 0;
+      mesh.material = fadeBlade;
+
+      const fadeGround = this.groundMat.clone();
+      fadeGround.transparent = true;
+      fadeGround.opacity = 0;
+      ground.material = fadeGround;
+    }
+
     this.group.add(group);
     this.active.set(`${gx},${gz}`, {
       group,
@@ -419,6 +482,7 @@ export class GrassManager {
       gridZ: gz,
       flowerMeshes,
       flowerPositions,
+      fadeElapsed: 0,
     });
   }
 
@@ -637,6 +701,14 @@ export class GrassManager {
 
   /** Räumt einen Chunk auf (geht zurück in den Pool). */
   private disposeChunk(chunk: GrassChunk): void {
+    // Geklonte Fade-Materials entsorgen (nur wenn ungleich Shared-Material)
+    if (chunk.mesh.material !== this.bladeMat) {
+      (chunk.mesh.material as THREE.Material).dispose();
+    }
+    if (chunk.ground.material !== this.groundMat) {
+      (chunk.ground.material as THREE.Material).dispose();
+    }
+
     // Instanz-Geometrie freigeben
     chunk.mesh.geometry.dispose();
     chunk.mesh.removeFromParent();
