@@ -8,11 +8,10 @@
  *
  * Phasen:
  *   0 [0–290s]     Underwater World läuft normal
- *   1 [290s–∞]     Portal sichtbar → Spieler muss reinschwimmen
- *   2 [onCollide]  Fade to Black (2s)
- *   3 [fadeEnd]    Underwater dispose + Insect setup (async)
- *   4 [insectReady] Fade from Black (2s)
- *   5 [∞]          Insect World läuft normal
+ *   1 [290s–∞]     Portal sichtbar → distance-basierter Fade (10→3 m)
+ *   2 [Kollision]  Voll schwarz (+ dispose Underwater + async Insect setup)
+ *   3 [ready]      Fade from Black (3s)
+ *   4 [∞]          Insect World läuft normal
  */
 
 import * as THREE from "three/webgpu";
@@ -34,8 +33,9 @@ import { createRiftPortal, type RiftPortal } from "$lib/portal/portalRift";
 // ── Konstanten ──
 const T_PORTAL_APPEAR = 290;     // s – Portal erscheint
 const COLLISION_DIST = 3;        // Einheiten – Kollisionsradius
+const FADE_RANGE = 10;           // Einheiten – Abstand ab dem Fade beginnt (bei 13 → 3)
 const PORTAL_TIMEOUT = 40;       // s – Notfall‑Timeout nach Portal-Erscheinen
-const FADE_DURATION = 3;         // s – Dauer Fade to/from Black
+const FADE_DURATION = 3;         // s – Dauer Fade from Black
 const FADE_Z = 5;                // Einheiten – Abstand FadeSprite vor Kamera
 
 // ── State ──
@@ -121,34 +121,38 @@ export function tick(
 		_spawnPortal(s, ctx);
 	}
 
-	// 1 → 2: Kollision (Weltkoordinaten) oder Notfall-Timeout
+	// 1 → 2: Distance-basierter Fade + Kollision
 	if (s.phase === 1) {
 		ctx.camera.getWorldPosition(s._worldPos);
 		const dist = s._worldPos.distanceTo(s.portal.group.position);
+
+		// Fade progress 0→1 je näher der Spieler kommt (13 → 3 Einheiten)
+		const fadeProgress = 1 - Math.max(0, Math.min(1,
+			(dist - COLLISION_DIST) / FADE_RANGE));
+		s.fadeSprite.material.opacity = fadeProgress;
+
 		if (dist < COLLISION_DIST || (elapsed - s._phaseChangedAt) > PORTAL_TIMEOUT) {
+			s.fadeSprite.material.opacity = 1; // voll schwarz
 			_setPhase(s, 2, elapsed);
+			_startTransition(s);
 		}
 	}
 
-	// 2 → 3: Fade abgeschlossen
-	if (s.phase === 2 && (elapsed - s._phaseChangedAt) >= FADE_DURATION) {
+	// 2 → 3: Insect-Setup fertig → Fade-In starten
+	if (s.phase === 2 && s._insectReady) {
 		_setPhase(s, 3, elapsed);
-		_startTransition(s);
 	}
 
-	// 3 → 4: Insect-Setup fertig
-	if (s.phase === 3 && s._insectReady) {
+	// 3 → 4: Fade-In abgeschlossen
+	if (s.phase === 3 && (elapsed - s._phaseChangedAt) >= FADE_DURATION) {
 		_setPhase(s, 4, elapsed);
-	}
-
-	// 4 → 5: Fade-in abgeschlossen
-	if (s.phase === 4 && (elapsed - s._phaseChangedAt) >= FADE_DURATION) {
-		_setPhase(s, 5, elapsed);
 		s.fadeSprite.material.opacity = 0;
 	}
 
 	// ── FadeSprite immer vor die aktuelle Kamera ──
-	if (s.phase >= 2) {
+	// ab Phase 1 (Portal-Annäherung) muss es der Kamera folgen,
+	// sonst bleibt es an (0,0,-10) in der Welt und der Fade ist unsichtbar
+	if (s.phase >= 1) {
 		ctx.camera.getWorldPosition(s._worldPos);
 		const fwd = s._fwd.set(0, 0, -1).applyQuaternion(ctx.camera.quaternion);
 		s.fadeSprite.position.copy(s._worldPos).add(fwd.multiplyScalar(FADE_Z));
@@ -160,24 +164,20 @@ export function tick(
 		case 1:
 			return _tickUnderwater(s, ctx);
 
-		case 2: {
-			const t = Math.min(1, (elapsed - s._phaseChangedAt) / FADE_DURATION);
-			s.fadeSprite.material.opacity = t;
-			if (s.underwaterState) return _tickUnderwater(s, ctx);
-			return { state: s };
-		}
-
-		case 3:
+		// Phase 2: Transition läuft (black screen) – warte auf Insect-Setup
+		case 2:
 			return { state: s };
 
-		case 4: {
-			if (!s._insectReady || !s.insectState) return { state: s };
+		// Phase 3: Insect ready → Fade In (3s)
+		case 3: {
+			if (!s.insectState) return { state: s };
 			const t = Math.min(1, (elapsed - s._phaseChangedAt) / FADE_DURATION);
 			s.fadeSprite.material.opacity = 1 - t;
 			return _tickInsect(s, ctx);
 		}
 
-		case 5:
+		// Phase 4: Insect World läuft normal
+		case 4:
 			return _tickInsect(s, ctx);
 
 		default:
@@ -271,8 +271,6 @@ async function _setupInsectAsync(s: BeyondState): Promise<void> {
 		s.scene.add(sun);
 		s.insectLights = { ambient, sun };
 
-		s.scene.remove(s.fadeSprite);
-
 		const iState = await insectSetup({
 			scene: s.scene,
 			camera: s.dummyCamera,
@@ -280,11 +278,10 @@ async function _setupInsectAsync(s: BeyondState): Promise<void> {
 		});
 		s.insectState = iState;
 
-		s.scene.add(s.fadeSprite);
 		s.fadeSprite.material.opacity = 1;
 
 		s._insectReady = true;
-		// Nächster tick wechselt zu Phase 4 über _setPhase
+		// Nächster tick erkennt Phase 2→3
 	} catch (err) {
 		console.error("[Beyond-limits] Insect-Setup fehlgeschlagen:", err);
 	}
