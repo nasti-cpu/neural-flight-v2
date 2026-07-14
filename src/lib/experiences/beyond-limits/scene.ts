@@ -74,6 +74,7 @@ export async function setup(ctx: SetupContext): Promise<BeyondState> {
 	const fade = new THREE.Sprite(fMat);
 	fade.scale.set(100, 100, 1);
 	fade.position.set(0, 0, -10);
+	fade.renderOrder = 999; // immer ganz zuletzt rendern (über Partikel etc.)
 
 	const portal = createRiftPortal({ scale: 3 });
 	portal.group.visible = false;

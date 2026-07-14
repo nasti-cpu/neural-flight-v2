@@ -1,9 +1,10 @@
 /**
  * player.ts – Delegiert ICAROS-Steuerung an die aktive Sub-Experience.
  *
- * Phase 0–2 → updatePlayer aus der Underwater World
- * Phase 3   → keine Steuerung (Transition, schwarzer Bildschirm)
- * Phase 4–5 → updatePlayer aus der Insect World
+ * Phasen:
+ *   0–1 → Underwater World (Pitch=Steigen/Sinken, Roll=Kurve)
+ *   2   → Transition (keine Steuerung, schwarzer Bildschirm)
+ *   3–4 → Insect World (genauso: Pitch=Steigen/Sinken, Roll=Kurve)
  */
 
 import type { ExperienceState } from "../types";
@@ -19,7 +20,8 @@ export function updatePlayer(
 	const s = state as Record<string, unknown>;
 	const phase = s.phase as number;
 
-	if (phase <= 2 && s.underwaterState) {
+	// Phase 0–1: Underwater World
+	if (phase <= 1 && s.underwaterState) {
 		return uwUpdatePlayer(
 			orientation,
 			speed,
@@ -28,7 +30,8 @@ export function updatePlayer(
 		);
 	}
 
-	if (phase >= 4 && s.insectState) {
+	// Phase 3–4: Insect World (auch während Fade-In fliegen lasen)
+	if (phase >= 3 && s.insectState) {
 		return insectUpdatePlayer(
 			orientation,
 			speed,
@@ -36,4 +39,5 @@ export function updatePlayer(
 			delta,
 		);
 	}
+	// Phase 2: keine Steuerung
 }
