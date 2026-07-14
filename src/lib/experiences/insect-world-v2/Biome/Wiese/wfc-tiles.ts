@@ -128,8 +128,8 @@ export const TILE_CONTENT: Record<TileType, TileContent> = {
   [TileType.TALL_GRASS]: {
     grassCount: 18000,
     flowerCount: 0,
-    grassMinHeight: 1.2,
-    grassMaxHeight: 2.5,
+    grassMinHeight: 0.6,
+    grassMaxHeight: 1.8,
   },
   [TileType.CITY]: {
     grassCount: 0,
