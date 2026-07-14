@@ -103,6 +103,7 @@ export function createRiftPortal(config?: RiftConfig): RiftPortal {
 	riftMat.opacity = 0.95;
 	riftMat.side = THREE.DoubleSide;
 	riftMat.toneMapped = false;
+	riftMat.fog = false;
 
 	const riftMesh = new THREE.Mesh(riftGeo, riftMat);
 	group.add(riftMesh);
@@ -122,6 +123,7 @@ export function createRiftPortal(config?: RiftConfig): RiftPortal {
 	glowMat.side = THREE.DoubleSide;
 	glowMat.depthWrite = false;
 	glowMat.toneMapped = false;
+	glowMat.fog = false;
 	const glowMesh = new THREE.Mesh(glowGeo, glowMat);
 	glowMesh.position.z = -0.02;
 	group.add(glowMesh);
@@ -141,6 +143,7 @@ export function createRiftPortal(config?: RiftConfig): RiftPortal {
 	edgeMat.side = THREE.DoubleSide;
 	edgeMat.depthWrite = false;
 	edgeMat.toneMapped = false;
+	edgeMat.fog = false;
 	const edgeMesh = new THREE.Mesh(edgeGeo, edgeMat);
 	edgeMesh.position.z = -0.01;
 	group.add(edgeMesh);
@@ -175,6 +178,7 @@ export function createRiftPortal(config?: RiftConfig): RiftPortal {
 		float(0.5).add(sin(time.mul(2).add(positionLocal.z.mul(6))).mul(0.3)),
 	);
 	pMat.toneMapped = false;
+	pMat.fog = false;
 	const ptMesh = new THREE.Points(pGeo, pMat);
 	group.add(ptMesh);
 
