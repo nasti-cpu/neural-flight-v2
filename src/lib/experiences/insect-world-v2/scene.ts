@@ -79,6 +79,38 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   groundPlane.rotation.x = -Math.PI / 2;
   ctx.scene.add(groundPlane);
 
+  // 2b. Gras-Silhouette am Horizontrand – raue Kante statt glatter Linie
+  {
+    const RING_COUNT = 800;
+    const RING_INNER = GROUND_RADIUS * 0.98;
+    const RING_OUTER = GROUND_RADIUS;
+    const bladeGeo = new THREE.PlaneGeometry(0.6, 1.5);
+    const bladeMat = new THREE.MeshBasicMaterial({
+      color: 0x3a6028,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.8,
+    });
+    const ring = new THREE.InstancedMesh(bladeGeo, bladeMat, RING_COUNT);
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < RING_COUNT; i++) {
+      const angle = (i / RING_COUNT) * Math.PI * 2;
+      const r = RING_INNER + Math.random() * (RING_OUTER - RING_INNER);
+      const wx = Math.cos(angle) * r;
+      const wz = Math.sin(angle) * r;
+      // Horizont-Höhe an dieser Stelle berechnen
+      const t = r / GROUND_RADIUS;
+      const h = -(t * t * GROUND_DROP) + 0.5;
+      dummy.position.set(wx, h + 0.75, wz);
+      dummy.rotation.y = angle + Math.PI / 2;
+      dummy.scale.set(1, 0.8 + Math.random() * 1.2, 1);
+      dummy.updateMatrix();
+      ring.setMatrixAt(i, dummy.matrix);
+    }
+    ring.instanceMatrix.needsUpdate = true;
+    ctx.scene.add(ring);
+  }
+
   // 3. Blumen vorladen (einmalig, wird von GrassManager wiederverwendet)
   const preloadedFlowers = await preloadFlowers();
 
