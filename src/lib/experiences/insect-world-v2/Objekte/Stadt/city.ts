@@ -15,9 +15,9 @@ export const CITY_CONFIG = {
 	// ── Anzahl & Verteilung ──
 	CITY_COUNT: 3,
 	/** Minimaler Abstand zwischen zwei Städten (Meter) */
-	MIN_DISTANCE: 250,
+	MIN_DISTANCE: 120,
 	/** Maximaler Abstand zwischen zwei Städten (Meter) */
-	MAX_DISTANCE: 400,
+	MAX_DISTANCE: 220,
 
 	// ── Spieler-Reichweiten (in Metern) ──
 	/** Bei diesem Abstand wird das Stadt-Modell eingeblendet (≈ Nebelgrenze) */
