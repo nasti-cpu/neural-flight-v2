@@ -110,7 +110,7 @@ export async function setup(ctx: SetupContext): Promise<BeyondState> {
 
 		portalJump = new THREE.Audio(listener);
 		portalJump.setBuffer(jumpBuf);
-		portalJump.setVolume(0.3);
+		portalJump.setVolume(0.15);
 
 		portalAmbient = new THREE.Audio(listener);
 		portalAmbient.setBuffer(ambientBuf);
@@ -155,6 +155,17 @@ function _setStage(s: BeyondState, stage: number, elapsed: number): void {
 	s.stageStart = elapsed;
 }
 
+// ── Manueller Portal-Trigger (von P-Taste in +page.svelte) ──
+let _forcePortalTrigger = false;
+
+/**
+ * Wird von der P-Taste in +page.svelte aufgerufen.
+ * Setzt ein Flag, das im nächsten tick() zur sofortigen Portal-Transition führt.
+ */
+export function forcePortalTransition(): void {
+	_forcePortalTrigger = true;
+}
+
 // ── tick ──
 export function tick(
 	state: ExperienceState,
@@ -177,7 +188,8 @@ export function tick(
 		// ── Stage 0: Aktive Welt läuft ──
 		case 0: {
 			// Manueller Trigger (P-Taste) oder Zeit-basierter Trigger
-			if (s._forcePortal || elapsed - s.stageStart >= T_PORTAL_APPEAR) {
+			if (_forcePortalTrigger || s._forcePortal || elapsed - s.stageStart >= T_PORTAL_APPEAR) {
+				_forcePortalTrigger = false;
 				s._forcePortal = false;
 				_setStage(s, 1, elapsed);
 				_spawnPortal(s, ctx);
@@ -188,7 +200,8 @@ export function tick(
 		// ── Stage 1: Portal + distance-basierter Fade ──
 		case 1: {
 			// P-Taste in Stage 1 → sofortige Transition (ohne hinfliegen)
-			if (s._forcePortal) {
+			if (_forcePortalTrigger || s._forcePortal) {
+				_forcePortalTrigger = false;
 				s._forcePortal = false;
 				s.fadeSprite.material.opacity = 1;
 				_setStage(s, 2, elapsed);

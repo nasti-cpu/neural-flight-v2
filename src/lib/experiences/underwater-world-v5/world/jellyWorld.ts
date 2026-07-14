@@ -309,7 +309,7 @@ export class JellyWorld {
       pz += Math.sin(ma) * member.groupMemberRadius;
     }
 
-    // ═══ Exclusion-Zonen: linearer radialer Push um Kuppeln herum ═══
+    // ═══ Exclusion-Zonen: sanfter radialer Push (dt-smooth, kein Zischen) ═══
     if (this._exclusionZones.length > 0) {
       for (const zone of this._exclusionZones) {
         const dx = px - zone.centerX;
@@ -318,7 +318,8 @@ export class JellyWorld {
         const minDist = zone.radius + 2;
         if (distSq < minDist * minDist && distSq > 0.01) {
           const dist = Math.sqrt(distSq);
-          const push = minDist - dist;
+          const overlap = (minDist - dist) / minDist;
+          const push = overlap * delta * 30;
           px += (dx / dist) * push;
           pz += (dz / dist) * push;
         }

@@ -21,6 +21,7 @@
         getClientId,
         type IcarosHostIntegration,
     } from "$lib/icaros";
+    import { forcePortalTransition } from "$lib/experiences/beyond-limits/scene";
 
     let canvas: HTMLCanvasElement;
     let renderer: any;
@@ -165,9 +166,11 @@
 
                 // ── P-Taste: Portal-Transition manuell auslösen ──
                 // Einmal drücken = Portal erscheint, nochmal = sofortiger Wechsel
+                // Nutzt direkt die Modul-Funktion aus beyond-limits/scene.ts,
+                // damit auch bei state-Neusetzung der Trigger ankommt.
                 function onKeyDown(e: KeyboardEvent): void {
-                    if (e.code === "KeyP" && exp.state) {
-                        (exp.state as Record<string, unknown>)._forcePortal = true;
+                    if (e.code === "KeyP") {
+                        forcePortalTransition();
                     }
                 }
                 window.addEventListener("keydown", onKeyDown);

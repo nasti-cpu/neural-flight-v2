@@ -429,7 +429,7 @@ export class LargeCreatureWorld {
       Math.min(this.config.waterY - 4, creature.currentY),
     );
 
-    // Exclusion-Zonen: linearer radialer Push um Kuppeln herum
+    // Exclusion-Zonen: sanfter radialer Push (dt-smooth, kein Zischen)
     if (this._exclusionZones.length > 0) {
       for (const zone of this._exclusionZones) {
         const dx = px - zone.centerX;
@@ -438,15 +438,15 @@ export class LargeCreatureWorld {
         const minDist = zone.radius + 4;
         if (distSq < minDist * minDist && distSq > 0.01) {
           const dist = Math.sqrt(distSq);
-          const push = minDist - dist;
+          const overlap = (minDist - dist) / minDist;
+          const push = overlap * dt * 30;
           px += (dx / dist) * push;
           pz += (dz / dist) * push;
         }
       }
     }
 
-    // ── Yaw aus der rotierten Ellipsen-Tangente ──
-      // ── Yaw aus der rotierten Ellipsen-Tangente + Push ──
+    // ── Yaw aus der rotierten Ellipsen-Tangente + Push ──
     const dRx = -sinA * radiusX;
     const dRz = cosA * radiusZ;
     const tangentX = dRx * cosRot - dRz * sinRot;
