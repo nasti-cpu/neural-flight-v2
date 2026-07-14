@@ -68,7 +68,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 
   // 2b. Dynamischer Horizont-Blocker – Ring aus Grasblättern, folgt der Kamera.
   // Verdeckt ferne Städte/Objekte und erzeugt eine raue Graskante am Horizont.
-  const HORIZON_RADIUS = 1800;
+  const HORIZON_RADIUS = 2400;
   const HORIZON_COUNT = 1200;
   const HORIZON_BLADE_H = 20;
   const HORIZON_BLADE_W = 4;
