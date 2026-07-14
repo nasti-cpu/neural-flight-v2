@@ -39,6 +39,12 @@ export class CityManager {
   /** Wurde das Modell bereits in die Szene eingehängt? */
   private modelAdded = false;
 
+  /**
+   * Gesperrte Stadt: Sobald eine Stadt sichtbar war, bleibt sie
+   * sichtbar, bis sie besucht UND der Spieler >100m entfernt ist.
+   */
+  private _lockedCity: CityInstance | null = null;
+
   constructor() {
     this.modelPivot = new THREE.Group();
     this.modelPivot.visible = false;
@@ -135,21 +141,66 @@ export class CityManager {
   }
 
   /**
-   * Jeden Frame aufrufen: Zeigt das Modell an der nächsten aktiven Stadt.
-   * Auch besuchte Städte bleiben sichtbar – verschwinden nicht mehr.
+   * Jeden Frame aufrufen: Zeigt Stadt-Modell mit Lock-Logik.
+   *
+   * - Sobald eine Stadt sichtbar wird (Chunk aktiv), wird sie "gesperrt"
+   * - Gesperrte Stadt bleibt sichtbar, egal wie weit der Spieler fliegt
+   * - Erst wenn: Stadt besucht UND >100m Entfernung → Entsperrung
+   * - Danach wird die nächste aktive Stadt gesperrt
    */
-  update(grassManager: GrassManager): void {
-    const activeCity = this.cities.find(
-      (c) => grassManager.hasChunk(c.gx, c.gz),
-    );
+  update(grassManager: GrassManager, playerPos: THREE.Vector3): void {
+    // ── 1. Gesperrte Stadt prüfen ──
+    if (this._lockedCity) {
+      const dist = playerPos.distanceTo(this._lockedCity.position);
+
+      // Entsperrung: besucht UND weit genug entfernt
+      if (this._lockedCity.visited && dist > 100) {
+        this._lockedCity = null;
+      } else {
+        // Stadt bleibt sichtbar
+        this._showCity(this._lockedCity);
+        return;
+      }
+    }
+
+    // ── 2. Nächste aktive Stadt suchen ──
+    const activeCity = this._findNearestActiveCity(grassManager, playerPos);
 
     if (activeCity) {
-      this.modelPivot.position.copy(activeCity.position);
-      this.modelPivot.rotation.y = activeCity.rotation;
-      this.modelPivot.visible = true;
+      this._lockedCity = activeCity;
+      this._showCity(activeCity);
     } else {
       this.modelPivot.visible = false;
     }
+  }
+
+  /** Zeigt das Stadt-Modell an einer bestimmten Stadt. */
+  private _showCity(city: CityInstance): void {
+    this.modelPivot.position.copy(city.position);
+    this.modelPivot.rotation.y = city.rotation;
+    this.modelPivot.visible = true;
+  }
+
+  /** Findet die nächste Stadt, deren Chunk aktiv ist (auch besuchte). */
+  private _findNearestActiveCity(
+    grassManager: GrassManager,
+    playerPos: THREE.Vector3,
+  ): CityInstance | null {
+    let best: CityInstance | null = null;
+    let bestDistSq = Infinity;
+
+    for (const city of this.cities) {
+      if (!grassManager.hasChunk(city.gx, city.gz)) continue;
+      const dx = city.position.x - playerPos.x;
+      const dz = city.position.z - playerPos.z;
+      const dSq = dx * dx + dz * dz;
+      if (dSq < bestDistSq) {
+        bestDistSq = dSq;
+        best = city;
+      }
+    }
+
+    return best;
   }
 
   /**

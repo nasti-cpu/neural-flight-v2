@@ -23,7 +23,7 @@ import {
   ADJACENCY_RULES,
   ALL_TILE_TYPES,
   TILE_WEIGHTS,
-  type TileType,
+  TileType,
 } from "./wfc-tiles";
 
 // ── Hilfsfunktionen ──

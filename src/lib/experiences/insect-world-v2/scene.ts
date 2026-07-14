@@ -156,7 +156,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   await cityManager.loadCities(positions, ctx.scene, grassManager);
   console.log(`[City] ${cityManager.cities.length} Städte erzeugt`);
 
-  // 11. Große Pheromon-Leitspur zur nächsten Stadt (400m Reichweite)
+  // 11. Große Pheromon-Leitspur zur nächsten Stadt (500m Reichweite)
   const guidePath = new CityGuidePath({
     neonColor: 0xff66ff,
     dashLength: 0.8,
@@ -164,7 +164,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     spriteSizeMin: 0.8,
     spriteSizeMax: 1.6,
     spritesPerDash: 4,
-    maxDist: 400,
+    maxDist: 500,
   });
   ctx.scene.add(guidePath.group);
 
@@ -239,8 +239,8 @@ export function tick(
     s.grassManager.update(ctx.camera.position, ctx.delta * 3);
   }
 
-  // ── CityManager: chunk-basierte Stadt-Anzeige (Modell folgt aktivem Chunk) ──
-  s.cityManager.update(s.grassManager);
+  // ── CityManager: Lock-Logik (sichtbar bis besucht + >100m) ──
+  s.cityManager.update(s.grassManager, ctx.camera.position);
 
   // ── Große Pheromon-Leitspur zur nächsten Stadt ──
   const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);
