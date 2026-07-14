@@ -3,7 +3,9 @@
  *
  * Wechselt alle ~5 min zwischen Underwater World und Insect World.
  * Während des asynchronen Ladens der nächsten Welt wird eine
- * Portal-Innensicht (Tunnel) eingeblendet.
+ * 3D-Perspektiv-Tunnel eingeblendet, der direkt vor der Kamera
+ * liegt. Sobald die neue Welt geladen ist, blendet der Tunnel aus
+ * und die neue Welt wird sichtbar – ohne schwarze Lücke.
  */
 
 import * as THREE from "three/webgpu";
@@ -28,15 +30,16 @@ const T_PORTAL_APPEAR = 290;     // s – aktive Zeit bevor Portal erscheint
 const COLLISION_DIST = 3;        // Einheiten – Kollisionsradius
 const FADE_RANGE = 10;           // Einheiten – Abstand ab dem Fade beginnt
 const PORTAL_TIMEOUT = 40;       // s – Notfall‑Timeout nach Portal-Erscheinen
-const FADE_DURATION = 3;         // s – Dauer Fade from Black
-const FADE_IN_DELAY = 2;         // s – Verzögerung bevor Fade beginnt (erst fliegen, dann sehen)
 const FADE_Z = 5;                // Einheiten – Abstand FadeSprite vor Kamera
-const TUNNEL_FADE = 0.5;         // s – Ein-/Ausblendzeit des Tunnels
+const TUNNEL_FADE = 0.3;         // s – Ausblendzeit des Tunnels
+const MIN_TUNNEL_DURATION = 1.0; // s – Tunnel mindestens 1s sichtbar
+const TUNNEL_Z = 8;              // Einheiten – Abstand Tunnel vor Kamera
+const TUNNEL_SCALE = 8;          // Skalierung des Tunnel-Overlays
 
 // ── State ──
 interface BeyondState extends ExperienceState {
 	world: number;          // 0=Underwater, 1=Insect
-	stage: number;          // 0=active, 1=portal, 2=black+tunnel, 3=fadeIn
+	stage: number;          // 0=active, 1=portal, 2=tunnel
 	stageStart: number;     // ctx.elapsed bei Stage-Beginn
 
 	underwaterState: ExperienceState | null;
@@ -56,8 +59,6 @@ interface BeyondState extends ExperienceState {
 	_ready: boolean;
 	/** Aktuelle Tunnel-Opazität [0…0.95] */
 	_tunnelOpacity: number;
-	/** Tunnel hat volle Helligkeit erreicht */
-	_tunnelFull: boolean;
 	/** Tunnel blendet gerade aus */
 	_tunnelFadeOut: boolean;
 
@@ -138,7 +139,6 @@ export async function setup(ctx: SetupContext): Promise<BeyondState> {
 		scene: ctx.scene,
 		_ready: false,
 		_tunnelOpacity: 0,
-		_tunnelFull: false,
 		_tunnelFadeOut: false,
 		_portalJump: portalJump,
 		_portalAmbient: portalAmbient,
@@ -175,7 +175,7 @@ export function tick(
 	const elapsed = ctx.elapsed;
 	const inWorld = s.world;
 
-	// ── FadeSprite immer vor die Kamera (Stage 1–3) ──
+	// ── FadeSprite immer vor die Kamera (Stage 1–2) ──
 	if (s.stage >= 1) {
 		ctx.camera.getWorldPosition(s._worldPos);
 		ctx.camera.getWorldQuaternion(s._worldQuat);
@@ -187,7 +187,6 @@ export function tick(
 	switch (s.stage) {
 		// ── Stage 0: Aktive Welt läuft ──
 		case 0: {
-			// Manueller Trigger (P-Taste) oder Zeit-basierter Trigger
 			if (_forcePortalTrigger || s._forcePortal || elapsed - s.stageStart >= T_PORTAL_APPEAR) {
 				_forcePortalTrigger = false;
 				s._forcePortal = false;
@@ -199,20 +198,19 @@ export function tick(
 
 		// ── Stage 1: Portal + distance-basierter Fade ──
 		case 1: {
-			// P-Taste in Stage 1 → sofortige Transition (ohne hinfliegen)
+			// P-Taste in Stage 1 → sofortige Transition
 			if (_forcePortalTrigger || s._forcePortal) {
 				_forcePortalTrigger = false;
 				s._forcePortal = false;
-				s.fadeSprite.material.opacity = 1;
+				s.fadeSprite.material.opacity = 0;
 				_setStage(s, 2, elapsed);
 				if (s._portalJump) {
 					s._portalJump.stop();
 					s._portalJump.play();
 				}
-				s.tunnel.mesh.visible = true;
 				s._tunnelOpacity = 0.95;
-				s._tunnelFull = true;
 				s._tunnelFadeOut = false;
+				s.tunnel.mesh.visible = true;
 				s.tunnel.mesh.material.opacity = 0.95;
 				_startTransition(s);
 				return { state: s };
@@ -226,86 +224,79 @@ export function tick(
 			s.fadeSprite.material.opacity = fp;
 
 			if (dist < COLLISION_DIST || (elapsed - s.stageStart) > PORTAL_TIMEOUT) {
-				s.fadeSprite.material.opacity = 1;
+				s.fadeSprite.material.opacity = 0;
 				_setStage(s, 2, elapsed);
 				if (s._portalJump) {
 					s._portalJump.stop();
 					s._portalJump.play();
 				}
-				s.tunnel.mesh.visible = true;
 				s._tunnelOpacity = 0.95;
-				s._tunnelFull = true;
 				s._tunnelFadeOut = false;
+				s.tunnel.mesh.visible = true;
 				s.tunnel.mesh.material.opacity = 0.95;
 				_startTransition(s);
 			}
 			return _tickActiveWorld(s, ctx);
 		}
 
-		// ── Stage 2: Tunnel sofort sichtbar (Ladebrücke) ──
+		// ── Stage 2: Tunnel vor Kamera (Ladebrücke) ──
 		case 2: {
-			// Ambient-Sound starten (bei erstem Frame der Stage)
+			// Jeden Frame: Tunnel direkt vor die Kamera setzen
+			ctx.camera.getWorldPosition(s._worldPos);
+			ctx.camera.getWorldQuaternion(s._worldQuat);
+			s.tunnel.mesh.position.copy(s._worldPos);
+			s.tunnel.mesh.quaternion.copy(s._worldQuat);
+			s.tunnel.mesh.translateZ(-TUNNEL_Z);
+			s.tunnel.mesh.scale.setScalar(TUNNEL_SCALE);
+
+			// Ambient-Sound starten
 			if (s._portalAmbient && !s._portalAmbient.isPlaying) {
 				s._portalAmbient.play();
-				s._portalAmbient.setVolume(0.4); // sofort volle Lautstärke
+				s._portalAmbient.setVolume(0.4);
 			}
 
-			// Tunnel auf voller Opazität halten, solange nicht ausgeblendet wird
+			// Tunnel auf voller Opazität halten bis fade-out beginnt
 			if (!s._tunnelFadeOut) {
 				s._tunnelOpacity = 0.95;
 			}
 
-			// Loading fertig → Tunnel ausblenden starten
-			if (s._ready && !s._tunnelFadeOut) {
+			// Start fade-out wenn geladen + Mindestdauer erreicht
+			if (s._ready && !s._tunnelFadeOut && (elapsed - s.stageStart) >= MIN_TUNNEL_DURATION) {
 				s._tunnelFadeOut = true;
 			}
+
 			if (s._tunnelFadeOut) {
-				s._tunnelOpacity = Math.max(0,
-					s._tunnelOpacity - ctx.delta / (TUNNEL_FADE * 0.6));
-				// Ambient-Lautstärke runter
+				s._tunnelOpacity = Math.max(0, s._tunnelOpacity - ctx.delta / TUNNEL_FADE);
+
+				// Ambient-Lautstärke folgt Tunnel-Opazität
 				if (s._portalAmbient) {
-					s._portalAmbient.setVolume(s._tunnelOpacity / 0.95 * 0.4);
+					s._portalAmbient.setVolume((s._tunnelOpacity / 0.95) * 0.4);
 				}
+
+				// Neue Welt wird eingeblendet (Audio folgt invers)
+				const newWorld = inWorld === 0 ? 1 : 0;
+				const audioT = 1 - (s._tunnelOpacity / 0.95);
+				_setAudioVolume(s, newWorld, audioT * _getAudioTargetVolume(newWorld));
+
 				if (s._tunnelOpacity <= 0) {
 					s.tunnel.mesh.visible = false;
 					if (s._portalAmbient) {
 						s._portalAmbient.stop();
 					}
-					_setStage(s, 3, elapsed);
+
+					// Direkt zurück zu Stage 0 mit neuer Welt
+					s.world = newWorld;
+					s.stage = 0;
+					s.stageStart = elapsed;
+					s.fadeSprite.material.opacity = 0;
+					s.portal.group.visible = false;
+					s._ready = false;
+					s._tunnelFadeOut = false;
 				}
 			}
 
-			s.tunnel.mesh.material.opacity = s._tunnelOpacity;
+			s.tunnel.mesh.material.opacity = Math.max(0, s._tunnelOpacity);
 			return { state: s };
-		}
-
-		// ── Stage 3: Delay, dann Fade In in die neue Welt ──
-		// Zuerst delay (schwarz, Welt läuft bereits im Hintergrund),
-		// dann weiche Einblendung über FADE_DURATION.
-		case 3: {
-			const newWorld = inWorld === 0 ? 1 : 0;
-			const stageElapsed = elapsed - s.stageStart;
-			const fadeProgress = Math.max(0, stageElapsed - FADE_IN_DELAY);
-			const t = Math.min(1, fadeProgress / FADE_DURATION);
-
-			s.fadeSprite.material.opacity = 1 - t;
-
-			// Audio erst nach dem Delay einblenden
-			_setAudioVolume(s, newWorld, t * _getAudioTargetVolume(newWorld));
-
-			if (t >= 1) {
-				// Nächsten Zyklus starten
-				s.world = newWorld;
-				s.stage = 0;
-				s.stageStart = elapsed;
-				s.fadeSprite.material.opacity = 0;
-				s.portal.group.visible = false;
-				s._ready = false;
-				s._tunnelFull = false;
-				s._tunnelFadeOut = false;
-			}
-			// Welt läuft bereits – Spieler kann fliegen, bevor er sieht
-			return _tickActiveWorld(s, ctx);
 		}
 
 		default:
@@ -361,7 +352,6 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 	if (s._portalJump) {
 		if (s._portalJump.isPlaying) s._portalJump.stop();
 	}
-	// AudioListener entfernen (ist an dummyCamera / ctx.camera)
 	const listener = s._portalAmbient?.listener ?? s._portalJump?.listener;
 	if (listener) {
 		listener.parent?.remove(listener);
@@ -467,10 +457,9 @@ async function _setupWorldAsync(s: BeyondState, targetWorld: number): Promise<vo
 			s.insectState = iState;
 		}
 
-		// Neue Welt startet stumm – wird in Stage 3 eingeblendet
+		// Neue Welt startet stumm – Audio wird beim Tunnel-Ausblenden eingeblendet
 		_setAudioVolume(s, targetWorld, 0);
 
-		s.fadeSprite.material.opacity = 1;
 		s._ready = true;
 	} catch (err) {
 		console.error("[Beyond-limits] Setup fehlgeschlagen für world", targetWorld, err);
