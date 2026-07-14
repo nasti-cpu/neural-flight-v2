@@ -156,16 +156,20 @@ export async function createBees(
         const dx = cameraPosition.x - bee.centerX;
         const dz = cameraPosition.z - bee.centerZ;
         const dist = Math.sqrt(dx * dx + dz * dz);
-        if (dist > 80) {
-          // Zu weit → direkt teleportieren in spieler-nähe
+        if (dist > 120) {
+          // Unsichtbar teleportieren, dann wieder einblenden
+          bee.group.visible = false;
           const snapAngle = Math.random() * Math.PI * 2;
-          const snapDist = 10 + Math.random() * 20;
+          const snapDist = 8 + Math.random() * 15;
           bee.centerX = cameraPosition.x + Math.cos(snapAngle) * snapDist;
           bee.centerZ = cameraPosition.z + Math.sin(snapAngle) * snapDist;
           bee.targetX = bee.centerX;
           bee.targetZ = bee.centerZ;
+          bee.group.position.set(bee.centerX, bee.group.position.y, bee.centerZ);
+          setTimeout(() => { bee.group.visible = true; }, 500);
         } else if (dist > 20) {
-          const pull = Math.min(delta * 8, dist - 15);
+          const speed = dist > 60 ? 30 : 8;
+          const pull = Math.min(delta * speed, dist - 15);
           bee.centerX += (dx / dist) * pull;
           bee.centerZ += (dz / dist) * pull;
           bee.targetX += (dx / dist) * pull;
