@@ -6,6 +6,7 @@ import { manifest as shaderDemo } from "./shader-demo";
 import { manifest as underwaterWorldV4 } from "./underwater-world-v4";
 import { manifest as underwaterWorldV5 } from "./underwater-world-v5";
 import { manifest as insectWorldV2 } from "./insect-world-v2";
+import { manifest as beyondLimits } from "./beyond-limits";
 import type { ExperienceManifest } from "./types";
 
 // ── Registry ──
@@ -25,9 +26,10 @@ const CATALOG: Record<string, ExperienceManifest> = {
   "underwater-world-v4": underwaterWorldV4,
   "underwater-world-v5": underwaterWorldV5,
   "insect-world-v2": insectWorldV2,
+  "beyond-limits": beyondLimits,
 };
 
-export const DEFAULT_EXPERIENCE_ID = "mountain-flight";
+export const DEFAULT_EXPERIENCE_ID = "beyond-limits";
 
 /** Get experience by ID — throws with available IDs if not found */
 export function getExperience(id: string): ExperienceManifest {

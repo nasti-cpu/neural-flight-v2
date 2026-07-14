@@ -132,20 +132,26 @@
                 // (nicht aus localStorage – der könnte veraltet sein)
                 startIcarosHost(exp.manifest.id, exp.manifest.name);
 
-                const renderCamera =
-                    (exp.state.camera as THREE.PerspectiveCamera | undefined) ??
-                    dummyCamera;
+                /**
+                 * Gibt die aktuelle Render-Kamera zurück.
+                 * Die Erfahrung kann die Kamera während der Laufzeit wechseln
+                 * (z. B. Beyond‑Limits: FlightPlayer → DummyCamera beim Portal‑Übergang).
+                 * Daher muss die Kamera JEDEN Frame frisch aus dem State gelesen werden.
+                 */
+                function getRenderCamera(): THREE.PerspectiveCamera {
+                    return (exp.state.camera as THREE.PerspectiveCamera | undefined) ??
+                        dummyCamera;
+                }
 
                 /**
                  * Aktualisiert die Kamera-Aspect-Ratio beim Fenster-Resize.
-                 * Wird auch beim Start einmal aufgerufen, damit die Kamera
-                 * sofort die richtige Perspektive hat (sonst wirkt alles
-                 * langgezogen, weil der Initial-Wert 1 ist).
+                 * Liest die Kamera jeden Aufruf frisch (siehe getRenderCamera).
                  */
                 function onResize(): void {
-                    renderCamera.aspect =
+                    const cam = getRenderCamera();
+                    cam.aspect =
                         window.innerWidth / window.innerHeight;
-                    renderCamera.updateProjectionMatrix();
+                    cam.updateProjectionMatrix();
                     renderer.setSize(window.innerWidth, window.innerHeight);
                 }
                 window.addEventListener("resize", onResize);
@@ -158,6 +164,7 @@
 
                 renderer.setAnimationLoop(() => {
                     const delta = Math.min(clock.getDelta(), 0.1);
+                    const cam = getRenderCamera();
 
                     // ── ICAROS Host-Orientierung wird über onOrientation-Callback
                     //    direkt in lastOrientation geschrieben. Der lokale WS-Client
@@ -202,12 +209,12 @@
                     const result = exp.manifest.tick(exp.state, {
                         delta,
                         elapsed: clock.elapsedTime,
-                        camera: renderCamera,
+                        camera: cam,
                         playerPosition:
-                            renderCamera.parent?.position ??
+                            cam.parent?.position ??
                             new THREE.Vector3(),
                         playerRotation:
-                            renderCamera.parent?.rotation ?? new THREE.Euler(),
+                            cam.parent?.rotation ?? new THREE.Euler(),
                     });
                     exp.state = result.state;
                     if (result.outputs?.score !== undefined) {
@@ -215,7 +222,7 @@
                     }
 
                     fpsCounter?.update();
-                    renderer.render(scene, renderCamera);
+                    renderer.render(scene, cam);
                 });
 
                 console.log("✅ VR bereit!");
