@@ -29,6 +29,7 @@ const COLLISION_DIST = 3;        // Einheiten – Kollisionsradius
 const FADE_RANGE = 10;           // Einheiten – Abstand ab dem Fade beginnt
 const PORTAL_TIMEOUT = 40;       // s – Notfall‑Timeout nach Portal-Erscheinen
 const FADE_DURATION = 3;         // s – Dauer Fade from Black
+const FADE_IN_DELAY = 2;         // s – Verzögerung bevor Fade beginnt (erst fliegen, dann sehen)
 const FADE_Z = 5;                // Einheiten – Abstand FadeSprite vor Kamera
 const TUNNEL_FADE = 0.5;         // s – Ein-/Ausblendzeit des Tunnels
 
@@ -250,13 +251,18 @@ export function tick(
 			return { state: s };
 		}
 
-		// ── Stage 3: Fade In in die neue Welt ──
+		// ── Stage 3: Delay, dann Fade In in die neue Welt ──
+		// Zuerst delay (schwarz, Welt läuft bereits im Hintergrund),
+		// dann weiche Einblendung über FADE_DURATION.
 		case 3: {
-			const t = Math.min(1, (elapsed - s.stageStart) / FADE_DURATION);
+			const newWorld = inWorld === 0 ? 1 : 0;
+			const stageElapsed = elapsed - s.stageStart;
+			const fadeProgress = Math.max(0, stageElapsed - FADE_IN_DELAY);
+			const t = Math.min(1, fadeProgress / FADE_DURATION);
+
 			s.fadeSprite.material.opacity = 1 - t;
 
-			// Audio der neuen Welt einblenden
-			const newWorld = inWorld === 0 ? 1 : 0;
+			// Audio erst nach dem Delay einblenden
 			_setAudioVolume(s, newWorld, t * _getAudioTargetVolume(newWorld));
 
 			if (t >= 1) {
@@ -270,6 +276,7 @@ export function tick(
 				s._tunnelFull = false;
 				s._tunnelFadeOut = false;
 			}
+			// Welt läuft bereits – Spieler kann fliegen, bevor er sieht
 			return _tickActiveWorld(s, ctx);
 		}
 
