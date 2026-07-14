@@ -190,9 +190,13 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 	if (s.underwaterState) underwaterDispose(s.underwaterState, scene);
 	if (s.insectState) insectDispose(s.insectState, scene);
 
-	s.portal.dispose();
-	scene.remove(s.portal.group);
-	scene.remove(s.fadeSprite);
+	if (s.portal) {
+		s.portal.dispose();
+		scene.remove(s.portal.group);
+	}
+	if (s.fadeSprite) {
+		scene.remove(s.fadeSprite);
+	}
 
 	if (s.insectLights) {
 		scene.remove(s.insectLights.ambient);
