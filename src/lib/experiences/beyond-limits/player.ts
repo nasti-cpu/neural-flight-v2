@@ -13,10 +13,12 @@ import { getWorldHeight } from "../insect-world-v2/Biome/Wiese/grass-manager";
 
 // ── Insect-World-Player (Pitch = vertikal, wie Underwater) ──
 const INSECT_BASE_SPEED = 0.98;
-const VERTICAL_SPEED = 3;       // m/s pro Einheit Pitch
 const YAW_FACTOR = 0.02;
 const CEILING_HEIGHT = 10;      // m – max Höhe über dem Boden
+const PITCH_LERP = 0.15;        // Smoothing-Faktor (wie Underwater)
+
 const _FWD = new THREE.Vector3();
+let _smoothPitch = 0;
 
 function _insectUpdatePlayer(
 	orientation: { pitch: number; roll: number },
@@ -27,6 +29,9 @@ function _insectUpdatePlayer(
 	const s = state as Record<string, unknown>;
 	const camera = s.camera as THREE.PerspectiveCamera;
 	if (!camera) return;
+
+	// Pitch smoothn (wie Underwater) – orientation.pitch ist in Grad
+	_smoothPitch += (orientation.pitch - _smoothPitch) * PITCH_LERP;
 
 	// Geschwindigkeit
 	let moveSpeed = (s.baseSpeed as number) ?? INSECT_BASE_SPEED;
@@ -42,8 +47,10 @@ function _insectUpdatePlayer(
 	_FWD.normalize();
 	camera.position.addScaledVector(_FWD, moveSpeed * delta);
 
-	// Pitch → vertikale Bewegung (positive Pitch = abwärts)
-	camera.position.y += -orientation.pitch * VERTICAL_SPEED * delta;
+	// Pitch → vertikale Bewegung (smoothed, als Winkel in Grad)
+	// positive Pitch = nach unten (wie Underwater)
+	const pitchRad = _smoothPitch * THREE.MathUtils.DEG2RAD;
+	camera.position.y += -Math.sin(pitchRad) * moveSpeed * delta;
 
 	// Boden-Follow + Höhendecke
 	const groundY = getWorldHeight(camera.position.x, camera.position.z);
