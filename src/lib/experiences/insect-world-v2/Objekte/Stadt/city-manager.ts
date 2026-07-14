@@ -17,6 +17,7 @@ import { CITY_CONFIG } from "./city";
 import { CHUNK_SIZE } from "../../Biome/Wiese/grass-manager";
 import type { GrassManager } from "../../Biome/Wiese/grass-manager";
 import { TileType } from "../../Biome/Wiese/wfc-tiles";
+import { getWorldHeight } from "../../Biome/Wiese/grass-manager";
 
 export interface CityInstance {
   /** Mittelpunkt des Chunks (Weltkoordinaten) */
@@ -87,7 +88,7 @@ export class CityManager {
       }
 
       if (!tooClose) {
-        positions.push(new THREE.Vector3(wx2, 0, wz2));
+        positions.push(new THREE.Vector3(wx2, getWorldHeight(wx2, wz2), wz2));
       }
     }
 
@@ -123,7 +124,7 @@ export class CityManager {
       grassManager.forceTileType(gx, gz, TileType.CITY);
 
       this.cities.push({
-        position: new THREE.Vector3(pos.x, 0, pos.z),
+        position: new THREE.Vector3(pos.x, getWorldHeight(pos.x, pos.z), pos.z),
         gx,
         gz,
         visited: false,
@@ -223,7 +224,8 @@ export class CityManager {
             const box = new THREE.Box3().setFromObject(model);
             const center = new THREE.Vector3();
             box.getCenter(center);
-            model.position.set(-center.x, 0, -center.z);
+            // Horizontale Mitte + Fuß bei Y=0 → Modell steht auf dem Boden
+            model.position.set(-center.x, -box.min.y, -center.z);
 
             resolve(model);
           },
