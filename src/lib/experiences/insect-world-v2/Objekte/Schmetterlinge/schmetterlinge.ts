@@ -152,7 +152,15 @@ export async function createButterflies(
         const dx = cameraPosition.x - b.centerX;
         const dz = cameraPosition.z - b.centerZ;
         const dist = Math.sqrt(dx * dx + dz * dz);
-        if (dist > 20) {
+        if (dist > 80) {
+          // Zu weit → direkt teleportieren in spieler-nähe
+          const snapAngle = Math.random() * Math.PI * 2;
+          const snapDist = 10 + Math.random() * 20;
+          b.centerX = cameraPosition.x + Math.cos(snapAngle) * snapDist;
+          b.centerZ = cameraPosition.z + Math.sin(snapAngle) * snapDist;
+          b.targetX = b.centerX;
+          b.targetZ = b.centerZ;
+        } else if (dist > 20) {
           const pull = Math.min(delta * 8, dist - 15);
           b.centerX += (dx / dist) * pull;
           b.centerZ += (dz / dist) * pull;
