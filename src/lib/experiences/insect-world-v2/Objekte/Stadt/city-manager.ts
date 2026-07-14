@@ -1,13 +1,13 @@
 /**
  * insect-world-v2 — CityManager.
- * Verwaltet mehrere Städte, die jeweils einen ganzen Chunk belegen.
+ * Verwaltet mehrere Städte mit je eigenem Modell.
  *
  * Funktionsweise:
- * - 3 Städte werden auf dem 40m-Chunk-Grid platziert (400–500m Abstand)
- * - Jede Stadt bekommt einen CITY-Tile-Typ → kein Gras/Blumen auf dem Chunk
- * - Das Stadt-Modell wird EINMAL geladen und per Pivot positioniert
- * - In update() wird geprüft ob der City-Chunk aktiv ist → Modell sichtbar/unsichtbar
- * - Große Pheromon-Leitspuren (CityGuidePath) führen zur nächsten Stadt
+ * - Städte werden auf dem Chunk-Grid platziert (konfigurierbar)
+ * - Jede Stadt bekommt einen CITY-Tile-Typ → kein Gras/Blumen
+ * - GLB wird EINMAL geladen, pro Stadt ein Klon → eigenes Modell
+ * - Alle Modelle sind permanent in der Szene (kein Hin- und Herschalten)
+ * - Pheromon-Leitspuren (CityGuidePath) führen zur nächsten Stadt
  *
  * WebGPU-konform.
  */
@@ -28,27 +28,16 @@ export interface CityInstance {
   visited: boolean;
   index: number;
   rotation: number;
+  /** Das eigenständige Modell dieser Stadt */
+  model: THREE.Group | null;
 }
 
 export class CityManager {
   readonly cities: CityInstance[] = [];
   lastVisitedCity: CityInstance | null = null;
   private modelPromise: Promise<THREE.Group | null> | null = null;
-  private sharedModel: THREE.Group | null = null;
-  private modelPivot: THREE.Group;
-  /** Wurde das Modell bereits in die Szene eingehängt? */
-  private modelAdded = false;
-
-  /**
-   * Gesperrte Stadt: Sobald eine Stadt sichtbar war, bleibt sie
-   * sichtbar, bis sie besucht UND der Spieler >100m entfernt ist.
-   */
-  private _lockedCity: CityInstance | null = null;
-
-  constructor() {
-    this.modelPivot = new THREE.Group();
-    this.modelPivot.visible = false;
-  }
+  /** Das GLB-Skeleton (wird pro Stadt geklont) */
+  private templateModel: THREE.Group | null = null;
 
   /**
    * Generiert bis zu `count` Stadt-Positionen auf dem Chunk-Grid.
@@ -63,24 +52,20 @@ export class CityManager {
     while (positions.length < count && attempts < count * 50) {
       attempts++;
 
-      // Zufälligen Chunk im Ring suchen
       const angle = Math.random() * Math.PI * 2;
       const dist = minDistance + Math.random() * (maxDistance - minDistance);
       const wx = Math.cos(angle) * dist;
       const wz = Math.sin(angle) * dist;
 
-      // Auf Chunk-Grid ausrichten (Math.floor wie grass-manager)
       const gx = Math.floor(wx / CHUNK_SIZE);
       const gz = Math.floor(wz / CHUNK_SIZE);
 
-      // (0,0) überspringen (Spawn-Chunk)
       if (gx === 0 && gz === 0) continue;
 
       const key = `${gx},${gz}`;
       if (used.has(key)) continue;
       used.add(key);
 
-      // Prüfen ob weit genug von anderen Städten entfernt
       const wx2 = gx * CHUNK_SIZE + CHUNK_SIZE / 2;
       const wz2 = gz * CHUNK_SIZE + CHUNK_SIZE / 2;
       let tooClose = false;
@@ -102,32 +87,34 @@ export class CityManager {
   }
 
   /**
-   * Lädt das Stadt-Modell EINMAL und registriert alle Städte als CITY-Chunks.
-   * Das Modell wird im modelPivot positioniert.
+   * Lädt das GLB-EINMAL und erstellt pro Stadt einen Klon.
+   * Jedes Modell ist permanent in der Szene platziert.
    */
   async loadCities(
     positions: THREE.Vector3[],
     scene: THREE.Scene,
     grassManager: GrassManager,
   ): Promise<void> {
-    const model = await this.loadModel();
-    this.sharedModel = model;
-
-    if (model) {
-      this.modelPivot.add(model);
-      if (!this.modelAdded) {
-        scene.add(this.modelPivot);
-        this.modelAdded = true;
-      }
-    }
+    const template = await this.loadModel();
+    this.templateModel = template;
 
     for (let i = 0; i < positions.length; i++) {
       const pos = positions[i];
       const gx = Math.floor(pos.x / CHUNK_SIZE);
       const gz = Math.floor(pos.z / CHUNK_SIZE);
 
-      // WFC-Tile auf CITY zwingen → kein Gras, keine Blumen auf diesem Chunk
       grassManager.forceTileType(gx, gz, TileType.CITY);
+
+      const rotY = Math.random() * Math.PI * 2;
+
+      // Klon erzeugen und permanent in die Szene stellen
+      let modelClone: THREE.Group | null = null;
+      if (template) {
+        modelClone = template.clone(true);
+        modelClone.position.set(pos.x, getWorldHeight(pos.x, pos.z), pos.z);
+        modelClone.rotation.y = rotY;
+        scene.add(modelClone);
+      }
 
       this.cities.push({
         position: new THREE.Vector3(pos.x, getWorldHeight(pos.x, pos.z), pos.z),
@@ -135,87 +122,18 @@ export class CityManager {
         gz,
         visited: false,
         index: i,
-        rotation: Math.random() * Math.PI * 2,
+        rotation: rotY,
+        model: modelClone,
       });
     }
   }
 
   /**
-   * Jeden Frame aufrufen: Zeigt Stadt-Modell mit Lock-Logik.
-   *
-   * - Sobald eine Stadt sichtbar wird (Chunk aktiv), wird sie "gesperrt"
-   * - Gesperrte Stadt bleibt sichtbar, egal wie weit der Spieler fliegt
-   * - Erst wenn: Stadt besucht UND >100m Entfernung → Entsperrung
-   * - Danach wird die nächste aktive Stadt gesperrt
+   * Jeden Frame aufrufen – currently no-op da Modelle permanent sind.
+   * Kann für Sichtbarkeits-Optimierung (LOD) verwendet werden.
    */
-  update(grassManager: GrassManager, playerPos: THREE.Vector3): void {
-    // ── 1. Gesperrte Stadt prüfen ──
-    if (this._lockedCity) {
-      const dist = playerPos.distanceTo(this._lockedCity.position);
-
-      // Entsperrung: besucht UND weit genug entfernt
-      if (this._lockedCity.visited && dist > 100) {
-        this._lockedCity = null;
-      } else {
-        // Stadt bleibt sichtbar
-        this._showCity(this._lockedCity);
-        return;
-      }
-    }
-
-    // ── 2. Nächste aktive Stadt suchen ──
-    const activeCity = this._findNearestActiveCity(grassManager, playerPos);
-
-    if (activeCity) {
-      this._lockedCity = activeCity;
-      this._showCity(activeCity);
-    } else {
-      this.modelPivot.visible = false;
-    }
-  }
-
-  /** Zeigt das Stadt-Modell an einer bestimmten Stadt. */
-  private _showCity(city: CityInstance): void {
-    this.modelPivot.position.copy(city.position);
-    this.modelPivot.rotation.y = city.rotation;
-    this.modelPivot.visible = true;
-  }
-
-  /** Findet die nächste Stadt, deren Chunk aktiv ist (auch besuchte). */
-  private _findNearestActiveCity(
-    grassManager: GrassManager,
-    playerPos: THREE.Vector3,
-  ): CityInstance | null {
-    let best: CityInstance | null = null;
-    let bestDistSq = Infinity;
-
-    for (const city of this.cities) {
-      if (!grassManager.hasChunk(city.gx, city.gz)) continue;
-      const dx = city.position.x - playerPos.x;
-      const dz = city.position.z - playerPos.z;
-      const dSq = dx * dx + dz * dz;
-      if (dSq < bestDistSq) {
-        bestDistSq = dSq;
-        best = city;
-      }
-    }
-
-    return best;
-  }
-
-  /**
-   * Setzt das Stadt-Modell an eine bestimmte Stadt (für GuidePath-Anzeige).
-   */
-  setActiveCity(city: CityInstance | null): void {
-    if (!this.sharedModel) return;
-
-    if (city) {
-      this.modelPivot.position.copy(city.position);
-      this.modelPivot.rotation.y = city.rotation;
-      this.modelPivot.visible = true;
-    } else {
-      this.modelPivot.visible = false;
-    }
+  update(_grassManager: GrassManager, _playerPos: THREE.Vector3): void {
+    // Modelle sind permanent – keine Aktualisierung nötig
   }
 
   getNearestUndiscovered(from: THREE.Vector3): CityInstance | null {
@@ -244,21 +162,21 @@ export class CityManager {
   }
 
   dispose(scene: THREE.Scene): void {
-    scene.remove(this.modelPivot);
-
-    if (this.sharedModel) {
-      this.sharedModel.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (Array.isArray(child.material)) {
-            child.material.forEach((m) => m.dispose());
-          } else {
-            child.material.dispose();
+    for (const city of this.cities) {
+      if (city.model) {
+        scene.remove(city.model);
+        city.model.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            child.geometry.dispose();
+            if (Array.isArray(child.material)) {
+              child.material.forEach((m) => m.dispose());
+            } else {
+              child.material.dispose();
+            }
           }
-        }
-      });
+        });
+      }
     }
-
     this.cities.length = 0;
   }
 
@@ -274,7 +192,6 @@ export class CityManager {
             const box = new THREE.Box3().setFromObject(model);
             const center = new THREE.Vector3();
             box.getCenter(center);
-            // Horizontale Mitte + Fuß bei Y=0 → Modell steht auf dem Boden
             model.position.set(-center.x, -box.min.y, -center.z);
 
             resolve(model);
