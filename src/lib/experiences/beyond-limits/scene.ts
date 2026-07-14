@@ -131,8 +131,11 @@ export function tick(
 	switch (s.phase) {
 		// ── Phase 0, 1 – Underwater (inkl. Portal-Sichtbarkeit) ──
 		case 0:
-		case 1:
-			return underwaterTick(s.underwaterState!, ctx);
+		case 1: {
+			const result = underwaterTick(s.underwaterState!, ctx);
+			s.underwaterState = result.state;
+			return { state: s };
+		}
 
 		// ── Phase 2 – Fade to Black ──
 		case 2: {
@@ -144,7 +147,9 @@ export function tick(
 				_startTransition(s);
 				return { state: s };
 			}
-			return underwaterTick(s.underwaterState!, ctx);
+			const result = underwaterTick(s.underwaterState!, ctx);
+			s.underwaterState = result.state;
+			return { state: s };
 		}
 
 		// ── Phase 3 – Warte auf Insect-Setup (schwarzer Bildschirm) ──
@@ -163,7 +168,9 @@ export function tick(
 				s.portal.group.visible = false;
 				s.fadeSprite.material.opacity = 0;
 			}
-			return insectTick(s.insectState, ctx);
+			const result = insectTick(s.insectState, ctx);
+			s.insectState = result.state;
+			return { state: s };
 		}
 
 		// ── Phase 5 – Insect World ──
@@ -172,7 +179,9 @@ export function tick(
 				console.error("[Beyond-limits] insectState is null in phase 5!");
 				return { state: s };
 			}
-			return insectTick(s.insectState, ctx);
+			const result = insectTick(s.insectState, ctx);
+			s.insectState = result.state;
+			return { state: s };
 		}
 
 		default:
