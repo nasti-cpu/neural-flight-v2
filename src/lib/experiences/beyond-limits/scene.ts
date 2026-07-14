@@ -196,40 +196,34 @@ export function tick(
 					s._portalJump.stop();
 					s._portalJump.play();
 				}
-				// Tunnel vorbereiten
-				s.tunnel.mesh.visible = true;
-				s._tunnelOpacity = 0;
-				s._tunnelFull = false;
-				s._tunnelFadeOut = false;
-				s.tunnel.mesh.material.opacity = 0;
+			// Tunnel sofort sichtbar (kein Einfaden)
+			s.tunnel.mesh.visible = true;
+			s._tunnelOpacity = 0.95;
+			s._tunnelFull = true;
+			s._tunnelFadeOut = false;
+			s.tunnel.mesh.material.opacity = 0.95;
 				_startTransition(s);
 			}
 			return _tickActiveWorld(s, ctx);
 		}
 
-		// ── Stage 2: Black Screen + Tunnel-Ladeanimation ──
+		// ── Stage 2: Tunnel sofort sichtbar (Ladebrücke) ──
 		case 2: {
 			// Ambient-Sound starten (bei erstem Frame der Stage)
 			if (s._portalAmbient && !s._portalAmbient.isPlaying) {
 				s._portalAmbient.play();
+				s._portalAmbient.setVolume(0.4); // sofort volle Lautstärke
 			}
 
-			// Tunnel einblenden
+			// Tunnel auf voller Opazität halten, solange nicht ausgeblendet wird
 			if (!s._tunnelFadeOut) {
-				s._tunnelOpacity = Math.min(0.95,
-					s._tunnelOpacity + ctx.delta / TUNNEL_FADE);
-				if (s._tunnelOpacity >= 0.95) s._tunnelFull = true;
-				// Ambient-Lautstärke proportional zur Tunnel-Opazität
-				if (s._portalAmbient) {
-					s._portalAmbient.setVolume(s._tunnelOpacity / 0.95 * 0.4);
-				}
+				s._tunnelOpacity = 0.95;
 			}
 
-			// Loading fertig → Tunnel ausblenden
-			if (s._ready && s._tunnelFull && !s._tunnelFadeOut) {
+			// Loading fertig → Tunnel ausblenden starten
+			if (s._ready && !s._tunnelFadeOut) {
 				s._tunnelFadeOut = true;
 			}
-
 			if (s._tunnelFadeOut) {
 				s._tunnelOpacity = Math.max(0,
 					s._tunnelOpacity - ctx.delta / (TUNNEL_FADE * 0.6));
@@ -239,7 +233,6 @@ export function tick(
 				}
 				if (s._tunnelOpacity <= 0) {
 					s.tunnel.mesh.visible = false;
-					// Ambient stoppen
 					if (s._portalAmbient) {
 						s._portalAmbient.stop();
 					}
