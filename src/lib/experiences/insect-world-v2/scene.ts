@@ -46,8 +46,6 @@ interface InsectWorldV2State extends ExperienceState {
   tickInterval: number;
   /** Letzte bekannte Blumen-Anzahl (für Pheromon-Nachrüstung) */
   lastFlowerCount: number;
-  /** Dynamischer Horizont-Blocker (Grasblätter) */
-  horizonBlades: THREE.InstancedMesh;
 }
 
 export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
@@ -65,42 +63,6 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   groundPlane.rotation.x = -Math.PI / 2;
   groundPlane.position.y = 0.5;
   ctx.scene.add(groundPlane);
-
-  // 2b. Dynamischer Horizont-Blocker – Ring aus Grasblättern, folgt der Kamera.
-  // Verdeckt ferne Städte/Objekte und erzeugt eine raue Graskante am Horizont.
-  const HORIZON_RADIUS = 2400;
-  const HORIZON_COUNT = 1200;
-  const HORIZON_BLADE_H = 20;
-  const HORIZON_BLADE_W = 4;
-  const horizonBlades = (() => {
-    const geo = new THREE.PlaneGeometry(HORIZON_BLADE_W, HORIZON_BLADE_H);
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0x3a6028,
-      side: THREE.DoubleSide,
-    });
-    const mesh = new THREE.InstancedMesh(geo, mat, HORIZON_COUNT * 2);
-    mesh.frustumCulled = false;
-    const dummy = new THREE.Object3D();
-    let idx = 0;
-    for (let i = 0; i < HORIZON_COUNT; i++) {
-      const angle = (i / HORIZON_COUNT) * Math.PI * 2;
-      const scale = 0.5 + Math.random() * 1.0;
-      // Ebene 1
-      dummy.position.set(0, (HORIZON_BLADE_H * scale) / 2, 0);
-      dummy.rotation.set(0, angle, 0);
-      dummy.scale.set(1, scale, 1);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(idx++, dummy.matrix);
-      // Ebene 2 (Plus-Form)
-      dummy.rotation.set(0, angle + Math.PI / 2, 0);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(idx++, dummy.matrix);
-    }
-    mesh.count = idx;
-    mesh.instanceMatrix.needsUpdate = true;
-    return mesh;
-  })();
-  ctx.scene.add(horizonBlades);
 
   // 3. Blumen vorladen (einmalig, wird von GrassManager wiederverwendet)
   const preloadedFlowers = await preloadFlowers();
@@ -220,7 +182,6 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     firstPathActivated: false,
     tickInterval: 0,
     lastFlowerCount: 0,
-    horizonBlades,
   };
 }
 
@@ -311,13 +272,6 @@ export function tick(
     s.guidePath.update(ctx.elapsed);
   }
 
-  // Horizont-Blocker folgt der Kamera (XZ), steht immer 1800m entfernt
-  s.horizonBlades.position.set(
-    ctx.camera.position.x,
-    0,
-    ctx.camera.position.z,
-  );
-
   return {
     state: s,
   };
@@ -342,9 +296,6 @@ export function dispose(state: ExperienceState, _scene: THREE.Scene): void {
   _scene.remove(s.groundPlane);
   (s.groundPlane.geometry as THREE.BufferGeometry).dispose();
   (s.groundPlane.material as THREE.Material).dispose();
-  _scene.remove(s.horizonBlades);
-  (s.horizonBlades.geometry as THREE.BufferGeometry).dispose();
-  (s.horizonBlades.material as THREE.Material).dispose();
   _scene.remove(s.grassManager.group);
   _scene.remove(s.bees.group);
   _scene.remove(s.butterflies.group);

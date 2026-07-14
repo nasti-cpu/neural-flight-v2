@@ -32,7 +32,7 @@ const FOG_COLOR = new THREE.Color("#4a90d9");
 export function createSky(preset: SkyPresetName = "gletscher", power = 2): THREE.Mesh {
 	const hexColors = SKY_PRESETS[preset] as unknown as number[];
 
-	const radius = 2500;
+	const radius = 500;
 	const geo = new THREE.SphereGeometry(radius, 32, 32);
 
 	const colorNodes = hexColors.map((h) => {
