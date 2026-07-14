@@ -60,6 +60,10 @@ interface BeyondState extends ExperienceState {
 	/** Tunnel blendet gerade aus */
 	_tunnelFadeOut: boolean;
 
+	/** Portal-Sounds */
+	_portalJump: THREE.Audio | null;
+	_portalAmbient: THREE.Audio | null;
+
 	_worldPos: THREE.Vector3;
 	_fwd: THREE.Vector3;
 	_worldQuat: THREE.Quaternion;
@@ -87,6 +91,31 @@ export async function setup(ctx: SetupContext): Promise<BeyondState> {
 	tunnel.mesh.visible = false;
 	ctx.scene.add(tunnel.mesh);
 
+	// Portal-Sounds laden (THREE.Audio, 2D – keine Position)
+	let portalJump: THREE.Audio | null = null;
+	let portalAmbient: THREE.Audio | null = null;
+	try {
+		const listener = new THREE.AudioListener();
+		ctx.camera.add(listener);
+
+		const loader = new THREE.AudioLoader();
+		const [jumpBuf, ambientBuf] = await Promise.all([
+			loader.loadAsync("/sounds/portal%20jump.mp3"),
+			loader.loadAsync("/sounds/portal%20sound.mp3"),
+		]);
+
+		portalJump = new THREE.Audio(listener);
+		portalJump.setBuffer(jumpBuf);
+		portalJump.setVolume(0.8);
+
+		portalAmbient = new THREE.Audio(listener);
+		portalAmbient.setBuffer(ambientBuf);
+		portalAmbient.setLoop(true);
+		portalAmbient.setVolume(0);
+	} catch (err) {
+		console.warn("[Beyond-limits] Portal-Sounds nicht geladen:", err);
+	}
+
 	const uwState = await underwaterSetup(ctx);
 	ctx.scene.add(fade);
 
@@ -107,6 +136,8 @@ export async function setup(ctx: SetupContext): Promise<BeyondState> {
 		_tunnelOpacity: 0,
 		_tunnelFull: false,
 		_tunnelFadeOut: false,
+		_portalJump: portalJump,
+		_portalAmbient: portalAmbient,
 		_worldPos: new THREE.Vector3(),
 		_fwd: new THREE.Vector3(),
 		_worldQuat: new THREE.Quaternion(),
@@ -159,6 +190,11 @@ export function tick(
 			if (dist < COLLISION_DIST || (elapsed - s.stageStart) > PORTAL_TIMEOUT) {
 				s.fadeSprite.material.opacity = 1;
 				_setStage(s, 2, elapsed);
+				// Portal-Jump-Sound abspielen
+				if (s._portalJump) {
+					s._portalJump.stop();
+					s._portalJump.play();
+				}
 				// Tunnel vorbereiten
 				s.tunnel.mesh.visible = true;
 				s._tunnelOpacity = 0;
@@ -172,11 +208,20 @@ export function tick(
 
 		// ── Stage 2: Black Screen + Tunnel-Ladeanimation ──
 		case 2: {
+			// Ambient-Sound starten (bei erstem Frame der Stage)
+			if (s._portalAmbient && !s._portalAmbient.isPlaying) {
+				s._portalAmbient.play();
+			}
+
 			// Tunnel einblenden
 			if (!s._tunnelFadeOut) {
 				s._tunnelOpacity = Math.min(0.95,
 					s._tunnelOpacity + ctx.delta / TUNNEL_FADE);
 				if (s._tunnelOpacity >= 0.95) s._tunnelFull = true;
+				// Ambient-Lautstärke proportional zur Tunnel-Opazität
+				if (s._portalAmbient) {
+					s._portalAmbient.setVolume(s._tunnelOpacity / 0.95 * 0.4);
+				}
 			}
 
 			// Loading fertig → Tunnel ausblenden
@@ -187,8 +232,16 @@ export function tick(
 			if (s._tunnelFadeOut) {
 				s._tunnelOpacity = Math.max(0,
 					s._tunnelOpacity - ctx.delta / (TUNNEL_FADE * 0.6));
+				// Ambient-Lautstärke runter
+				if (s._portalAmbient) {
+					s._portalAmbient.setVolume(s._tunnelOpacity / 0.95 * 0.4);
+				}
 				if (s._tunnelOpacity <= 0) {
 					s.tunnel.mesh.visible = false;
+					// Ambient stoppen
+					if (s._portalAmbient) {
+						s._portalAmbient.stop();
+					}
 					_setStage(s, 3, elapsed);
 				}
 			}
@@ -264,6 +317,19 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 		s.insectLights.ambient.dispose();
 		scene.remove(s.insectLights.sun);
 		s.insectLights.sun.dispose();
+	}
+
+	// Portal-Sounds aufräumen
+	if (s._portalAmbient) {
+		if (s._portalAmbient.isPlaying) s._portalAmbient.stop();
+	}
+	if (s._portalJump) {
+		if (s._portalJump.isPlaying) s._portalJump.stop();
+	}
+	// AudioListener entfernen (ist an dummyCamera / ctx.camera)
+	const listener = s._portalAmbient?.listener ?? s._portalJump?.listener;
+	if (listener) {
+		listener.parent?.remove(listener);
 	}
 }
 
