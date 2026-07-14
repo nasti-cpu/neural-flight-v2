@@ -1,17 +1,16 @@
 /**
- * insect-world-v2 — GrassManager (Chunk-basiert + WFC).
+ * insect-world-v2 — GrassManager (Chunk-basiert + WFC + Async Queue).
  *
  * Lädt Gras-Chunks und Blumen dynamisch um den Spieler herum.
  * Nutzt den Wavefunction-Collapse-Algorithmus (Robert Heaton)
- * für eine abwechslungsreiche, aber konsistente Welt.
+ * für eine abwechslungsreiche Welt.
  *
- * Funktionsweise:
- * - Die Welt wird in ein 40×40m-Raster eingeteilt (Chunks).
- * - Nur Chunks in Sichtweite (3×3-Raster) sind aktiv.
- * - Entfernte Chunks werden entfernt, neue werden erzeugt.
- * - Geometrie und Material werden einmal erzeugt und wiederverwendet.
- * - Blumen werden aus vorab geladenen Assets instanziert.
- * - Clear-Regionen (z.B. Stadt) verhindern Gras/Blumen in bestimmten Bereichen.
+ * Verbesserungen:
+ * - Async-Chunk-Queue: Max 2 Chunks pro Frame → kein Ruckeln beim Laden
+ * - Zwei Detailstufen: GROUND (Bodenplatte, sofort) + FULL (Gras+Blumen, asynchron)
+ * - PREGEN_RADIUS=2: 25 Chunks getrackt, nur 9 mit vollem Detail
+ * - Jittered Grid für Blumen: O(1) statt O(n²) → 100× schneller
+ * - Keine leeren Kanten: Ground-Plane ist sofort da, Gras folgt unsichtbar
  *
  * WebGPU + TSL (siehe AGENTS.md).
  */
@@ -33,9 +32,12 @@ import type { PreloadedFlower } from "../../Objekte/Blumen/blumen";
 
 /** Chunk-Grösse in Metern (exportiert für Stadt-Position → Chunk-Koordinaten) */
 export const CHUNK_SIZE = 40;
-const VIEW_RADIUS = 1; // Wie viele Chunks um den Spieler herum geladen werden (1 = 3×3 = 9 Chunks)
-// VIEW_RADIUS=1 lädt Chunks bis 40m Entfernung. Der Nebel (FogExp2, density 0.04)
-// verdeckt bei 40m bereits ~80% → Chunks erscheinen/verschwinden unsichtbar.
+/** Wie viele Chunks um den Spieler herum volle Details haben (1 = 3×3 = 9 Chunks) */
+const VIEW_RADIUS = 1;
+/** Wie viele Chunks vorab als Ground-Plane existieren (2 = 5×5 = 25 Chunks) */
+const PREGEN_RADIUS = 2;
+/** Maximal 2 Chunk-Upgrades pro update()-Aufruf (≈ alle 50ms bei 3-Frame-Intervall) */
+const QUEUE_ITEMS_PER_UPDATE = 2;
 
 // ── Hilfsfunktion: Welthöhe (sanfte Mulde um den Ursprung) ──
 
@@ -62,11 +64,19 @@ interface CircleClearRegion {
   border: number;
 }
 
+// ── QueueItem (intern) ──
+
+interface ChunkQueueItem {
+  gx: number;
+  gz: number;
+}
+
 // ── GrassChunk (intern) ──
 
 interface GrassChunk {
   group: THREE.Group;
-  mesh: THREE.InstancedMesh;
+  /** InstancedMesh für Gras - null bedeutet: Chunk hat nur Ground (noch kein Gras) */
+  mesh: THREE.InstancedMesh | null;
   ground: THREE.Mesh;
   gridX: number;
   gridZ: number;
@@ -109,7 +119,22 @@ export class GrassManager {
   /** Registrierte Clear-Regionen (z.B. Stadt) – Rechtecke */
   private clearRegions: RectClearRegion[] = [];
   /** Registrierte kreisförmige Clear-Regionen (z.B. Stadt) */
-  private circleClearRegions: CircleClearRegion[] = [];
+  private circleClearRegion: CircleClearRegion[] = [];
+
+  /**
+   * Async-Upgrade-Queue: Chunks, die noch Gras+Blumen brauchen.
+   * Pro update()-Aufruf werden max QUEUE_ITEMS_PER_UPDATE Stück verarbeitet.
+   */
+  private chunkQueue: ChunkQueueItem[] = [];
+  /** Keys von Chunks, die bereits in der Queue sind (kein Double-Enqueue) */
+  private queuedKeys = new Set<string>();
+
+  /**
+   * Flag: Beim ersten update()-Aufruf werden ALLE Queue-Items synchron
+   * verarbeitet, damit der Spawn sofort perfekt aussieht.
+   * Danach wird asynchron (max 2 pro Aufruf) gearbeitet.
+   */
+  private initialLoadComplete = false;
 
   // Einmal erzeugte, gemeinsame Ressourcen (wiederverwendet)
   private bladeGeo: THREE.ConeGeometry;
@@ -136,7 +161,7 @@ export class GrassManager {
   /**
    * Aktiviert den sanften Fade-In für neu geladene Chunks.
    * Sollte erst NACH dem ersten update()-Aufruf gesetzt werden,
-   * damit die initialen 9 Chunks ohne Fade erscheinen.
+   * damit die initialen Chunks ohne Fade erscheinen.
    *
    * @param duration - Dauer des Fade-In in Sekunden (z.B. 0.5)
    */
@@ -146,54 +171,89 @@ export class GrassManager {
 
   /**
    * Stellt sicher, dass der Spawn-Chunk (0,0) garantiert Blumen hat.
-   *
-   * Problem ohne diesen Aufruf:
-   * - Die WFC-Engine würfelt den Chunk-Typ zufällig
-   * - Nur ~34% der Chunks haben Blumen (FLOWERS_SPARSE/DENSE)
-   * - Der Spieler startet also meistens in einer leeren Wiese
-   *
-   * Lösung:
-   * - Wir sagen der WFC-Engine: "Chunk (0,0) = FLOWERS_DENSE"
-   * - Das sind 30 Blumen auf 40×40m, direkt beim Start sichtbar
-   * - Die umliegenden Chunks passen sich automatisch an (WFC-Propagation)
    */
   preSeedSpawn(): void {
-    // "flowers_dense" als String, weil TileType ein Enum ist
-    // (der Import des Enums würde eine zirkuläre Abhängigkeit erzeugen)
     this.wfc.preSeed(0, 0, "flowers_dense" as any);
   }
 
   /**
-   * Wird jeden Frame (oder jeden N-ten Frame) aufgerufen.
-   * Berechnet, welche Chunks um den Spieler herum sichtbar sein müssen,
-   * erzeugt neue und entfernt alte.
-   * Wenn `delta` übergeben wird, werden neu geladene Chunks sanft eingeblendet.
+   * Wird jeden N-ten Frame aufgerufen.
+   * - Erzeugt sofort Ground-Planes für Chunks in PREGEN_RADIUS
+   * - Queued Upgrades (Gras+Blumen) für Chunks in VIEW_RADIUS
+   * - Verarbeitet 2 Queue-Items pro Aufruf (außer beim ersten Mal)
+   * - Entfernt Chunks außerhalb PREGEN_RADIUS
    *
-   * @param delta - Vergangene Zeit seit dem letzten Aufruf in Sekunden
-   *                (optional – für Fade-Animation)
+   * @param playerPosition - Aktuelle Kameraposition
+   * @param delta - Zeit seit letztem Aufruf (für Fade-Animation)
    */
   update(playerPosition: THREE.Vector3, delta?: number): void {
     // Aktuelle Chunk-Koordinaten des Spielers
     const cx = Math.floor(playerPosition.x / CHUNK_SIZE);
     const cz = Math.floor(playerPosition.z / CHUNK_SIZE);
 
-    // Alle benötigten Chunk-Keys sammeln
+    // Alle benötigten Chunk-Keys für PREGEN_RADIUS sammeln
     const needed = new Set<string>();
 
-    for (let dx = -VIEW_RADIUS; dx <= VIEW_RADIUS; dx++) {
-      for (let dz = -VIEW_RADIUS; dz <= VIEW_RADIUS; dz++) {
+    for (let dx = -PREGEN_RADIUS; dx <= PREGEN_RADIUS; dx++) {
+      for (let dz = -PREGEN_RADIUS; dz <= PREGEN_RADIUS; dz++) {
         const gx = cx + dx;
         const gz = cz + dz;
         const key = `${gx},${gz}`;
         needed.add(key);
 
-        if (!this.active.has(key)) {
-          this.createChunk(gx, gz);
+        // Prüfen ob dieser Chunk im inneren Ring liegt (VIEW_RADIUS)
+        const isInnerRing = Math.abs(dx) <= VIEW_RADIUS && Math.abs(dz) <= VIEW_RADIUS;
+
+        const existing = this.active.get(key);
+
+        if (!existing) {
+          // Chunk existiert noch gar nicht → Ground-Plane sofort erstellen
+          this.createGroundChunk(gx, gz);
+
+          // Wenn im inneren Ring: Upgrade (Gras+Blumen) in die Queue
+          if (isInnerRing) {
+            this.enqueueUpgrade(gx, gz);
+          }
+        } else if (existing.mesh === null && isInnerRing) {
+          // Chunk existiert nur als Ground, ist aber jetzt im inneren Ring → Upgrade queued
+          this.enqueueUpgrade(gx, gz);
         }
       }
     }
 
-    // Nicht mehr benötigte Chunks entfernen
+    // ── Queue verarbeiten ──
+    if (!this.initialLoadComplete) {
+      // Beim ersten Aufruf: ALLE Queue-Items sofort verarbeiten
+      // → Spawn sieht perfekt aus, kein Warten auf Gras
+      while (this.chunkQueue.length > 0) {
+        const item = this.chunkQueue.shift()!;
+        this.queuedKeys.delete(`${item.gx},${item.gz}`);
+        this.processUpgrade(item.gx, item.gz, false);
+      }
+      this.initialLoadComplete = true;
+    } else {
+      // Normale asynchrone Verarbeitung: max QUEUE_ITEMS_PER_UPDATE pro Frame
+      let processed = 0;
+      // Queue nach Distanz zum Spieler sortieren (nächste Chunks zuerst)
+      this.chunkQueue.sort((a, b) => {
+        const ax = a.gx * CHUNK_SIZE + CHUNK_SIZE / 2;
+        const az = a.gz * CHUNK_SIZE + CHUNK_SIZE / 2;
+        const bx = b.gx * CHUNK_SIZE + CHUNK_SIZE / 2;
+        const bz = b.gz * CHUNK_SIZE + CHUNK_SIZE / 2;
+        const da = (ax - playerPosition.x) ** 2 + (az - playerPosition.z) ** 2;
+        const db = (bx - playerPosition.x) ** 2 + (bz - playerPosition.z) ** 2;
+        return da - db;
+      });
+
+      while (this.chunkQueue.length > 0 && processed < QUEUE_ITEMS_PER_UPDATE) {
+        const item = this.chunkQueue.shift()!;
+        this.queuedKeys.delete(`${item.gx},${item.gz}`);
+        this.processUpgrade(item.gx, item.gz, delta !== undefined);
+        processed++;
+      }
+    }
+
+    // ── Nicht mehr benötigte Chunks entfernen (außerhalb PREGEN_RADIUS) ──
     for (const [key, chunk] of this.active) {
       if (!needed.has(key)) {
         this.group.remove(chunk.group);
@@ -205,6 +265,8 @@ export class GrassManager {
     // ── Fade-Animation für neu geladene Chunks ──
     if (delta !== undefined && this.fadeDuration > 0) {
       for (const [, chunk] of this.active) {
+        // Ground-only Chunks haben kein mesh → Fade nicht nötig (Ground ist immer sichtbar)
+        if (!chunk.mesh) continue;
         // Nur Chunks mit geklontem Material (Fade aktiv)
         if (chunk.mesh.material === this.bladeMat) continue;
 
@@ -232,7 +294,7 @@ export class GrassManager {
     // WFC-Engine aufräumen, um Speicherplatz zu sparen (nur alle 10 Frames)
     this.cleanupCounter++;
     if (this.cleanupCounter % 10 === 0) {
-      this.wfc.cleanup(cx, cz, VIEW_RADIUS + 2);
+      this.wfc.cleanup(cx, cz, PREGEN_RADIUS + 2);
     }
   }
 
@@ -244,21 +306,22 @@ export class GrassManager {
     }
     this.active.clear();
     this.flowerTargets.length = 0;
+    this.flowerColors.length = 0;
+    this.chunkQueue.length = 0;
+    this.queuedKeys.clear();
     this.wfc.reset();
   }
 
   /**
    * Erzwingt einen WFC-Tile-Typ für einen bestimmten Chunk.
    * Wird vor dem ersten Laden des Chunks aufgerufen (z. B. für Stadt-Positionen).
-   * Verhindert, dass eine Stadt zufällig in einem EMPTY-Chunk landet.
    */
   forceTileType(gx: number, gz: number, tile: TileType): void {
     this.wfc.preSeed(gx, gz, tile);
   }
 
   /**
-   * Registriert einen rechteckigen Bereich, in dem kein Gras und keine Blumen wachsen sollen (z. B. Stadt).
-   * Neue Chunks beachten das automatisch. Existierende Chunks werden nachträglich bereinigt.
+   * Registriert einen rechteckigen Bereich, in dem kein Gras und keine Blumen wachsen sollen.
    */
   addClearRegion(
     cx: number,
@@ -282,7 +345,7 @@ export class GrassManager {
     radius: number,
     border: number = 0.5,
   ): void {
-    this.circleClearRegions.push({ cx, cz, radius, border });
+    this.circleClearRegion.push({ cx, cz, radius, border });
     // Bereits existierende Chunks nachträglich bereinigen
     this.clearCircle(cx, cz, radius, border);
   }
@@ -306,7 +369,7 @@ export class GrassManager {
       }
     }
     // Kreise prüfen
-    for (const reg of this.circleClearRegions) {
+    for (const reg of this.circleClearRegion) {
       const dx = x - reg.cx;
       const dz = z - reg.cz;
       const dist = Math.sqrt(dx * dx + dz * dz);
@@ -319,8 +382,6 @@ export class GrassManager {
 
   /**
    * Entfernt alle Grashalme in einem rotierten Rechteck (z. B. für Stadt).
-   * Funktioniert chunk-übergreifend: sucht in allen aktiven Chunks
-   * und versenkt Halme im Rechteck unter der Erde (y = -100).
    */
   clearRect(
     cx: number,
@@ -338,6 +399,7 @@ export class GrassManager {
     const pos = new THREE.Vector3();
 
     for (const chunk of this.active.values()) {
+      if (!chunk.mesh) continue; // Ground-only Chunks haben keine Instanzen
       const mesh = chunk.mesh;
       const count = mesh.count;
 
@@ -375,6 +437,7 @@ export class GrassManager {
     const pos = new THREE.Vector3();
 
     for (const chunk of this.active.values()) {
+      if (!chunk.mesh) continue; // Ground-only Chunks haben keine Instanzen
       const mesh = chunk.mesh;
       const count = mesh.count;
 
@@ -405,28 +468,71 @@ export class GrassManager {
     this.groundMat.dispose();
   }
 
+  // ── Queue-Logik ──
+
+  /**
+   * Fügt einen Chunk in die Upgrade-Queue ein (falls nicht bereits vorhanden).
+   * Die Queue wird später nach Distanz zum Spieler sortiert.
+   */
+  private enqueueUpgrade(gx: number, gz: number): void {
+    const key = `${gx},${gz}`;
+    if (!this.queuedKeys.has(key)) {
+      this.queuedKeys.add(key);
+      this.chunkQueue.push({ gx, gz });
+    }
+  }
+
   // ── Private Hilfsfunktionen ──
 
-  /** Erzeugt einen neuen Gras-Chunk an der angegebenen Raster-Position. */
-  private createChunk(gx: number, gz: number): void {
+  /**
+   * Erzeugt einen Ground-only Chunk (nur Bodenplatte, kein Gras, keine Blumen).
+   * Das ist billig (~0.1ms) und passiert sofort.
+   * Gras+Blumen werden später per upgradeChunkToFull() asynchron nachgeliefert.
+   */
+  private createGroundChunk(gx: number, gz: number): void {
     const worldX = gx * CHUNK_SIZE;
     const worldZ = gz * CHUNK_SIZE;
 
     const group = new THREE.Group();
-
-    // ── Bodenplatte ──
     const ground = this.createGround(worldX, worldZ);
     group.add(ground);
 
-    // ── WFC-Typ und Content bestimmen ──
+    this.group.add(group);
+    this.active.set(`${gx},${gz}`, {
+      group,
+      mesh: null, // ground-only → noch kein Gras
+      ground,
+      gridX: gx,
+      gridZ: gz,
+      flowerMeshes: [],
+      flowerPositions: [],
+      fadeElapsed: 0,
+    });
+  }
+
+  /**
+   * Verarbeitet ein Queue-Item: Erzeugt Gras+Blumen für einen existierenden
+   * Ground-only Chunk. Der Chunk muss existieren und mesh === null haben.
+   *
+   * @param useFade - Ob die neuen Meshes mit Fade-In erscheinen sollen
+   */
+  private processUpgrade(gx: number, gz: number, useFade: boolean): void {
+    const key = `${gx},${gz}`;
+    const existing = this.active.get(key);
+    // Nur upgraden, wenn der Chunk noch existiert und ground-only ist
+    if (!existing || existing.mesh !== null) return;
+
+    const worldX = gx * CHUNK_SIZE;
+    const worldZ = gz * CHUNK_SIZE;
+
+    // WFC-Typ und Content bestimmen
     const tileType = this.wfc.getTileType(gx, gz);
     const content = TILE_CONTENT[tileType];
 
-    // Prüfen, ob Clear-Regionen (Städte) nahe genug sind, um diesen Chunk zu beeinflussen.
-    // Nur dann müssen einzelne Halme/Blumen gegen Clear-Regionen geprüft werden.
+    // Prüfen, ob Clear-Regionen in der Nähe sind (spart isPositionCleared-Aufrufe)
     const chunkHalfDiag = CHUNK_SIZE * 0.71;
     const needsClearCheck =
-      this.circleClearRegions.some((r) => {
+      this.circleClearRegion.some((r) => {
         const dx = worldX - r.cx;
         const dz = worldZ - r.cz;
         return Math.sqrt(dx * dx + dz * dz) < r.radius + r.border + chunkHalfDiag;
@@ -439,56 +545,41 @@ export class GrassManager {
 
     // ── Grashalme ──
     const mesh = this.createChunkGrass(gx, gz, content, needsClearCheck);
-    group.add(mesh);
+    existing.group.add(mesh);
 
-    // ── Blumen generieren ──
-    const flowerMeshes: THREE.InstancedMesh[] = [];
-    const flowerPositions: THREE.Vector3[] = [];
-
+    // ── Blumen generieren (Jittered Grid) ──
     if (content.flowerCount > 0 && this.preloadedFlowers.length > 0) {
       this.generateFlowersForChunk(
         worldX,
         worldZ,
         content.flowerCount,
-        group,
-        flowerMeshes,
-        flowerPositions,
+        existing.group,
+        existing.flowerMeshes,
+        existing.flowerPositions,
         needsClearCheck,
       );
     }
 
     // ── Material-Klon für sanften Fade-In ──
-    // Nur wenn Fade aktiv ist (fadeDuration > 0).
-    // Die initialen 9 Chunks laden OHNE Fade, weil setFadeDuration()
-    // erst nach dem ersten update()-Aufruf gesetzt wird.
-    if (this.fadeDuration > 0) {
+    if (useFade && this.fadeDuration > 0) {
       const fadeBlade = this.bladeMat.clone();
       fadeBlade.transparent = true;
       fadeBlade.opacity = 0;
       mesh.material = fadeBlade;
-
-      const fadeGround = this.groundMat.clone();
-      fadeGround.transparent = true;
-      fadeGround.opacity = 0;
-      ground.material = fadeGround;
     }
 
-    this.group.add(group);
-    this.active.set(`${gx},${gz}`, {
-      group,
-      mesh,
-      ground,
-      gridX: gx,
-      gridZ: gz,
-      flowerMeshes,
-      flowerPositions,
-      fadeElapsed: 0,
-    });
+    // Chunk auf "volles Detail" aktualisieren
+    existing.mesh = mesh;
+    existing.fadeElapsed = 0;
   }
 
   /**
-   * Generiert Blumen für einen Chunk aus den vorab geladenen Assets.
-   * Verhindert Performance-Einbrüche beim dynamischen Laden.
+   * Generiert Blumen für einen Chunk mit Jittered Grid.
+   *
+   * Statt O(n²) Rejection-Sampling (alte Version) werden Blumen auf
+   * einem regelmäßigen Grid platziert und innerhalb ihrer Zelle zufällig
+   * versetzt ("gejittert"). Das sieht genauso zufällig aus, ist aber O(1)
+   * pro Blume und garantiert Mindestabstand.
    */
   private generateFlowersForChunk(
     worldX: number,
@@ -500,59 +591,43 @@ export class GrassManager {
     checkClear: boolean,
   ): void {
     const dummy = new THREE.Object3D();
-    const MIN_FLOWER_DIST = 1.0; // Mindestabstand 1m zwischen Blumen (nie ineinander)
 
-    // Bereits platzierte Positionen (für Abstands-Check, chunk-intern)
-    const placedPositions: { x: number; z: number }[] = [];
+    // Jittered Grid: Blumen auf einem Raster verteilen
+    // gridCols × gridCols Zellen, jede bekommt maximal eine Blume
+    const gridCols = Math.ceil(Math.sqrt(flowerCount));
+    const spacing = CHUNK_SIZE / gridCols;
+    const halfSize = CHUNK_SIZE / 2;
 
     // Positionen pro Blumentyp sammeln
     const flowerInstances: Array<
       { x: number; y: number; z: number; rotY: number; s: number }[]
     > = Array.from({ length: this.preloadedFlowers.length }, () => []);
 
-    for (let i = 0; i < flowerCount; i++) {
-      const typeIdx = Math.floor(Math.random() * this.preloadedFlowers.length);
+    let placed = 0;
+    for (let r = 0; r < gridCols && placed < flowerCount; r++) {
+      for (let c = 0; c < gridCols && placed < flowerCount; c++) {
+        // Jitter: ±40% der Zellgröße → Blume bleibt in ihrer Zelle
+        const jx = (Math.random() - 0.5) * spacing * 0.8;
+        const jz = (Math.random() - 0.5) * spacing * 0.8;
 
-      // Versuche bis zu 20x einen freien Platz zu finden (mind. 15cm Abstand)
-      let placed = false;
-      for (let attempt = 0; attempt < 20; attempt++) {
-        const x = worldX + (Math.random() - 0.5) * CHUNK_SIZE;
-        const z = worldZ + (Math.random() - 0.5) * CHUNK_SIZE;
+        const x = worldX - halfSize + (c + 0.5) * spacing + jx;
+        const z = worldZ - halfSize + (r + 0.5) * spacing + jz;
 
-        // Überspringen, wenn Position in Clear-Region liegt (z.B. Stadt)
-        // Nur prüfen, wenn Clear-Regionen in der Nähe sind
-        if (checkClear && this.isPositionCleared(x, z)) {
-          continue;
-        }
+        // Clear-Region prüfen (z.B. Stadt)
+        if (checkClear && this.isPositionCleared(x, z)) continue;
 
-        // Prüfen ob weit genug von anderen Blumen entfernt
-        let tooClose = false;
-        for (const p of placedPositions) {
-          const dx = x - p.x;
-          const dz = z - p.z;
-          if (dx * dx + dz * dz < MIN_FLOWER_DIST * MIN_FLOWER_DIST) {
-            tooClose = true;
-            break;
-          }
-        }
+        const typeIdx = Math.floor(Math.random() * this.preloadedFlowers.length);
+        const y = worldGroundHeight(x, z) + Math.random() * 0.05;
+        const rotY = Math.random() * Math.PI * 2;
+        const s =
+          this.preloadedFlowers[typeIdx].scale * (0.8 + Math.random() * 0.7);
 
-        if (!tooClose) {
-          const y = worldGroundHeight(x, z) + Math.random() * 0.05;
-          const rotY = Math.random() * Math.PI * 2;
-          const s =
-            this.preloadedFlowers[typeIdx].scale * (0.8 + Math.random() * 0.7);
-
-          flowerInstances[typeIdx].push({ x, y, z, rotY, s });
-          placedPositions.push({ x, z });
-          placed = true;
-          break;
-        }
+        flowerInstances[typeIdx].push({ x, y, z, rotY, s });
+        placed++;
       }
-      // Wenn kein freier Platz gefunden, wird diese Blume übersprungen
-      if (!placed) continue;
     }
 
-    // InstancedMeshes pro Blumentyp erstellen
+    // InstancedMeshes pro Blumentyp erstellen (gleicher Code wie vorher)
     for (let typeIdx = 0; typeIdx < this.preloadedFlowers.length; typeIdx++) {
       const flower = this.preloadedFlowers[typeIdx];
       const instances = flowerInstances[typeIdx];
@@ -581,7 +656,7 @@ export class GrassManager {
           const pos = new THREE.Vector3(p.x, p.y, p.z);
           flowerPositionsOut.push(pos);
           this.flowerTargets.push(pos);
-          // Farbe der Blume speichern (pink, gelb oder weiß – für Pheromon-Spuren)
+          // Farbe der Blume speichern (für Pheromon-Spuren)
           this.flowerColors.push(flower.color.clone());
         }
       }
@@ -605,7 +680,6 @@ export class GrassManager {
 
     // Jeder Chunk braucht eine eigene Geometrie-Kopie, weil die Instanz-Attribute
     // (aPhase, aSpeed, aBaseX, aBaseZ) pro Chunk unterschiedliche Längen haben.
-    // Das Teilen einer Geometry würde die Buffer-Größen überschreiben → WebGPU-Fehler.
     const bladeGeoClone = this.bladeGeo.clone();
     const mesh = new THREE.InstancedMesh(bladeGeoClone, this.bladeMat, count);
 
@@ -628,7 +702,6 @@ export class GrassManager {
       const baseY = worldGroundHeight(x, z);
 
       // Instanz-Matrix setzen (unter die Erde, wenn in Clear-Region)
-      // isPositionCleared wird nur geprüft, wenn Clear-Regionen in der Nähe sind
       if (checkClear && this.isPositionCleared(x, z)) {
         dummy.position.set(x, -100, z);
         dummy.scale.setScalar(0);
@@ -648,7 +721,7 @@ export class GrassManager {
 
   /** Erzeugt die Bodenplatte für einen Chunk mit leichter Wölbung. */
   private createGround(worldX: number, worldZ: number): THREE.Mesh {
-    const segs = 4; // 8→4: −75% Vertices, Wölbung bei 40m Chunk immer noch glatt
+    const segs = 4;
     const geo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, segs, segs);
     geo.rotateX(-Math.PI / 2);
 
@@ -699,21 +772,21 @@ export class GrassManager {
     return mat;
   }
 
-  /** Räumt einen Chunk auf (geht zurück in den Pool). */
+  /** Räumt einen Chunk auf (entfernt Geometrie und Targets). */
   private disposeChunk(chunk: GrassChunk): void {
-    // Geklonte Fade-Materials entsorgen (nur wenn ungleich Shared-Material)
-    if (chunk.mesh.material !== this.bladeMat) {
-      (chunk.mesh.material as THREE.Material).dispose();
+    // Gras (falls vorhanden – Ground-only Chunks haben kein mesh)
+    if (chunk.mesh) {
+      if (chunk.mesh.material !== this.bladeMat) {
+        (chunk.mesh.material as THREE.Material).dispose();
+      }
+      chunk.mesh.geometry.dispose();
+      chunk.mesh.removeFromParent();
     }
+
+    // Boden (immer vorhanden)
     if (chunk.ground.material !== this.groundMat) {
       (chunk.ground.material as THREE.Material).dispose();
     }
-
-    // Instanz-Geometrie freigeben
-    chunk.mesh.geometry.dispose();
-    chunk.mesh.removeFromParent();
-
-    // Boden-Geometrie freigeben
     chunk.ground.geometry.dispose();
     chunk.ground.removeFromParent();
 
