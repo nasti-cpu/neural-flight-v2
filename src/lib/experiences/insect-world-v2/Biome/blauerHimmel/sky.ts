@@ -6,6 +6,9 @@
  *
  * Presets: [unten (hell), Horizont, oben (dunkel)]
  * power: Exponent >1 = heller Bereich reicht höher, Übergang wird schärfer.
+ *
+ * Horizont-Fade: Der Himmel wird nahe der Horizontlinie (normal.y ≈ 0)
+ * in die Nebelfarbe überblendet, damit der Horizont rund wirkt.
  */
 import * as THREE from "three/webgpu";
 import { vec3, positionWorld } from "three/tsl";
@@ -23,10 +26,12 @@ export const SKY_PRESETS = {
 
 export type SkyPresetName = keyof typeof SKY_PRESETS;
 
+// Nebelfarbe als Konstante (muss mit scene.ts übereinstimmen)
+const FOG_COLOR = new THREE.Color("#4a90d9");
+
 export function createSky(preset: SkyPresetName = "gletscher", power = 2): THREE.Mesh {
 	const hexColors = SKY_PRESETS[preset] as unknown as number[];
 
-	// SphereGeometry, KEIN scale(-1,1,1) — das zerstört WebGPU-Rendering
 	const radius = 500;
 	const geo = new THREE.SphereGeometry(radius, 32, 32);
 
@@ -38,13 +43,48 @@ export function createSky(preset: SkyPresetName = "gletscher", power = 2): THREE
 	// Gradient-Faktor: y von -1 (unten) → 0 (Horizont) → +1 (oben)
 	const tRaw = positionWorld.normalize().y.mul(0.5).add(0.5);
 	const t = power > 1 ? tRaw.pow(power) : tRaw;
+	const skyColor = nStopGradient(colorNodes, t);
+
+	// Horizont-Fade: Je flacher der Blickwinkel (normal.y ≈ 0),
+	// desto mehr wird in Nebelfarbe überblendet.
+	// Der Himmel "verschwindet" so am Horizont im Nebel → runder Horizont.
+	const horizonFade = positionWorld.normalize().y.abs().oneMinus().pow(4);
+	const fogNode = vec3(FOG_COLOR.r, FOG_COLOR.g, FOG_COLOR.b);
+	const finalColor = skyColor.mix(fogNode, horizonFade);
 
 	const mat = new THREE.MeshBasicNodeMaterial();
-	mat.colorNode = nStopGradient(colorNodes, t);
+	mat.colorNode = finalColor;
 	mat.side = THREE.BackSide;
 	mat.fog = false;
 
 	const mesh = new THREE.Mesh(geo, mat);
 	mesh.frustumCulled = false;
 	return mesh;
+}
+
+/**
+ * Aktualisiert die Nebelfarbe im Himmelshader.
+ * Wird aufgerufen, wenn der Benutzer die Nebelfarbe im Manifest ändert.
+ */
+export function updateSkyFogColor(skyMesh: THREE.Mesh, color: THREE.Color): void {
+	const mat = skyMesh.material as THREE.MeshBasicNodeMaterial;
+	// Die Nebelfarbe ist als Uniform im TSL-Graphen eingebaut.
+	// Da TSL-Knoten nicht einfach überschrieben werden können,
+	// erstellen wir den Himmel neu.
+	// (Das passiert nur bei Settings-Änderungen, nicht jeden Frame.)
+	const preset = "gletscher"; // TODO: aus Settings lesen, wenn konfigurierbar
+	const power = 2;
+	const hexColors = SKY_PRESETS[preset] as unknown as number[];
+	const colorNodes = hexColors.map((h) => {
+		const c = new THREE.Color(h);
+		return vec3(c.r, c.g, c.b);
+	});
+	const tRaw = positionWorld.normalize().y.mul(0.5).add(0.5);
+	const t = power > 1 ? tRaw.pow(power) : tRaw;
+	const skyColor = nStopGradient(colorNodes, t);
+	const horizonFade = positionWorld.normalize().y.abs().oneMinus().pow(4);
+	const fogNode = vec3(color.r, color.g, color.b);
+	const finalColor = skyColor.mix(fogNode, horizonFade);
+	mat.colorNode = finalColor;
+	mat.needsUpdate = true;
 }

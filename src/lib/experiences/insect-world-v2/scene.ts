@@ -53,14 +53,32 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   const sky = createSky();
   ctx.scene.add(sky);
 
-  // 2. Statische Grundplatte (verhindert leere Welt beim Umdrehen)
+  // 2. Gewölbte Grundplatte – erzeugt eine runde Horizontlinie
   // Liegt unter den per-Chunk-Bodenplatten und ist immer sichtbar.
+  // Die Scheibe ist nach unten gebogen: flach in der Mitte, stark gekrümmt am Rand.
+  // Zusammen mit dem Nebel entsteht ein runder Horizont, der im Nebel verschwindet.
+  const GROUND_RADIUS = 250;
+  const GROUND_SEGMENTS = 64;
+  const GROUND_DROP = 50; // max Eintauchtiefe am Rand (m)
+  const groundGeo = new THREE.CircleGeometry(GROUND_RADIUS, GROUND_SEGMENTS);
+  {
+    const pos = groundGeo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const y2 = pos.getY(i);
+      const dist = Math.sqrt(x * x + y2 * y2);
+      const t = dist / GROUND_RADIUS;
+      const drop = t * t * GROUND_DROP; // quadratisch: flach in der Mitte, steil am Rand
+      pos.setZ(i, -drop - 5); // -5 = Basis-Tiefe, -drop = zusätzliche Krümmung
+    }
+    pos.needsUpdate = true;
+    groundGeo.computeVertexNormals();
+  }
   const groundPlane = new THREE.Mesh(
-    new THREE.PlaneGeometry(500, 500),
-    new THREE.MeshBasicMaterial({ color: 0x3a6028 }),
+    groundGeo,
+    new THREE.MeshBasicMaterial({ color: 0x3a6028, side: THREE.DoubleSide }),
   );
   groundPlane.rotation.x = -Math.PI / 2;
-  groundPlane.position.y = -5; // tief genug, nie über der Terrain-Oberfläche
   ctx.scene.add(groundPlane);
 
   // 3. Blumen vorladen (einmalig, wird von GrassManager wiederverwendet)
