@@ -67,7 +67,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
       const dist = Math.sqrt(x * x + y2 * y2);
       const t = dist / GROUND_RADIUS;
       const drop = t * t * GROUND_DROP; // quadratisch: flach in der Mitte, steil am Rand
-      pos.setZ(i, -drop - 5); // -5 = Basis-Tiefe, -drop = zusätzliche Krümmung
+      pos.setZ(i, -drop + 0.5); // +0.5 = leicht über Grass-Chunks, schließt Horizontlücke
     }
     pos.needsUpdate = true;
     groundGeo.computeVertexNormals();
