@@ -63,9 +63,9 @@ export class CityManager {
       const wx = Math.cos(angle) * dist;
       const wz = Math.sin(angle) * dist;
 
-      // Auf Chunk-Grid ausrichten
-      const gx = Math.round(wx / CHUNK_SIZE);
-      const gz = Math.round(wz / CHUNK_SIZE);
+      // Auf Chunk-Grid ausrichten (Math.floor wie grass-manager)
+      const gx = Math.floor(wx / CHUNK_SIZE);
+      const gz = Math.floor(wz / CHUNK_SIZE);
 
       // (0,0) überspringen (Spawn-Chunk)
       if (gx === 0 && gz === 0) continue;
@@ -117,8 +117,8 @@ export class CityManager {
 
     for (let i = 0; i < positions.length; i++) {
       const pos = positions[i];
-      const gx = Math.round(pos.x / CHUNK_SIZE);
-      const gz = Math.round(pos.z / CHUNK_SIZE);
+      const gx = Math.floor(pos.x / CHUNK_SIZE);
+      const gz = Math.floor(pos.z / CHUNK_SIZE);
 
       // WFC-Tile auf CITY zwingen → kein Gras, keine Blumen auf diesem Chunk
       grassManager.forceTileType(gx, gz, TileType.CITY);
@@ -135,20 +135,19 @@ export class CityManager {
   }
 
   /**
-   * Jeden Frame aufrufen: Prüft ob City-Chunks aktiv sind und positioniert Modell.
+   * Jeden Frame aufrufen: Zeigt das Modell an der nächsten aktiven Stadt.
+   * Auch besuchte Städte bleiben sichtbar – verschwinden nicht mehr.
    */
   update(grassManager: GrassManager): void {
     const activeCity = this.cities.find(
-      (c) => !c.visited && grassManager.hasChunk(c.gx, c.gz),
+      (c) => grassManager.hasChunk(c.gx, c.gz),
     );
 
     if (activeCity) {
-      // Modell an die aktive Stadt verschieben
       this.modelPivot.position.copy(activeCity.position);
       this.modelPivot.rotation.y = activeCity.rotation;
       this.modelPivot.visible = true;
     } else {
-      // Keine unbesuchte Stadt aktiv → Modell ausblenden
       this.modelPivot.visible = false;
     }
   }
