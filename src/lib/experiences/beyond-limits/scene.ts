@@ -60,6 +60,7 @@ interface BeyondState extends ExperienceState {
 	/** Wiederverwendbare Vektoren (keine Garbage pro Frame) */
 	_worldPos: THREE.Vector3;
 	_fwd: THREE.Vector3;
+	_worldQuat: THREE.Quaternion;
 }
 
 // ── setup ──
@@ -97,6 +98,7 @@ export async function setup(ctx: SetupContext): Promise<BeyondState> {
 		_insectReady: false,
 		_worldPos: new THREE.Vector3(),
 		_fwd: new THREE.Vector3(),
+		_worldQuat: new THREE.Quaternion(),
 	};
 }
 
@@ -155,7 +157,8 @@ export function tick(
 	// sonst bleibt es an (0,0,-10) in der Welt und der Fade ist unsichtbar
 	if (s.phase >= 1) {
 		ctx.camera.getWorldPosition(s._worldPos);
-		const fwd = s._fwd.set(0, 0, -1).applyQuaternion(ctx.camera.quaternion);
+		ctx.camera.getWorldQuaternion(s._worldQuat);
+		const fwd = s._fwd.set(0, 0, -1).applyQuaternion(s._worldQuat);
 		s.fadeSprite.position.copy(s._worldPos).add(fwd.multiplyScalar(FADE_Z));
 	}
 
@@ -224,12 +227,14 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 
 // ── Hilfsfunktionen ──
 
-/** Portal 10 m vor dem Spieler (in Weltkoordinaten) auf Augenhöhe platzieren */
+/** Portal 10 m vor dem Spieler (Weltkoordinaten + Weltquaternion) auf Augenhöhe platzieren */
 function _spawnPortal(s: BeyondState, ctx: TickContext): void {
 	const camWorld = s._worldPos;
 	ctx.camera.getWorldPosition(camWorld);
+	ctx.camera.getWorldQuaternion(s._worldQuat);
 
-	const fwd = s._fwd.set(0, 0, -1).applyQuaternion(ctx.camera.quaternion);
+	// Forward aus Weltquaternion (lokales Quat ist relativ zum Rig → falsch)
+	const fwd = s._fwd.set(0, 0, -1).applyQuaternion(s._worldQuat);
 	fwd.y = 0;
 	fwd.normalize();
 
