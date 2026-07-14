@@ -90,6 +90,9 @@ export interface UnderwaterWorldV5State extends ExperienceState {
 
   /** City-Vorab-Scan: Aktuelle Zeile für Row-by-Row-Scan (0..20 = aktiv, >20 = fertig) */
   _cityScanRow: number;
+
+  /** Flag: Flight-State muss beim ersten updatePlayer()-Aufruf zurückgesetzt werden */
+  _needsFlightReset: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +351,7 @@ export async function setup(
     _lastCityScanChunkX: NaN,
     _lastCityScanChunkZ: NaN,
     _cityScanRow: 9999,
+    _needsFlightReset: true,
   };
 }
 
@@ -565,6 +569,11 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
     (s.particles.material as any)?.dispose();
   }
 
+  // Beleuchtung aufräumen
+  if (s.ambientLight) { s.ambientLight.removeFromParent(); s.ambientLight.dispose(); }
+  if (s.sunLight) { s.sunLight.removeFromParent(); s.sunLight.dispose(); }
+  if (s.fillLight) { s.fillLight.removeFromParent(); s.fillLight.dispose(); }
+
   // Hintergrund-Atmo stoppen
   s.audio?.stop();
 }
@@ -691,6 +700,15 @@ export function updatePlayer(
   delta: number,
 ): void {
   const s = state as UnderwaterWorldV5State;
+
+  // Bei Re-Setup (nach Portal-Transition): Flight-State zurücksetzen
+  if (s._needsFlightReset) {
+    s._needsFlightReset = false;
+    _smoothedPitch = 0;
+    _smoothedRoll = 0;
+    _heading = 0;
+    _playerSpeed = s.player.baseSpeed * FLOAT_SPEED_FACTOR;
+  }
 
   // Controller-Werte sanft interpolieren
   _smoothedPitch += (orientation.pitch - _smoothedPitch) * PLAYER_LERP;

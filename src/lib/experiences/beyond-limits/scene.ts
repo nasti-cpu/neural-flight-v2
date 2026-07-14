@@ -438,6 +438,7 @@ async function _setupWorldAsync(s: BeyondState, targetWorld: number): Promise<vo
 				renderer: null as any,
 			});
 			s.underwaterState = uwState;
+			s.camera = (uwState as any).camera as THREE.PerspectiveCamera;
 		} else {
 			s.scene.fog = null;
 			s.scene.background = new THREE.Color(0x000000);
