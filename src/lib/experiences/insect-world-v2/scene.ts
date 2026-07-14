@@ -148,7 +148,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   pheromones.addTrails(pheromoneTargets, ctx.camera.position);
   ctx.scene.add(pheromones.group);
 
-  // 10. Städte (prozedural, 250-400m entfernt, nur 3 Stück)
+  // 10. Städte auf Chunk-Grid (400–500m Abstand, CITY-Tile = kein Gras/Blumen)
   const cityManager = new CityManager();
   const positions = cityManager.generatePositions(
     CITY_CONFIG.CITY_COUNT,
@@ -156,26 +156,18 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     CITY_CONFIG.MAX_DISTANCE,
   );
   await cityManager.loadCities(positions, ctx.scene, grassManager);
-
-  // Das Modell ist im modelPivot und wird erst per setActiveCity() sichtbar
   console.log(`[City] ${cityManager.cities.length} Städte erzeugt`);
 
-  // 11. GuidePath – erst nach 30m Erkundung aktiv (verzögertes Erscheinen)
+  // 11. Große Pheromon-Leitspur zur nächsten Stadt (400m Reichweite)
   const guidePath = new CityGuidePath({
-    neonColor: 0x44ffff,
-    dashLength: 0.5,
-    gapLength: 0.3,
-    spriteSizeMin: 1.4,
-    spriteSizeMax: 2.2,
-    spritesPerDash: 1,
-    maxDist: 200,
+    neonColor: 0xff66ff,
+    dashLength: 0.8,
+    gapLength: 0.4,
+    spriteSizeMin: 0.8,
+    spriteSizeMax: 1.6,
+    spritesPerDash: 4,
+    maxDist: 400,
   });
-  const firstCity = cityManager.getNearestUndiscovered(new THREE.Vector3(0, 2, 0));
-  if (firstCity) {
-    // Stadt-Modell positionieren, aber Leitspur noch nicht aktivieren
-    cityManager.setActiveCity(firstCity);
-    console.log(`[City] Erste Stadt ${firstCity.index} bei`, firstCity.position);
-  }
   ctx.scene.add(guidePath.group);
 
   // ── Atmosphärischer Nebel ──
@@ -249,31 +241,17 @@ export function tick(
     s.grassManager.update(ctx.camera.position, ctx.delta * 3);
   }
 
-  // ── Stadt- & Leitsystem (ohne Sofort-Redirect) ──
+  // ── CityManager: chunk-basierte Stadt-Anzeige (Modell folgt aktivem Chunk) ──
+  s.cityManager.update(s.grassManager);
+
+  // ── Große Pheromon-Leitspur zur nächsten Stadt ──
   const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);
   const last = s.cityManager.lastVisitedCity;
 
   if (nearest) {
     const distToNearest = ctx.camera.position.distanceTo(nearest.position);
-    const distFromLast = last
-      ? ctx.camera.position.distanceTo(last.position)
-      : Infinity;
 
-    // 1. Modell-Steuerung: Zeige die Stadt, wenn nah dran,
-    //    sonst das Modell an der zuletzt besuchten Stadt lassen.
-    if (distToNearest < CITY_CONFIG.VISIBILITY_RANGE) {
-      // Unbesuchte Stadt in Sichtweite → Modell dorthin schalten
-      s.cityManager.setActiveCity(nearest);
-    } else if (last) {
-      // Weit weg von unbesuchten Städten → Modell an letzter besuchter Stadt
-      s.cityManager.setActiveCity(last);
-    } else {
-      // Ganz am Start → Modell an erster Stadt (auch wenn im Nebel)
-      s.cityManager.setActiveCity(nearest);
-    }
-
-    // 2. Ankunft an einer Stadt (→ besucht markieren, Trail löschen,
-    //    KEIN Redirect zur nächsten Stadt!)
+    // Ankunft an einer Stadt
     if (distToNearest < CITY_CONFIG.ARRIVAL_DISTANCE && !nearest.visited) {
       s.cityManager.markVisited(nearest);
       s.guidePath.clear();
@@ -281,20 +259,20 @@ export function tick(
     }
   }
 
-  // 3. Erste Leitspur aktivieren (nach 30m Erkundung, nicht sofort beim Start)
+  // Leitspur aktivieren (nach 30m Erkundung)
   if (!s.guidePath.isActive && !s.firstPathActivated) {
     const distFromStart = ctx.camera.position.distanceTo(s.startPosition);
     if (distFromStart > 30) {
-      const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);
-      if (nearest) {
-        s.guidePath.setTarget(ctx.camera.position, nearest.position);
+      const target = s.cityManager.getNearestUndiscovered(ctx.camera.position);
+      if (target) {
+        s.guidePath.setTarget(ctx.camera.position, target.position);
         s.firstPathActivated = true;
-        console.log(`[City] Erste Leitspur zu Stadt ${nearest.index} aktiviert`);
+        console.log(`[City] Erste Leitspur zu Stadt ${target.index} aktiviert`);
       }
     }
   }
 
-  // 4. GuidePath reaktivieren (nach Stadtbesuch, erst nach ausreichender Erkundung)
+  // Leitspur reaktivieren nach Stadtbesuch
   if (!s.guidePath.isActive && s.firstPathActivated && last) {
     const distFromLast = ctx.camera.position.distanceTo(last.position);
     if (distFromLast > CITY_CONFIG.ACTIVATION_DISTANCE) {
@@ -306,8 +284,7 @@ export function tick(
     }
   }
 
-  // GuidePath animieren (pulsierende Sprites – nur jeden 2. Frame)
-  // Sinus-Puls bei 30Hz vs 60Hz ist visuell identisch, spart 50% CPU.
+  // GuidePath animieren (jeden 2. Frame)
   if (s.tickInterval % 2 === 0) {
     s.guidePath.update(ctx.elapsed);
   }

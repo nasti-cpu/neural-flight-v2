@@ -177,6 +177,24 @@ export class GrassManager {
   }
 
   /**
+   * Prüft ob ein Chunk mit bestimmten Koordinaten aktuell aktiv ist.
+   * Wird vom CityManager verwendet, um Stadt-Modelle zu platzieren.
+   */
+  hasChunk(gx: number, gz: number): boolean {
+    return this.active.has(`${gx},${gz}`);
+  }
+
+  /**
+   * Gibt den Tile-Typ eines aktiven Chunks zurück (oder undefined).
+   */
+  getTileTypeAt(gx: number, gz: number): string | undefined {
+    const chunk = this.active.get(`${gx},${gz}`);
+    if (!chunk) return undefined;
+    // Den Tile-Typ via WFC abfragen (wird gecached)
+    return this.wfc.getTileType(gx, gz) as unknown as string;
+  }
+
+  /**
    * Wird jeden N-ten Frame aufgerufen.
    * - Erzeugt sofort Ground-Planes für Chunks in PREGEN_RADIUS
    * - Queued Upgrades (Gras+Blumen) für Chunks in VIEW_RADIUS

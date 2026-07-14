@@ -14,8 +14,8 @@
  */
 
 /**
- * Die 5 Chunk-Typen unserer Wiese.
- * Jeder bestimmt, was in einem 80×80m-Chunk wächst.
+ * Die 6 Chunk-Typen unserer Wiese.
+ * Jeder bestimmt, was in einem 40×40m-Chunk wächst.
  */
 export enum TileType {
   /** Kahle Fläche (kaum Gras, keine Blumen) */
@@ -28,6 +28,8 @@ export enum TileType {
   FLOWERS_DENSE = "flowers_dense",
   /** Hohes Gras (keine Blumen) */
   TALL_GRASS = "tall_grass",
+  /** Stadt-Chunk – kein Gras, keine Blumen, nur Boden */
+  CITY = "city",
 }
 
 /**
@@ -45,6 +47,7 @@ export const ADJACENCY_RULES: Record<TileType, TileType[]> = {
     TileType.FLOWERS_SPARSE,
     TileType.FLOWERS_DENSE,
     TileType.TALL_GRASS,
+    TileType.CITY,
   ],
   [TileType.FLOWERS_SPARSE]: [
     TileType.MEADOW,
@@ -53,6 +56,7 @@ export const ADJACENCY_RULES: Record<TileType, TileType[]> = {
   ],
   [TileType.FLOWERS_DENSE]: [TileType.FLOWERS_SPARSE, TileType.FLOWERS_DENSE],
   [TileType.TALL_GRASS]: [TileType.EMPTY, TileType.MEADOW, TileType.TALL_GRASS],
+  [TileType.CITY]: [TileType.MEADOW],
 };
 
 /**
@@ -67,6 +71,7 @@ export const TILE_WEIGHTS: Record<TileType, number> = {
   [TileType.FLOWERS_SPARSE]: 7,
   [TileType.FLOWERS_DENSE]: 3,
   [TileType.TALL_GRASS]: 4,
+  [TileType.CITY]: 0.1,
 };
 
 /**
@@ -125,6 +130,12 @@ export const TILE_CONTENT: Record<TileType, TileContent> = {
     flowerCount: 0,
     grassMinHeight: 1.2,
     grassMaxHeight: 2.5,
+  },
+  [TileType.CITY]: {
+    grassCount: 0,
+    flowerCount: 0,
+    grassMinHeight: 0,
+    grassMaxHeight: 0,
   },
 };
 
