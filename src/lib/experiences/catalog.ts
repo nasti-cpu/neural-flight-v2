@@ -5,6 +5,7 @@ import { manifest as mountainFlight } from "./mountain-flight";
 import { manifest as shaderDemo } from "./shader-demo";
 import { manifest as underwaterWorldV4 } from "./underwater-world-v4";
 import { manifest as underwaterWorldV5 } from "./underwater-world-v5";
+import { manifest as insectWorldV2 } from "./insect-world-v2";
 import type { ExperienceManifest } from "./types";
 
 // ── Registry ──
@@ -23,6 +24,7 @@ const CATALOG: Record<string, ExperienceManifest> = {
   "shader-demo": shaderDemo,
   "underwater-world-v4": underwaterWorldV4,
   "underwater-world-v5": underwaterWorldV5,
+  "insect-world-v2": insectWorldV2,
 };
 
 export const DEFAULT_EXPERIENCE_ID = "mountain-flight";
