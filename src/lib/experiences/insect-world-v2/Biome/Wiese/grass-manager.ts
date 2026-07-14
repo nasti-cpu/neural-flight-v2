@@ -633,7 +633,7 @@ export class GrassManager {
         dummy.position.set(x, -100, z);
         dummy.scale.setScalar(0);
       } else {
-        dummy.position.set(x, baseY + h / 2, z);
+        dummy.position.set(x, baseY, z);
         dummy.scale.set(sx, h, sz);
       }
       dummy.rotation.set(0, rotY, 0);
