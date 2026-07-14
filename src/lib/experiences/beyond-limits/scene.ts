@@ -202,9 +202,13 @@ export function tick(
 			const t = Math.min(1, (elapsed - s.stageStart) / FADE_DURATION);
 			s.fadeSprite.material.opacity = 1 - t;
 
+			// Audio der neuen Welt einblenden
+			const newWorld = inWorld === 0 ? 1 : 0;
+			_setAudioVolume(s, newWorld, t * _getAudioTargetVolume(newWorld));
+
 			if (t >= 1) {
 				// Nächsten Zyklus starten
-				s.world = inWorld === 0 ? 1 : 0;
+				s.world = newWorld;
 				s.stage = 0;
 				s.stageStart = elapsed;
 				s.fadeSprite.material.opacity = 0;
@@ -263,6 +267,22 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 	}
 }
 
+// ── Audio-Volume setzen (beide Welten) ──
+function _setAudioVolume(s: BeyondState, world: number, vol: number): void {
+	if (world === 0 && s.underwaterState) {
+		const a = (s.underwaterState as any).audio;
+		if (a?.setVolume) a.setVolume(vol);
+	}
+	if (world === 1 && s.insectState) {
+		const a = (s.insectState as any).bgAudio;
+		if (a?.setVolume) a.setVolume(vol);
+	}
+}
+
+function _getAudioTargetVolume(world: number): number {
+	return world === 0 ? 0.35 : 0.3;
+}
+
 // ── Hilfsfunktionen ──
 
 /** Portal 10 m vor dem Spieler platzieren */
@@ -283,6 +303,9 @@ function _spawnPortal(s: BeyondState, ctx: TickContext): void {
 /** Transition starten: alte Welt disposen, neue asynchron aufbauen */
 function _startTransition(s: BeyondState): void {
 	const goingTo = s.world === 0 ? 1 : 0;
+
+	// Audio der alten Welt sofort stumm
+	_setAudioVolume(s, s.world, 0);
 
 	if (s.world === 0) {
 		if (s.underwaterState) underwaterDispose(s.underwaterState, s.scene);
@@ -342,6 +365,9 @@ async function _setupWorldAsync(s: BeyondState, targetWorld: number): Promise<vo
 			});
 			s.insectState = iState;
 		}
+
+		// Neue Welt startet stumm – wird in Stage 3 eingeblendet
+		_setAudioVolume(s, targetWorld, 0);
 
 		s.fadeSprite.material.opacity = 1;
 		s._ready = true;

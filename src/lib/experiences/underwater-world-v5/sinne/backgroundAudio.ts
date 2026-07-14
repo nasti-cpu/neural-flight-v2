@@ -18,6 +18,7 @@
  */
 export function startBackgroundAudio(): {
   stop: () => void;
+  setVolume: (v: number) => void;
 } | null {
   try {
     // AudioContext ist anfangs "suspended" – Browser erlauben Audio
@@ -121,6 +122,9 @@ export function startBackgroundAudio(): {
         } catch {
           // AudioContext ließ sich nicht schließen – ignorieren
         }
+      },
+      setVolume: (v: number) => {
+        gainNode.gain.value = v;
       },
     };
   } catch (err) {

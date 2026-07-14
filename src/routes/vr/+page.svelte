@@ -9,7 +9,7 @@
         loadExperience,
         unloadExperience,
     } from "$lib/experiences/loader";
-    import { FpsCounter } from "$lib/three/fps-counter";
+    // import { FpsCounter } from "$lib/three/fps-counter";
     import { createWebSocketClient } from "$lib/ws/client.svelte";
     import {
         isOrientationData,
@@ -43,7 +43,7 @@
     let lastOrientation = { pitch: 0, roll: 0 };
     let lastSpeed = { accelerate: false, brake: false };
     let removeResizeListener: (() => void) | null = null;
-    let fpsCounter: FpsCounter | null = null;
+    // let fpsCounter: FpsCounter | null = null;
 
     /**
      * ICAROS Host-Integration starten, wenn PUBLIC_ICAROS_HOST_ORIGIN gesetzt ist.
@@ -111,7 +111,7 @@
                 vrButton = VRButton.createButton(renderer);
                 document.body.appendChild(vrButton);
 
-                fpsCounter = new FpsCounter();
+                // fpsCounter = new FpsCounter();
 
                 const experienceId = getActiveExperienceId();
                 console.log("🚀 Lade Experience:", experienceId);
@@ -221,7 +221,7 @@
                         score = result.outputs.score as number;
                     }
 
-                    fpsCounter?.update();
+                    // fpsCounter?.update();
                     renderer.render(scene, cam);
                 });
 
@@ -238,7 +238,7 @@
     });
 
     onDestroy(() => {
-        fpsCounter?.dispose();
+        // fpsCounter?.dispose();
         renderer?.setAnimationLoop(null);
         if (scene) unloadExperience(scene);
         renderer?.dispose();
