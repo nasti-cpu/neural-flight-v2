@@ -57,7 +57,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   // Die per-Chunk-Bodenplatten (grass-manager) liegen darüber und sind feiner.
   const GROUND_RADIUS = 2000;
   const GROUND_SEGMENTS = 64;
-  const GROUND_DROP = 50; // max Eintauchtiefe am Rand (m)
+  const GROUND_RISE = 6; // Horizont steigt sanft an → verdeckt ferne Städte
   const groundGeo = new THREE.CircleGeometry(GROUND_RADIUS, GROUND_SEGMENTS);
   {
     const pos = groundGeo.attributes.position;
@@ -66,8 +66,8 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
       const y2 = pos.getY(i);
       const dist = Math.sqrt(x * x + y2 * y2);
       const t = dist / GROUND_RADIUS;
-      const drop = t * t * GROUND_DROP; // quadratisch: flach in der Mitte, steil am Rand
-      pos.setZ(i, -drop + 0.5); // +0.5 = leicht über Grass-Chunks, schließt Horizontlücke
+      const rise = t * t * GROUND_RISE; // quadratisch: flach in der Mitte, steil am Rand
+      pos.setZ(i, rise + 0.5); // +0.5 = Basis, +rise = Horizont steigt → verdeckt Städte
     }
     pos.needsUpdate = true;
     groundGeo.computeVertexNormals();
@@ -102,7 +102,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
       const wx = Math.cos(angle) * r;
       const wz = Math.sin(angle) * r;
       const t = r / GROUND_RADIUS;
-      const h = -(t * t * GROUND_DROP) + 0.5;
+      const h = t * t * GROUND_RISE + 0.5;
       const scaleY = 0.6 + Math.random() * 0.8;
       const baseY = h;
 
