@@ -35,7 +35,8 @@ import { createRiftPortal, type RiftPortal } from "$lib/portal/portalRift";
 const T_PORTAL_APPEAR = 290;     // s – Portal erscheint
 const COLLISION_DIST = 3;        // Einheiten – Kollisionsradius
 const PORTAL_TIMEOUT = 40;       // s – Notfall‑Timeout nach Portal-Erscheinen
-const FADE_DURATION = 2;         // s – Dauer Fade to/from Black
+const FADE_DURATION = 3;         // s – Dauer Fade to/from Black
+const FADE_Z = 5;                // Einheiten – Abstand FadeSprite vor Kamera
 
 // ── State ──
 interface BeyondState extends ExperienceState {
@@ -55,6 +56,10 @@ interface BeyondState extends ExperienceState {
 	scene: THREE.Scene;
 
 	_insectReady: boolean;
+
+	/** Wiederverwendbare Vektoren (keine Garbage pro Frame) */
+	_worldPos: THREE.Vector3;
+	_fwd: THREE.Vector3;
 }
 
 // ── setup ──
@@ -89,6 +94,8 @@ export async function setup(ctx: SetupContext): Promise<BeyondState> {
 		insectLights: null,
 		scene: ctx.scene,
 		_insectReady: false,
+		_worldPos: new THREE.Vector3(),
+		_fwd: new THREE.Vector3(),
 	};
 }
 
@@ -114,9 +121,10 @@ export function tick(
 		_spawnPortal(s, ctx);
 	}
 
-	// 1 → 2: Kollision oder Notfall-Timeout
+	// 1 → 2: Kollision (Weltkoordinaten) oder Notfall-Timeout
 	if (s.phase === 1) {
-		const dist = ctx.camera.position.distanceTo(s.portal.group.position);
+		ctx.camera.getWorldPosition(s._worldPos);
+		const dist = s._worldPos.distanceTo(s.portal.group.position);
 		if (dist < COLLISION_DIST || (elapsed - s._phaseChangedAt) > PORTAL_TIMEOUT) {
 			_setPhase(s, 2, elapsed);
 		}
@@ -136,8 +144,14 @@ export function tick(
 	// 4 → 5: Fade-in abgeschlossen
 	if (s.phase === 4 && (elapsed - s._phaseChangedAt) >= FADE_DURATION) {
 		_setPhase(s, 5, elapsed);
-		s.portal.group.visible = false;
 		s.fadeSprite.material.opacity = 0;
+	}
+
+	// ── FadeSprite immer vor die aktuelle Kamera ──
+	if (s.phase >= 2) {
+		ctx.camera.getWorldPosition(s._worldPos);
+		const fwd = s._fwd.set(0, 0, -1).applyQuaternion(ctx.camera.quaternion);
+		s.fadeSprite.position.copy(s._worldPos).add(fwd.multiplyScalar(FADE_Z));
 	}
 
 	// ── Per-Phase Update ──
@@ -209,24 +223,28 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 
 // ── Hilfsfunktionen ──
 
-/** Portal 10 m vor dem Spieler auf Augenhöhe platzieren */
+/** Portal 10 m vor dem Spieler (in Weltkoordinaten) auf Augenhöhe platzieren */
 function _spawnPortal(s: BeyondState, ctx: TickContext): void {
-	const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(ctx.camera.quaternion);
+	const camWorld = s._worldPos;
+	ctx.camera.getWorldPosition(camWorld);
+
+	const fwd = s._fwd.set(0, 0, -1).applyQuaternion(ctx.camera.quaternion);
 	fwd.y = 0;
 	fwd.normalize();
-	s.portal.group.position
-		.copy(ctx.camera.position)
-		.add(fwd.multiplyScalar(10));
-	// Portal auf Augenhöhe zentrieren
-	s.portal.group.position.y = ctx.camera.position.y;
-	s.portal.group.lookAt(ctx.camera.position);
+
+	s.portal.group.position.copy(camWorld).add(fwd.multiplyScalar(10));
+	s.portal.group.position.y = camWorld.y;
+	s.portal.group.lookAt(camWorld);
 	s.portal.group.visible = true;
 }
 
-/** Underwater entsorgen und Insect-Setup asynchron starten */
+/** Underwater entsorgen, Portal ausblenden und Insect-Setup asynchron starten */
 function _startTransition(s: BeyondState): void {
 	underwaterDispose(s.underwaterState!, s.scene);
 	s.underwaterState = null;
+
+	// Portal sofort unsichtbar – es soll NICHT in der Insect-World erscheinen
+	s.portal.group.visible = false;
 
 	s.dummyCamera.fov = 70;
 	s.dummyCamera.near = 0.1;
