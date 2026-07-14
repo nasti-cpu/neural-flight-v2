@@ -12,7 +12,7 @@ import { updatePlayer as uwUpdatePlayer } from "../underwater-world-v5/scene";
 import { getWorldHeight } from "../insect-world-v2/Biome/Wiese/grass-manager";
 
 // ── Insect-World-Player (Pitch = vertikal, wie Underwater) ──
-const INSECT_BASE_SPEED = 1.2;
+const INSECT_BASE_SPEED = 1;
 const YAW_FACTOR = 0.02;
 const CEILING_HEIGHT = 2.8;      // m – max Höhe über dem Boden
 const PITCH_LERP = 0.15;        // Smoothing-Faktor (wie Underwater)

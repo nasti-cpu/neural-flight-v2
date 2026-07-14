@@ -111,7 +111,7 @@ export class CityManager {
       let wrapper: THREE.Group | null = null;
       if (template) {
         wrapper = new THREE.Group();
-        wrapper.position.set(pos.x, getWorldHeight(pos.x, pos.z), pos.z);
+        wrapper.position.set(pos.x, getWorldHeight(pos.x, pos.z) - 0.3, pos.z);
         wrapper.rotation.y = rotY;
 
         const clone = template.clone(true);
