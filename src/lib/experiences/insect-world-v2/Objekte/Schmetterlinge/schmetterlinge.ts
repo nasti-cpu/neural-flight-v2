@@ -60,7 +60,8 @@ interface ButterflyState {
 
 export interface ButterflySwarm {
   group: THREE.Group;
-  update: (time: number, delta: number) => void;
+  /** @param cameraPosition – wenn gesetzt, driftet der Schwarm zur Kamera */
+  update: (time: number, delta: number, cameraPosition?: THREE.Vector3) => void;
   dispose: () => void;
 }
 
@@ -144,8 +145,22 @@ export async function createButterflies(
     });
   }
 
-  function update(time: number, delta: number): void {
+  function update(time: number, delta: number, cameraPosition?: THREE.Vector3): void {
     for (const b of butterflies) {
+      // ── Schwarm folgt der Kamera (sanftes Driften) ──
+      if (cameraPosition) {
+        const dx = cameraPosition.x - b.centerX;
+        const dz = cameraPosition.z - b.centerZ;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist > 20) {
+          const pull = Math.min(delta * 8, dist - 15);
+          b.centerX += (dx / dist) * pull;
+          b.centerZ += (dz / dist) * pull;
+          b.targetX += (dx / dist) * pull;
+          b.targetZ += (dz / dist) * pull;
+        }
+      }
+
       // ── Wegpunkt-Folge mit sanften Kurven ──
       b.targetTimer -= delta;
       const dx = b.targetX - b.group.position.x;

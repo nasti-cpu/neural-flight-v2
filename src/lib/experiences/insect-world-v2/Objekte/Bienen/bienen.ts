@@ -61,7 +61,8 @@ interface BeeState {
 
 export interface BeeSwarm {
   group: THREE.Group;
-  update: (time: number, delta: number) => void;
+  /** @param cameraPosition – wenn gesetzt, driftet der Bienenschwarm zur Kamera */
+  update: (time: number, delta: number, cameraPosition?: THREE.Vector3) => void;
   dispose: () => void;
 }
 
@@ -148,8 +149,23 @@ export async function createBees(
     });
   }
 
-  function update(time: number, delta: number): void {
+  function update(time: number, delta: number, cameraPosition?: THREE.Vector3): void {
     for (const bee of bees) {
+      // ── Schwarm folgt der Kamera (sanftes Driften) ──
+      if (cameraPosition) {
+        const dx = cameraPosition.x - bee.centerX;
+        const dz = cameraPosition.z - bee.centerZ;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist > 20) {
+          const pull = Math.min(delta * 8, dist - 15);
+          bee.centerX += (dx / dist) * pull;
+          bee.centerZ += (dz / dist) * pull;
+          // Auch das Ziel mitverschieben, damit Bienen nicht zurückfliegen
+          bee.targetX += (dx / dist) * pull;
+          bee.targetZ += (dz / dist) * pull;
+        }
+      }
+
       // ── Wegpunkt-Folge mit sanften Kurven ──
       // Die Biene fliegt zu zufälligen Wegpunkten, dreht aber
       // langsam mit begrenztem Lenkwinkel → fließende Bögen,

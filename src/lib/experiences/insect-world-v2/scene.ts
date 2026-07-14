@@ -53,11 +53,9 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   const sky = createSky();
   ctx.scene.add(sky);
 
-  // 2. Gewölbte Grundplatte – erzeugt eine runde Horizontlinie
-  // Liegt unter den per-Chunk-Bodenplatten und ist immer sichtbar.
-  // Die Scheibe ist nach unten gebogen: flach in der Mitte, stark gekrümmt am Rand.
-  // Zusammen mit dem Nebel entsteht ein runder Horizont, der im Nebel verschwindet.
-  const GROUND_RADIUS = 250;
+  // 2. Gewölbte Riesenscheibe – erzeugt Horizont weit über die Chunks hinaus.
+  // Die per-Chunk-Bodenplatten (grass-manager) liegen darüber und sind feiner.
+  const GROUND_RADIUS = 2000;
   const GROUND_SEGMENTS = 64;
   const GROUND_DROP = 50; // max Eintauchtiefe am Rand (m)
   const groundGeo = new THREE.CircleGeometry(GROUND_RADIUS, GROUND_SEGMENTS);
@@ -109,11 +107,11 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   // Fade erst NACH dem ersten Update aktivieren → nur Bewegungslade-Chunks fade
   grassManager.setFadeDuration(0.5);
 
-  // 7. Bienen (Wander-Steuerung, +10cm höher)
+  // 7. Bienen – Schwarm folgt der Kamera (fieldRadius klein = nah am Spieler)
   const bees = await createBees(beeGlbUrl, {
     count: 10,
     scale: 0.04,
-    fieldRadius: 200,
+    fieldRadius: 30,
     flyRadiusMin: 3,
     flyRadiusMax: 10,
     speedMin: 2.0,
@@ -124,11 +122,11 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   });
   ctx.scene.add(bees.group);
 
-  // 8. Schmetterlinge (Wander-Steuerung, +10cm höher)
+  // 8. Schmetterlinge – Schwarm folgt der Kamera
   const butterflies = await createButterflies(butterflyGlbUrl, {
     count: 6,
     scale: 0.036,
-    fieldRadius: 200,
+    fieldRadius: 30,
     flyRadiusMin: 3,
     flyRadiusMax: 12,
     speedMin: 1.5,
@@ -213,13 +211,13 @@ export function tick(
   // Der Spieler sieht keinen Unterschied, aber die CPU spart ~50%.
   s.tickInterval++;
 
-  // Bienen-Animation (jeden 3. Frame)
+  // Bienen-Animation – Schwarm folgt der Kamera (cameraPosition = folgen)
   if (s.tickInterval % 3 === 0) {
-    s.bees.update(ctx.elapsed, ctx.delta);
+    s.bees.update(ctx.elapsed, ctx.delta, ctx.camera.position);
   }
-  // Schmetterlings-Animation (jeden 3. Frame)
+  // Schmetterlings-Animation – Schwarm folgt der Kamera
   if (s.tickInterval % 3 === 0) {
-    s.butterflies.update(ctx.elapsed, ctx.delta);
+    s.butterflies.update(ctx.elapsed, ctx.delta, ctx.camera.position);
   }
   // Pheromon-Spuren-Animation (jeden Frame – nur opacity, billig)
   s.pheromones.update(ctx.elapsed);
