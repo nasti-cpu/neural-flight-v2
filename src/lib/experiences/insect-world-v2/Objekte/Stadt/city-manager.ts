@@ -107,13 +107,16 @@ export class CityManager {
 
       const rotY = Math.random() * Math.PI * 2;
 
-      // Klon erzeugen und permanent in die Szene stellen
-      let modelClone: THREE.Group | null = null;
+      // Wrapper-Gruppe: positioned das zentrierte Modell an der Chunk-Mitte
+      let wrapper: THREE.Group | null = null;
       if (template) {
-        modelClone = template.clone(true);
-        modelClone.position.set(pos.x, getWorldHeight(pos.x, pos.z), pos.z);
-        modelClone.rotation.y = rotY;
-        scene.add(modelClone);
+        wrapper = new THREE.Group();
+        wrapper.position.set(pos.x, getWorldHeight(pos.x, pos.z), pos.z);
+        wrapper.rotation.y = rotY;
+
+        const clone = template.clone(true);
+        wrapper.add(clone);
+        scene.add(wrapper);
       }
 
       this.cities.push({
@@ -123,7 +126,7 @@ export class CityManager {
         visited: false,
         index: i,
         rotation: rotY,
-        model: modelClone,
+        model: wrapper,
       });
     }
   }
