@@ -1,12 +1,9 @@
 /**
  * scene.ts – Zyklischer Sequencer für Beyond‑Limits.
  *
- * Wechselt alle ~5 min zwischen Underwater World und Insect World:
- *   1. Portal erscheint vor dem Spieler
- *   2. Annäherung → distance-basierter Fade to Black
- *   3. Alte Welt disposen, neue Welt asynchron aufbauen
- *   4. Fade from Black in die neue Welt
- *   5. Repeat (Loop)
+ * Wechselt alle ~5 min zwischen Underwater World und Insect World.
+ * Während des asynchronen Ladens der nächsten Welt wird eine
+ * Portal-Innensicht (Tunnel) eingeblendet.
  */
 
 import * as THREE from "three/webgpu";
@@ -24,6 +21,7 @@ import {
 } from "../insect-world-v2/scene";
 
 import { createRiftPortal, type RiftPortal } from "$lib/portal/portalRift";
+import { createPortalTunnel, type PortalTunnel } from "$lib/portal/portalTunnel";
 
 // ── Konstanten ──
 const T_PORTAL_APPEAR = 290;     // s – aktive Zeit bevor Portal erscheint
@@ -32,17 +30,14 @@ const FADE_RANGE = 10;           // Einheiten – Abstand ab dem Fade beginnt
 const PORTAL_TIMEOUT = 40;       // s – Notfall‑Timeout nach Portal-Erscheinen
 const FADE_DURATION = 3;         // s – Dauer Fade from Black
 const FADE_Z = 5;                // Einheiten – Abstand FadeSprite vor Kamera
+const TUNNEL_FADE = 0.5;         // s – Ein-/Ausblendzeit des Tunnels
 
 // ── State ──
 interface BeyondState extends ExperienceState {
-	/** 0 = Underwater, 1 = Insect */
-	world: number;
-	/** 0=active, 1=portal+fade, 2=black+transition, 3=fadeIn */
-	stage: number;
-	/** ctx.elapsed beim Start der aktuellen stage */
-	stageStart: number;
+	world: number;          // 0=Underwater, 1=Insect
+	stage: number;          // 0=active, 1=portal, 2=black+tunnel, 3=fadeIn
+	stageStart: number;     // ctx.elapsed bei Stage-Beginn
 
-	/** Zustand der jeweils aktiven Welt */
 	underwaterState: ExperienceState | null;
 	insectState: ExperienceState | null;
 
@@ -51,12 +46,19 @@ interface BeyondState extends ExperienceState {
 
 	fadeSprite: THREE.Sprite;
 	portal: RiftPortal;
+	tunnel: PortalTunnel;
 
 	insectLights: { ambient: THREE.AmbientLight; sun: THREE.DirectionalLight } | null;
 	scene: THREE.Scene;
 
-	/** Asynchroner Setup der nächsten Welt fertig? */
+	/** Async-Setup der nächsten Welt fertig? */
 	_ready: boolean;
+	/** Aktuelle Tunnel-Opazität [0…0.95] */
+	_tunnelOpacity: number;
+	/** Tunnel hat volle Helligkeit erreicht */
+	_tunnelFull: boolean;
+	/** Tunnel blendet gerade aus */
+	_tunnelFadeOut: boolean;
 
 	_worldPos: THREE.Vector3;
 	_fwd: THREE.Vector3;
@@ -81,7 +83,10 @@ export async function setup(ctx: SetupContext): Promise<BeyondState> {
 	portal.group.visible = false;
 	ctx.scene.add(portal.group);
 
-	// Starte mit Underwater World
+	const tunnel = createPortalTunnel();
+	tunnel.mesh.visible = false;
+	ctx.scene.add(tunnel.mesh);
+
 	const uwState = await underwaterSetup(ctx);
 	ctx.scene.add(fade);
 
@@ -95,16 +100,20 @@ export async function setup(ctx: SetupContext): Promise<BeyondState> {
 		dummyCamera: ctx.camera,
 		fadeSprite: fade,
 		portal,
+		tunnel,
 		insectLights: null,
 		scene: ctx.scene,
 		_ready: false,
+		_tunnelOpacity: 0,
+		_tunnelFull: false,
+		_tunnelFadeOut: false,
 		_worldPos: new THREE.Vector3(),
 		_fwd: new THREE.Vector3(),
 		_worldQuat: new THREE.Quaternion(),
 	};
 }
 
-// ── Helfer: Stage wechseln ──
+// ── Helfer ──
 function _setStage(s: BeyondState, stage: number, elapsed: number): void {
 	s.stage = stage;
 	s.stageStart = elapsed;
@@ -119,60 +128,7 @@ export function tick(
 	const elapsed = ctx.elapsed;
 	const inWorld = s.world;
 
-	// ── Stage-Übergänge ──
-
-	switch (s.stage) {
-		// Stage 0: Aktive Welt läuft
-		case 0: {
-			if (elapsed - s.stageStart >= T_PORTAL_APPEAR) {
-				_setStage(s, 1, elapsed);
-				_spawnPortal(s, ctx);
-			}
-			break;
-		}
-
-		// Stage 1: Portal + distance-basierter Fade
-		case 1: {
-			ctx.camera.getWorldPosition(s._worldPos);
-			const dist = s._worldPos.distanceTo(s.portal.group.position);
-
-			const fadeProgress = 1 - Math.max(0, Math.min(1,
-				(dist - COLLISION_DIST) / FADE_RANGE));
-			s.fadeSprite.material.opacity = fadeProgress;
-
-			if (dist < COLLISION_DIST || (elapsed - s.stageStart) > PORTAL_TIMEOUT) {
-				s.fadeSprite.material.opacity = 1;
-				_setStage(s, 2, elapsed);
-				_startTransition(s);
-			}
-			break;
-		}
-
-		// Stage 2: Black Screen – warte auf async Setup der nächsten Welt
-		case 2: {
-			if (s._ready) {
-				_setStage(s, 3, elapsed);
-			}
-			break;
-		}
-
-		// Stage 3: Fade In
-		case 3: {
-			if ((elapsed - s.stageStart) >= FADE_DURATION) {
-				// Nächsten Zyklus starten
-				s.world = inWorld === 0 ? 1 : 0;
-				s.stage = 0;
-				s.stageStart = elapsed;
-				s.fadeSprite.material.opacity = 0;
-				s.portal.group.visible = false;
-				s._ready = false;
-			}
-			break;
-		}
-	}
-
-	// ── FadeSprite immer vor die Kamera ──
-	// Stage 1, 2, 3: Fade ist aktiv
+	// ── FadeSprite immer vor die Kamera (Stage 1–3) ──
 	if (s.stage >= 1) {
 		ctx.camera.getWorldPosition(s._worldPos);
 		ctx.camera.getWorldQuaternion(s._worldQuat);
@@ -180,21 +136,83 @@ export function tick(
 		s.fadeSprite.position.copy(s._worldPos).add(fwd.multiplyScalar(FADE_Z));
 	}
 
-	// ── Per-Stage Update ──
+	// ── Stage-Maschine ──
 	switch (s.stage) {
-		// Stage 0, 1: Aktuelle Welt ticken
-		case 0:
-		case 1:
+		// ── Stage 0: Aktive Welt läuft ──
+		case 0: {
+			if (elapsed - s.stageStart >= T_PORTAL_APPEAR) {
+				_setStage(s, 1, elapsed);
+				_spawnPortal(s, ctx);
+			}
 			return _tickActiveWorld(s, ctx);
+		}
 
-		// Stage 2: Nichts (black screen)
-		case 2:
+		// ── Stage 1: Portal + distance-basierter Fade ──
+		case 1: {
+			ctx.camera.getWorldPosition(s._worldPos);
+			const dist = s._worldPos.distanceTo(s.portal.group.position);
+
+			const fp = 1 - Math.max(0, Math.min(1,
+				(dist - COLLISION_DIST) / FADE_RANGE));
+			s.fadeSprite.material.opacity = fp;
+
+			if (dist < COLLISION_DIST || (elapsed - s.stageStart) > PORTAL_TIMEOUT) {
+				s.fadeSprite.material.opacity = 1;
+				_setStage(s, 2, elapsed);
+				// Tunnel vorbereiten
+				s.tunnel.mesh.visible = true;
+				s._tunnelOpacity = 0;
+				s._tunnelFull = false;
+				s._tunnelFadeOut = false;
+				s.tunnel.mesh.material.opacity = 0;
+				_startTransition(s);
+			}
+			return _tickActiveWorld(s, ctx);
+		}
+
+		// ── Stage 2: Black Screen + Tunnel-Ladeanimation ──
+		case 2: {
+			// Tunnel einblenden
+			if (!s._tunnelFadeOut) {
+				s._tunnelOpacity = Math.min(0.95,
+					s._tunnelOpacity + ctx.delta / TUNNEL_FADE);
+				if (s._tunnelOpacity >= 0.95) s._tunnelFull = true;
+			}
+
+			// Loading fertig → Tunnel ausblenden
+			if (s._ready && s._tunnelFull && !s._tunnelFadeOut) {
+				s._tunnelFadeOut = true;
+			}
+
+			if (s._tunnelFadeOut) {
+				s._tunnelOpacity = Math.max(0,
+					s._tunnelOpacity - ctx.delta / (TUNNEL_FADE * 0.6));
+				if (s._tunnelOpacity <= 0) {
+					s.tunnel.mesh.visible = false;
+					_setStage(s, 3, elapsed);
+				}
+			}
+
+			s.tunnel.mesh.material.opacity = s._tunnelOpacity;
 			return { state: s };
+		}
 
-		// Stage 3: Neue Welt ticken + Fade In
+		// ── Stage 3: Fade In in die neue Welt ──
 		case 3: {
 			const t = Math.min(1, (elapsed - s.stageStart) / FADE_DURATION);
 			s.fadeSprite.material.opacity = 1 - t;
+
+			if (t >= 1) {
+				// Nächsten Zyklus starten
+				s.world = inWorld === 0 ? 1 : 0;
+				s.stage = 0;
+				s.stageStart = elapsed;
+				s.fadeSprite.material.opacity = 0;
+				s.portal.group.visible = false;
+				s._ready = false;
+				s._tunnelFull = false;
+				s._tunnelFadeOut = false;
+			}
 			return _tickActiveWorld(s, ctx);
 		}
 
@@ -229,6 +247,10 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 		s.portal.dispose();
 		scene.remove(s.portal.group);
 	}
+	if (s.tunnel) {
+		s.tunnel.dispose();
+		scene.remove(s.tunnel.mesh);
+	}
 	if (s.fadeSprite) {
 		scene.remove(s.fadeSprite);
 		s.fadeSprite.material.dispose();
@@ -262,7 +284,6 @@ function _spawnPortal(s: BeyondState, ctx: TickContext): void {
 function _startTransition(s: BeyondState): void {
 	const goingTo = s.world === 0 ? 1 : 0;
 
-	// Alte Welt disposen
 	if (s.world === 0) {
 		if (s.underwaterState) underwaterDispose(s.underwaterState, s.scene);
 		s.underwaterState = null;
@@ -278,17 +299,14 @@ function _startTransition(s: BeyondState): void {
 		}
 	}
 
-	// Portal ausblenden
 	s.portal.group.visible = false;
 
-	// Auf Dummy-Kamera umschalten
 	s.dummyCamera.fov = 70;
 	s.dummyCamera.near = 0.1;
 	s.dummyCamera.far = 800;
 	s.dummyCamera.updateProjectionMatrix();
 	s.camera = s.dummyCamera;
 
-	// Nächste Welt asynchron aufbauen
 	_setupWorldAsync(s, goingTo);
 }
 
@@ -298,7 +316,6 @@ async function _setupWorldAsync(s: BeyondState, targetWorld: number): Promise<vo
 		await new Promise((r) => requestAnimationFrame(r));
 
 		if (targetWorld === 0) {
-			// → Underwater
 			s.scene.fog = null;
 			s.scene.background = new THREE.Color(0x001020);
 			const uwState = await underwaterSetup({
@@ -308,7 +325,6 @@ async function _setupWorldAsync(s: BeyondState, targetWorld: number): Promise<vo
 			});
 			s.underwaterState = uwState;
 		} else {
-			// → Insect
 			s.scene.fog = null;
 			s.scene.background = new THREE.Color(0x000000);
 
