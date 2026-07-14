@@ -15,7 +15,7 @@ import { getWorldHeight } from "../insect-world-v2/Biome/Wiese/grass-manager";
 const INSECT_BASE_SPEED = 0.98;
 const VERTICAL_SPEED = 3;       // m/s pro Einheit Pitch
 const YAW_FACTOR = 0.02;
-const GROUND_LERP = 0.5;         // Sanftes Boden-Follow (nur wenn über Grund)
+const CEILING_HEIGHT = 10;      // m – max Höhe über dem Boden
 const _FWD = new THREE.Vector3();
 
 function _insectUpdatePlayer(
@@ -45,10 +45,12 @@ function _insectUpdatePlayer(
 	// Pitch → vertikale Bewegung (positive Pitch = abwärts)
 	camera.position.y += -orientation.pitch * VERTICAL_SPEED * delta;
 
-	// Boden-Follow (nur nach unten – nicht nach oben begrenzen)
+	// Boden-Follow + Höhendecke
 	const groundY = getWorldHeight(camera.position.x, camera.position.z);
 	const minY = groundY + 0.5;
+	const maxY = groundY + CEILING_HEIGHT;
 	if (camera.position.y < minY) camera.position.y = minY;
+	if (camera.position.y > maxY) camera.position.y = maxY;
 }
 
 // ── Delegation ──
