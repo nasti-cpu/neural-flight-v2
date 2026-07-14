@@ -128,46 +128,57 @@ export function tick(
 		_spawnPortal(s, ctx);
 	}
 
-	// ── Phase 0, 1 – Underwater (inkl. Portal-Sichtbarkeit) ──
-	if (s.phase <= 1) {
-		return underwaterTick(s.underwaterState!, ctx);
-	}
+	switch (s.phase) {
+		// ── Phase 0, 1 – Underwater (inkl. Portal-Sichtbarkeit) ──
+		case 0:
+		case 1:
+			return underwaterTick(s.underwaterState!, ctx);
 
-	// ── Phase 2 – Fade to Black ──
-	if (s.phase === 2) {
-		const t = Math.min(1, (elapsed - T_FADE_START) / (T_TRANSITION - T_FADE_START));
-		s.fadeSprite.material.opacity = t;
+		// ── Phase 2 – Fade to Black ──
+		case 2: {
+			const t = Math.min(1, (elapsed - T_FADE_START) / (T_TRANSITION - T_FADE_START));
+			s.fadeSprite.material.opacity = t;
 
-		if (elapsed >= T_TRANSITION) {
-			s.phase = 3;
-			_startTransition(s);
+			if (elapsed >= T_TRANSITION) {
+				s.phase = 3;
+				_startTransition(s);
+				return { state: s };
+			}
+			return underwaterTick(s.underwaterState!, ctx);
+		}
+
+		// ── Phase 3 – Warte auf Insect-Setup (schwarzer Bildschirm) ──
+		case 3:
 			return { state: s };
+
+		// ── Phase 4 – Fade from Black ──
+		case 4: {
+			if (!s._insectReady || !s.insectState) return { state: s };
+
+			const t = Math.min(1, (elapsed - T_FADE_END) / (T_INSECT_START - T_FADE_END));
+			s.fadeSprite.material.opacity = 1 - t;
+
+			if (elapsed >= T_INSECT_START) {
+				s.phase = 5;
+				s.portal.group.visible = false;
+				s.fadeSprite.material.opacity = 0;
+			}
+			return insectTick(s.insectState, ctx);
 		}
-		return underwaterTick(s.underwaterState!, ctx);
-	}
 
-	// ── Phase 3 – Warte auf Insect-Setup (schwarzer Bildschirm) ──
-	if (s.phase === 3) {
-		return { state: s };
-	}
-
-	// ── Phase 4 – Fade from Black ──
-	if (s.phase === 4) {
-		if (!s._insectReady) return { state: s };
-
-		const t = Math.min(1, (elapsed - T_FADE_END) / (T_INSECT_START - T_FADE_END));
-		s.fadeSprite.material.opacity = 1 - t;
-
-		if (elapsed >= T_INSECT_START) {
-			s.phase = 5;
-			s.portal.group.visible = false;
-			s.fadeSprite.material.opacity = 0;
+		// ── Phase 5 – Insect World ──
+		case 5: {
+			if (!s.insectState) {
+				console.error("[Beyond-limits] insectState is null in phase 5!");
+				return { state: s };
+			}
+			return insectTick(s.insectState, ctx);
 		}
-		return insectTick(s.insectState!, ctx);
-	}
 
-	// ── Phase 5 – Insect World ──
-	return insectTick(s.insectState!, ctx);
+		default:
+			console.warn("[Beyond-limits] Unknown phase:", s.phase);
+			return { state: s };
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -225,37 +236,42 @@ function _startTransition(s: BeyondState): void {
 
 /** Insect World asynchron aufbauen */
 async function _setupInsectAsync(s: BeyondState): Promise<void> {
-	// Einen Frame warten (dispose wurde gerade aufgerufen)
-	await new Promise((r) => requestAnimationFrame(r));
+	try {
+		// Einen Frame warten (dispose wurde gerade aufgerufen)
+		await new Promise((r) => requestAnimationFrame(r));
 
-	// Szene für Insect World vorbereiten
-	s.scene.fog = null;
-	s.scene.background = new THREE.Color(0x000000);
+		// Szene für Insect World vorbereiten
+		s.scene.fog = null;
+		s.scene.background = new THREE.Color(0x000000);
 
-	// Lichter (Insect World nutzt Loader-Lichter)
-	const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-	s.scene.add(ambient);
-	const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-	sun.position.set(50, 80, 30);
-	s.scene.add(sun);
-	s.insectLights = { ambient, sun };
+		// Lichter (Insect World nutzt Loader-Lichter)
+		const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+		s.scene.add(ambient);
+		const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+		sun.position.set(50, 80, 30);
+		s.scene.add(sun);
+		s.insectLights = { ambient, sun };
 
-	// Fade-Sprite kurz entfernen (damit insect‑setup keine Nebeneffekte)
-	s.scene.remove(s.fadeSprite);
+		// Fade-Sprite kurz entfernen (damit insect‑setup keine Nebeneffekte)
+		s.scene.remove(s.fadeSprite);
 
-	// Insect Setup aufrufen (async)
-	const iState = await insectSetup({
-		scene: s.scene,
-		camera: s.dummyCamera,
-		renderer: null as any,
-	});
-	s.insectState = iState;
+		// Insect Setup aufrufen (async)
+		const iState = await insectSetup({
+			scene: s.scene,
+			camera: s.dummyCamera,
+			renderer: null as any,
+		});
+		s.insectState = iState;
 
-	// Fade-Sprite wieder hinzufügen
-	s.scene.add(s.fadeSprite);
-	s.fadeSprite.material.opacity = 1;
+		// Fade-Sprite wieder hinzufügen
+		s.scene.add(s.fadeSprite);
+		s.fadeSprite.material.opacity = 1;
 
-	s._insectReady = true;
-	// Phase wechseln (nächster tick)
-	s.phase = 4;
+		s._insectReady = true;
+		// Phase wechseln (nächster tick)
+		s.phase = 4;
+	} catch (err) {
+		console.error("[Beyond-limits] Insect-Setup fehlgeschlagen:", err);
+		// Phase 3 bleibt – Bildschirm bleibt schwarz
+	}
 }
