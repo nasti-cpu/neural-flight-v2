@@ -503,6 +503,7 @@ export function tick(
   s.largeCreatureWorld.setExclusionZones(exclusionZones);
   s.chunkManager.setExclusionZones(exclusionZones);
   s.coralReefWorld.setExclusionZones(exclusionZones);
+  s.jellyWorld.setExclusionZones(exclusionZones);
 
   // =========================================================================
   // Fische + Quallen + Große Tiere aktualisieren

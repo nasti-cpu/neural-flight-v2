@@ -511,7 +511,7 @@ export class FishWorld {
       Math.min(this.config.waterY - 0.5, targetY),
     );
 
-    // Exklusionszonen: zusätzlicher Push auf der Orbit-Ebene
+    // Exclusion-Zonen: linearer radialer Push um Kuppeln herum
     let pushX = 0;
     let pushZ = 0;
     if (this._exclusionZones.length > 0) {
@@ -519,11 +519,10 @@ export class FishWorld {
         const dx = px - zone.centerX;
         const dz = pz - zone.centerZ;
         const distSq = dx * dx + dz * dz;
-        const effectR = zone.radius + 15;
-        if (distSq < effectR * effectR && distSq > 0.01) {
+        const minDist = zone.radius + 2;
+        if (distSq < minDist * minDist && distSq > 0.01) {
           const dist = Math.sqrt(distSq);
-          const overlap = 1 - dist / effectR;
-          const push = overlap * overlap * 25 * dt;
+          const push = minDist - dist;
           pushX += (dx / dist) * push;
           pushZ += (dz / dist) * push;
         }

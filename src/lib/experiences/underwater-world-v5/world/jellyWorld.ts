@@ -18,6 +18,16 @@ import {
 import type { EchoTarget } from "../sinne/echoortung/echolocationRings";
 
 // ---------------------------------------------------------------------------
+// Exclusion-Zone (wie in fishWorld)
+// ---------------------------------------------------------------------------
+
+interface ExclusionZone {
+  centerX: number;
+  centerZ: number;
+  radius: number;
+}
+
+// ---------------------------------------------------------------------------
 // Konfiguration
 // ---------------------------------------------------------------------------
 
@@ -91,6 +101,7 @@ export class JellyWorld {
 
   // Echoortung
   private _cachedEchoTargets: EchoTarget[] = [];
+  private _exclusionZones: ExclusionZone[] = [];
   private _glowColor = new THREE.Color(0xffaa00);
   private _tmpColor = new THREE.Color();
 
@@ -146,6 +157,14 @@ export class JellyWorld {
       this._updateMember(member, dt, elapsed);
       this._applyGlowDecay(member, glowDecay);
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // Exclusion-Zonen setzen (von der Außenwelt)
+  // -----------------------------------------------------------------------
+
+  setExclusionZones(zones: ExclusionZone[]): void {
+    this._exclusionZones = zones;
   }
 
   // -----------------------------------------------------------------------
@@ -288,6 +307,22 @@ export class JellyWorld {
       const ma = elapsed * 0.15 + member.groupMemberAngle;
       px += Math.cos(ma) * member.groupMemberRadius;
       pz += Math.sin(ma) * member.groupMemberRadius;
+    }
+
+    // ═══ Exclusion-Zonen: linearer radialer Push um Kuppeln herum ═══
+    if (this._exclusionZones.length > 0) {
+      for (const zone of this._exclusionZones) {
+        const dx = px - zone.centerX;
+        const dz = pz - zone.centerZ;
+        const distSq = dx * dx + dz * dz;
+        const minDist = zone.radius + 2;
+        if (distSq < minDist * minDist && distSq > 0.01) {
+          const dist = Math.sqrt(distSq);
+          const push = minDist - dist;
+          px += (dx / dist) * push;
+          pz += (dz / dist) * push;
+        }
+      }
     }
 
     // ═══ Position setzen ═══

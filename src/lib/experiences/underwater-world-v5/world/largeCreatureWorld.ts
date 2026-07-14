@@ -14,6 +14,16 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import type { EchoTarget } from "../sinne/echoortung/echolocationRings";
 
 // ---------------------------------------------------------------------------
+// Exclusion-Zone (wie in fishWorld)
+// ---------------------------------------------------------------------------
+
+interface ExclusionZone {
+  centerX: number;
+  centerZ: number;
+  radius: number;
+}
+
+// ---------------------------------------------------------------------------
 // Konfiguration
 // ---------------------------------------------------------------------------
 
@@ -77,6 +87,7 @@ export class LargeCreatureWorld {
   private loader: GLTFLoader;
 
   private _creatures: CreatureState[] = [];
+  private _exclusionZones: ExclusionZone[] = [];
 
   private _glowColor = new THREE.Color(0xffaa00);
   private _tmpColor = new THREE.Color();
@@ -193,8 +204,8 @@ export class LargeCreatureWorld {
   // setExclusionZones (nicht mehr nötig – Tiere sind auf weiten Orbits)
   // ---------------------------------------------------------------------------
 
-  setExclusionZones(_zones: unknown[]): void {
-    // wird nicht mehr verwendet
+  setExclusionZones(zones: ExclusionZone[]): void {
+    this._exclusionZones = zones;
   }
 
   // ---------------------------------------------------------------------------
@@ -375,8 +386,8 @@ export class LargeCreatureWorld {
     const sinRot = Math.sin(creature.orbitRot);
     const rx = cosA * radiusX;
     const rz = sinA * radiusZ;
-    const px = cameraPos.x + rx * cosRot - rz * sinRot;
-    const pz = cameraPos.z + rx * sinRot + rz * cosRot;
+    let px = cameraPos.x + rx * cosRot - rz * sinRot;
+    let pz = cameraPos.z + rx * sinRot + rz * cosRot;
 
     // ── Y + Rotation ──
     const lerpSpeed = 3.5;
@@ -418,7 +429,24 @@ export class LargeCreatureWorld {
       Math.min(this.config.waterY - 4, creature.currentY),
     );
 
+    // Exclusion-Zonen: linearer radialer Push um Kuppeln herum
+    if (this._exclusionZones.length > 0) {
+      for (const zone of this._exclusionZones) {
+        const dx = px - zone.centerX;
+        const dz = pz - zone.centerZ;
+        const distSq = dx * dx + dz * dz;
+        const minDist = zone.radius + 4;
+        if (distSq < minDist * minDist && distSq > 0.01) {
+          const dist = Math.sqrt(distSq);
+          const push = minDist - dist;
+          px += (dx / dist) * push;
+          pz += (dz / dist) * push;
+        }
+      }
+    }
+
     // ── Yaw aus der rotierten Ellipsen-Tangente ──
+      // ── Yaw aus der rotierten Ellipsen-Tangente + Push ──
     const dRx = -sinA * radiusX;
     const dRz = cosA * radiusZ;
     const tangentX = dRx * cosRot - dRz * sinRot;

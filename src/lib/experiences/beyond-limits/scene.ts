@@ -107,7 +107,7 @@ export async function setup(ctx: SetupContext): Promise<BeyondState> {
 
 		portalJump = new THREE.Audio(listener);
 		portalJump.setBuffer(jumpBuf);
-		portalJump.setVolume(0.8);
+		portalJump.setVolume(0.3);
 
 		portalAmbient = new THREE.Audio(listener);
 		portalAmbient.setBuffer(ambientBuf);
