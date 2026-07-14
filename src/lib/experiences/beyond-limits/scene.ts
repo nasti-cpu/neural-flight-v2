@@ -1,22 +1,23 @@
 /**
  * scene.ts – Haupt-Sequencer für Beyond‑Limits.
  *
- * Steuert den zeitgesteuerten Übergang von Underwater World V5
- * zu Insect World V2 über ein Space‑Time‑Rift‑Portal.
+ * Steuert den Übergang von Underwater World V5 zu Insect World V2:
+ * Nach 4:50 min erscheint ein Space‑Time‑Rift‑Portal direkt vor dem
+ * Spieler. Sobald er hindurch schwimmt (Kollision), startet der
+ * Fade‑Übergang in die Insekten‑Welt.
  *
  * Phasen:
- *   0 [0–290s]  Underwater World läuft normal
- *   1 [290–295s] Portal erscheint vor dem Spieler
- *   2 [295–300s] Spieler fliegt durchs Portal → Fade to Black
- *   3 [300–303s] Underwater dispose + Insect setup (async)
- *   4 [303–306s] Fade from Black → Insect World
- *   5 [306s+]    Insect World läuft normal
+ *   0 [0–290s]     Underwater World läuft normal
+ *   1 [290s–∞]     Portal sichtbar → Spieler muss reinschwimmen
+ *   2 [onCollide]  Fade to Black (2s)
+ *   3 [fadeEnd]    Underwater dispose + Insect setup (async)
+ *   4 [insectReady] Fade from Black (2s)
+ *   5 [∞]          Insect World läuft normal
  */
 
 import * as THREE from "three/webgpu";
 import type { ExperienceState, SetupContext, TickContext } from "../types";
 
-// Lifecycle-Funktionen der Sub-Experiences
 import {
 	setup as underwaterSetup,
 	tick as underwaterTick,
@@ -30,52 +31,34 @@ import {
 
 import { createRiftPortal, type RiftPortal } from "$lib/portal/portalRift";
 
-// ---------------------------------------------------------------------------
-// Zeit-Marken (Sekunden)
-// ---------------------------------------------------------------------------
-const T_PORTAL_APPEAR = 290;
-const T_FADE_START = 295;
-const T_TRANSITION = 300;
-const T_FADE_END = 303;
-const T_INSECT_START = 306;
+// ── Konstanten ──
+const T_PORTAL_APPEAR = 290;     // s – Portal erscheint
+const COLLISION_DIST = 3;        // Einheiten – Kollisionsradius
+const PORTAL_TIMEOUT = 40;       // s – Notfall‑Timeout nach Portal-Erscheinen
+const FADE_DURATION = 2;         // s – Dauer Fade to/from Black
 
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
+// ── State ──
 interface BeyondState extends ExperienceState {
 	phase: number;
+	_phaseChangedAt: number;   // ctx.elapsed beim letzten Phasenwechsel
 
-	/** Zustand der Underwater‑Welt (phase 0–2 aktiv) */
 	underwaterState: ExperienceState | null;
-
-	/** Zustand der Insekten‑Welt (phase 4–5 aktiv) */
 	insectState: ExperienceState | null;
 
-	/** Aktive Render-Kamera (wechselt bei Transition) */
 	camera: THREE.PerspectiveCamera;
-	/** Vom Loader übergebene Kamera (für Insekten‑Welt) */
 	dummyCamera: THREE.PerspectiveCamera;
 
-	/** Schwarzes Overlay für Fade-Effekte */
 	fadeSprite: THREE.Sprite;
-	/** Space-Time-Rift */
 	portal: RiftPortal;
 
-	/** Lichter für die Insekten‑Welt (nach Underwater-Cleanup) */
 	insectLights: { ambient: THREE.AmbientLight; sun: THREE.DirectionalLight } | null;
-	/** Referenz auf die Szene */
 	scene: THREE.Scene;
 
-	/** Asynchroner Insect‑Setup */
-	_insectPromise: Promise<void> | null;
 	_insectReady: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// setup
-// ---------------------------------------------------------------------------
+// ── setup ──
 export async function setup(ctx: SetupContext): Promise<BeyondState> {
-	// 1. Fade-Overlay (schwarzes Sprite)
 	const fMat = new THREE.SpriteMaterial({
 		color: 0x000000,
 		transparent: true,
@@ -87,19 +70,16 @@ export async function setup(ctx: SetupContext): Promise<BeyondState> {
 	fade.scale.set(100, 100, 1);
 	fade.position.set(0, 0, -10);
 
-	// 2. Portal (unsichtbar)
 	const portal = createRiftPortal({ scale: 3 });
 	portal.group.visible = false;
 	ctx.scene.add(portal.group);
 
-	// 3. Underwater‑Welt starten
 	const uwState = await underwaterSetup(ctx);
-
-	// 4. Fade-Overlay zur Szene
 	ctx.scene.add(fade);
 
 	return {
 		phase: 0,
+		_phaseChangedAt: 0,
 		underwaterState: uwState,
 		insectState: null,
 		camera: (uwState as any).camera as THREE.PerspectiveCamera,
@@ -108,14 +88,17 @@ export async function setup(ctx: SetupContext): Promise<BeyondState> {
 		portal,
 		insectLights: null,
 		scene: ctx.scene,
-		_insectPromise: null,
 		_insectReady: false,
 	};
 }
 
-// ---------------------------------------------------------------------------
-// tick
-// ---------------------------------------------------------------------------
+// ── Phasenwechsel (zentral, damit _phaseChangedAt immer korrekt ist) ──
+function _setPhase(s: BeyondState, phase: number, elapsed: number): void {
+	s.phase = phase;
+	s._phaseChangedAt = elapsed;
+}
+
+// ── tick ──
 export function tick(
 	state: ExperienceState,
 	ctx: TickContext,
@@ -123,79 +106,88 @@ export function tick(
 	const s = state as BeyondState;
 	const elapsed = ctx.elapsed;
 
+	// ── Phasen-Übergänge ──
+
+	// 0 → 1: Portal erscheint
 	if (s.phase === 0 && elapsed >= T_PORTAL_APPEAR) {
-		s.phase = 1;
+		_setPhase(s, 1, elapsed);
 		_spawnPortal(s, ctx);
 	}
 
+	// 1 → 2: Kollision oder Notfall-Timeout
+	if (s.phase === 1) {
+		const dist = ctx.camera.position.distanceTo(s.portal.group.position);
+		if (dist < COLLISION_DIST || (elapsed - s._phaseChangedAt) > PORTAL_TIMEOUT) {
+			_setPhase(s, 2, elapsed);
+		}
+	}
+
+	// 2 → 3: Fade abgeschlossen
+	if (s.phase === 2 && (elapsed - s._phaseChangedAt) >= FADE_DURATION) {
+		_setPhase(s, 3, elapsed);
+		_startTransition(s);
+	}
+
+	// 3 → 4: Insect-Setup fertig
+	if (s.phase === 3 && s._insectReady) {
+		_setPhase(s, 4, elapsed);
+	}
+
+	// 4 → 5: Fade-in abgeschlossen
+	if (s.phase === 4 && (elapsed - s._phaseChangedAt) >= FADE_DURATION) {
+		_setPhase(s, 5, elapsed);
+		s.portal.group.visible = false;
+		s.fadeSprite.material.opacity = 0;
+	}
+
+	// ── Per-Phase Update ──
 	switch (s.phase) {
-		// ── Phase 0, 1 – Underwater (inkl. Portal-Sichtbarkeit) ──
 		case 0:
-		case 1: {
-			const result = underwaterTick(s.underwaterState!, ctx);
-			s.underwaterState = result.state;
-			return { state: s };
-		}
+		case 1:
+			return _tickUnderwater(s, ctx);
 
-		// ── Phase 2 – Fade to Black ──
 		case 2: {
-			const t = Math.min(1, (elapsed - T_FADE_START) / (T_TRANSITION - T_FADE_START));
+			const t = Math.min(1, (elapsed - s._phaseChangedAt) / FADE_DURATION);
 			s.fadeSprite.material.opacity = t;
-
-			if (elapsed >= T_TRANSITION) {
-				s.phase = 3;
-				_startTransition(s);
-				return { state: s };
-			}
-			const result = underwaterTick(s.underwaterState!, ctx);
-			s.underwaterState = result.state;
+			if (s.underwaterState) return _tickUnderwater(s, ctx);
 			return { state: s };
 		}
 
-		// ── Phase 3 – Warte auf Insect-Setup (schwarzer Bildschirm) ──
 		case 3:
 			return { state: s };
 
-		// ── Phase 4 – Fade from Black ──
 		case 4: {
 			if (!s._insectReady || !s.insectState) return { state: s };
-
-			const t = Math.min(1, (elapsed - T_FADE_END) / (T_INSECT_START - T_FADE_END));
+			const t = Math.min(1, (elapsed - s._phaseChangedAt) / FADE_DURATION);
 			s.fadeSprite.material.opacity = 1 - t;
-
-			if (elapsed >= T_INSECT_START) {
-				s.phase = 5;
-				s.portal.group.visible = false;
-				s.fadeSprite.material.opacity = 0;
-			}
-			const result = insectTick(s.insectState, ctx);
-			s.insectState = result.state;
-			return { state: s };
+			return _tickInsect(s, ctx);
 		}
 
-		// ── Phase 5 – Insect World ──
-		case 5: {
-			if (!s.insectState) {
-				console.error("[Beyond-limits] insectState is null in phase 5!");
-				return { state: s };
-			}
-			const result = insectTick(s.insectState, ctx);
-			s.insectState = result.state;
-			return { state: s };
-		}
+		case 5:
+			return _tickInsect(s, ctx);
 
 		default:
-			console.warn("[Beyond-limits] Unknown phase:", s.phase);
 			return { state: s };
 	}
 }
 
-// ---------------------------------------------------------------------------
-// dispose
-// ---------------------------------------------------------------------------
+// ── Sub-Ticks (schreiben Ergebnis zurück in den State) ──
+function _tickUnderwater(s: BeyondState, ctx: TickContext): { state: BeyondState } {
+	const result = underwaterTick(s.underwaterState!, ctx);
+	s.underwaterState = result.state;
+	return { state: s };
+}
+
+function _tickInsect(s: BeyondState, ctx: TickContext): { state: BeyondState } {
+	if (!s.insectState) return { state: s };
+	const result = insectTick(s.insectState, ctx);
+	s.insectState = result.state;
+	return { state: s };
+}
+
+// ── dispose ──
 export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 	const s = state as BeyondState;
-
 	if (s.underwaterState) underwaterDispose(s.underwaterState, scene);
 	if (s.insectState) insectDispose(s.insectState, scene);
 
@@ -205,8 +197,8 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 	}
 	if (s.fadeSprite) {
 		scene.remove(s.fadeSprite);
+		s.fadeSprite.material.dispose();
 	}
-
 	if (s.insectLights) {
 		scene.remove(s.insectLights.ambient);
 		s.insectLights.ambient.dispose();
@@ -215,36 +207,34 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Hilfsfunktionen
-// ---------------------------------------------------------------------------
+// ── Hilfsfunktionen ──
 
-/** Portal 10m vor dem Spieler positionieren */
+/** Portal 10 m vor dem Spieler auf Augenhöhe platzieren */
 function _spawnPortal(s: BeyondState, ctx: TickContext): void {
 	const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(ctx.camera.quaternion);
 	fwd.y = 0;
 	fwd.normalize();
-	s.portal.group.position.copy(ctx.camera.position).add(fwd.multiplyScalar(10));
-	s.portal.group.position.y += 2;
+	s.portal.group.position
+		.copy(ctx.camera.position)
+		.add(fwd.multiplyScalar(10));
+	// Portal auf Augenhöhe zentrieren
+	s.portal.group.position.y = ctx.camera.position.y;
 	s.portal.group.lookAt(ctx.camera.position);
 	s.portal.group.visible = true;
 }
 
 /** Underwater entsorgen und Insect-Setup asynchron starten */
 function _startTransition(s: BeyondState): void {
-	// 1. Underwater sofort disposen
 	underwaterDispose(s.underwaterState!, s.scene);
 	s.underwaterState = null;
 
-	// 2. Auf Dummy-Kamera umschalten
 	s.dummyCamera.fov = 70;
 	s.dummyCamera.near = 0.1;
 	s.dummyCamera.far = 800;
 	s.dummyCamera.updateProjectionMatrix();
 	s.camera = s.dummyCamera;
 
-	// 3. Insect-Setup asynchron starten
-	s._insectPromise = _setupInsectAsync(s);
+	_setupInsectAsync(s);
 }
 
 /** Insect World asynchron aufbauen */
@@ -253,11 +243,9 @@ async function _setupInsectAsync(s: BeyondState): Promise<void> {
 		// Einen Frame warten (dispose wurde gerade aufgerufen)
 		await new Promise((r) => requestAnimationFrame(r));
 
-		// Szene für Insect World vorbereiten
 		s.scene.fog = null;
 		s.scene.background = new THREE.Color(0x000000);
 
-		// Lichter (Insect World nutzt Loader-Lichter)
 		const ambient = new THREE.AmbientLight(0xffffff, 0.4);
 		s.scene.add(ambient);
 		const sun = new THREE.DirectionalLight(0xffffff, 1.5);
@@ -265,10 +253,8 @@ async function _setupInsectAsync(s: BeyondState): Promise<void> {
 		s.scene.add(sun);
 		s.insectLights = { ambient, sun };
 
-		// Fade-Sprite kurz entfernen (damit insect‑setup keine Nebeneffekte)
 		s.scene.remove(s.fadeSprite);
 
-		// Insect Setup aufrufen (async)
 		const iState = await insectSetup({
 			scene: s.scene,
 			camera: s.dummyCamera,
@@ -276,15 +262,12 @@ async function _setupInsectAsync(s: BeyondState): Promise<void> {
 		});
 		s.insectState = iState;
 
-		// Fade-Sprite wieder hinzufügen
 		s.scene.add(s.fadeSprite);
 		s.fadeSprite.material.opacity = 1;
 
 		s._insectReady = true;
-		// Phase wechseln (nächster tick)
-		s.phase = 4;
+		// Nächster tick wechselt zu Phase 4 über _setPhase
 	} catch (err) {
 		console.error("[Beyond-limits] Insect-Setup fehlgeschlagen:", err);
-		// Phase 3 bleibt – Bildschirm bleibt schwarz
 	}
 }
