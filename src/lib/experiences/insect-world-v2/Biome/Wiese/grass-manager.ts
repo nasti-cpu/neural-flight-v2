@@ -508,8 +508,8 @@ export class GrassManager {
    * Gras+Blumen werden später per upgradeChunkToFull() asynchron nachgeliefert.
    */
   private createGroundChunk(gx: number, gz: number): void {
-    const worldX = gx * CHUNK_SIZE;
-    const worldZ = gz * CHUNK_SIZE;
+    const worldX = gx * CHUNK_SIZE + CHUNK_SIZE / 2;
+    const worldZ = gz * CHUNK_SIZE + CHUNK_SIZE / 2;
 
     const group = new THREE.Group();
     const ground = this.createGround(worldX, worldZ);
@@ -540,8 +540,8 @@ export class GrassManager {
     // Nur upgraden, wenn der Chunk noch existiert und ground-only ist
     if (!existing || existing.mesh !== null) return;
 
-    const worldX = gx * CHUNK_SIZE;
-    const worldZ = gz * CHUNK_SIZE;
+    const worldX = gx * CHUNK_SIZE + CHUNK_SIZE / 2;
+    const worldZ = gz * CHUNK_SIZE + CHUNK_SIZE / 2;
 
     // WFC-Typ und Content bestimmen
     const tileType = this.wfc.getTileType(gx, gz);
@@ -692,8 +692,8 @@ export class GrassManager {
     },
     checkClear: boolean,
   ): THREE.InstancedMesh {
-    const worldX = gx * CHUNK_SIZE;
-    const worldZ = gz * CHUNK_SIZE;
+    const worldX = gx * CHUNK_SIZE + CHUNK_SIZE / 2;
+    const worldZ = gz * CHUNK_SIZE + CHUNK_SIZE / 2;
     const count = content.grassCount;
 
     // Jeder Chunk braucht eine eigene Geometrie-Kopie, weil die Instanz-Attribute
