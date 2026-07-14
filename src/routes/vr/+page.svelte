@@ -43,6 +43,7 @@
     let lastOrientation = { pitch: 0, roll: 0 };
     let lastSpeed = { accelerate: false, brake: false };
     let removeResizeListener: (() => void) | null = null;
+    let removeKeyListener: (() => void) | null = null;
     // let fpsCounter: FpsCounter | null = null;
 
     /**
@@ -162,6 +163,17 @@
                 removeResizeListener = () =>
                     window.removeEventListener("resize", onResize);
 
+                // ── P-Taste: Portal-Transition manuell auslösen ──
+                // Einmal drücken = Portal erscheint, nochmal = sofortiger Wechsel
+                function onKeyDown(e: KeyboardEvent): void {
+                    if (e.code === "KeyP" && exp.state) {
+                        (exp.state as Record<string, unknown>)._forcePortal = true;
+                    }
+                }
+                window.addEventListener("keydown", onKeyDown);
+                removeKeyListener = () =>
+                    window.removeEventListener("keydown", onKeyDown);
+
                 renderer.setAnimationLoop(() => {
                     const delta = Math.min(clock.getDelta(), 0.1);
                     const cam = getRenderCamera();
@@ -234,6 +246,7 @@
 
         return () => {
             removeResizeListener?.();
+            removeKeyListener?.();
         };
     });
 

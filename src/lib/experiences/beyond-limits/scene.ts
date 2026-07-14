@@ -68,6 +68,9 @@ interface BeyondState extends ExperienceState {
 	_worldPos: THREE.Vector3;
 	_fwd: THREE.Vector3;
 	_worldQuat: THREE.Quaternion;
+
+	/** Wird von außen (P-Taste) gesetzt → Portal-Transition sofort starten */
+	_forcePortal: boolean;
 }
 
 // ── setup ──
@@ -142,6 +145,7 @@ export async function setup(ctx: SetupContext): Promise<BeyondState> {
 		_worldPos: new THREE.Vector3(),
 		_fwd: new THREE.Vector3(),
 		_worldQuat: new THREE.Quaternion(),
+		_forcePortal: false,
 	};
 }
 
@@ -172,7 +176,9 @@ export function tick(
 	switch (s.stage) {
 		// ── Stage 0: Aktive Welt läuft ──
 		case 0: {
-			if (elapsed - s.stageStart >= T_PORTAL_APPEAR) {
+			// Manueller Trigger (P-Taste) oder Zeit-basierter Trigger
+			if (s._forcePortal || elapsed - s.stageStart >= T_PORTAL_APPEAR) {
+				s._forcePortal = false;
 				_setStage(s, 1, elapsed);
 				_spawnPortal(s, ctx);
 			}
@@ -181,6 +187,24 @@ export function tick(
 
 		// ── Stage 1: Portal + distance-basierter Fade ──
 		case 1: {
+			// P-Taste in Stage 1 → sofortige Transition (ohne hinfliegen)
+			if (s._forcePortal) {
+				s._forcePortal = false;
+				s.fadeSprite.material.opacity = 1;
+				_setStage(s, 2, elapsed);
+				if (s._portalJump) {
+					s._portalJump.stop();
+					s._portalJump.play();
+				}
+				s.tunnel.mesh.visible = true;
+				s._tunnelOpacity = 0.95;
+				s._tunnelFull = true;
+				s._tunnelFadeOut = false;
+				s.tunnel.mesh.material.opacity = 0.95;
+				_startTransition(s);
+				return { state: s };
+			}
+
 			ctx.camera.getWorldPosition(s._worldPos);
 			const dist = s._worldPos.distanceTo(s.portal.group.position);
 
@@ -191,17 +215,15 @@ export function tick(
 			if (dist < COLLISION_DIST || (elapsed - s.stageStart) > PORTAL_TIMEOUT) {
 				s.fadeSprite.material.opacity = 1;
 				_setStage(s, 2, elapsed);
-				// Portal-Jump-Sound abspielen
 				if (s._portalJump) {
 					s._portalJump.stop();
 					s._portalJump.play();
 				}
-			// Tunnel sofort sichtbar (kein Einfaden)
-			s.tunnel.mesh.visible = true;
-			s._tunnelOpacity = 0.95;
-			s._tunnelFull = true;
-			s._tunnelFadeOut = false;
-			s.tunnel.mesh.material.opacity = 0.95;
+				s.tunnel.mesh.visible = true;
+				s._tunnelOpacity = 0.95;
+				s._tunnelFull = true;
+				s._tunnelFadeOut = false;
+				s.tunnel.mesh.material.opacity = 0.95;
 				_startTransition(s);
 			}
 			return _tickActiveWorld(s, ctx);
