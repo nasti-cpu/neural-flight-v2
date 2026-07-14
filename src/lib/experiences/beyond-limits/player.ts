@@ -30,10 +30,12 @@ export function updatePlayer(
 		);
 	}
 
-	// Phase 3–4: Insect World (auch während Fade-In fliegen lasen)
+	// Phase 3–4: Insect World
+	//   Roll muss negiert werden: Underwater  → heading -= roll
+	//   Insect                    → rotation.y += roll  (gegensätzlich)
 	if (phase >= 3 && s.insectState) {
 		return insectUpdatePlayer(
-			orientation,
+			{ pitch: orientation.pitch, roll: -orientation.roll },
 			speed,
 			s.insectState as ExperienceState,
 			delta,
