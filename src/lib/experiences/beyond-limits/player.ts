@@ -1,10 +1,9 @@
 /**
- * player.ts – Delegiert ICAROS-Steuerung an die aktive Sub-Experience.
+ * player.ts – Delegiert ICAROS-Steuerung an die aktive Welt.
  *
- * Phasen:
- *   0–1 → Underwater World (Pitch=Steigen/Sinken, Roll=Kurve)
- *   2   → Transition (keine Steuerung, schwarzer Bildschirm)
- *   3–4 → Insect World (genauso: Pitch=Steigen/Sinken, Roll=Kurve)
+ *   world: 0 = Underwater World
+ *   world: 1 = Insect World
+ *   Roll wird für Insect negiert (siehe Roll-Vorzeichen)
  */
 
 import type { ExperienceState } from "../types";
@@ -18,10 +17,13 @@ export function updatePlayer(
 	delta: number,
 ): void {
 	const s = state as Record<string, unknown>;
-	const phase = s.phase as number;
+	const world = s.world as number;
+	const stage = s.stage as number;
 
-	// Phase 0–1: Underwater World
-	if (phase <= 1 && s.underwaterState) {
+	// Während Stage 2 (Transition) keine Steuerung
+	if (stage === 2) return;
+
+	if (world === 0 && s.underwaterState) {
 		return uwUpdatePlayer(
 			orientation,
 			speed,
@@ -30,10 +32,8 @@ export function updatePlayer(
 		);
 	}
 
-	// Phase 3–4: Insect World
-	//   Roll muss negiert werden: Underwater  → heading -= roll
-	//   Insect                    → rotation.y += roll  (gegensätzlich)
-	if (phase >= 3 && s.insectState) {
+	if (world === 1 && s.insectState) {
+		// Roll-Vorzeichen angleichen (Underwater: heading -= roll)
 		return insectUpdatePlayer(
 			{ pitch: orientation.pitch, roll: -orientation.roll },
 			speed,
@@ -41,5 +41,4 @@ export function updatePlayer(
 			delta,
 		);
 	}
-	// Phase 2: keine Steuerung
 }

@@ -1,10 +1,8 @@
 /**
- * settings.ts – Delegiert Parameter-Änderungen an die aktive Sub-Experience.
+ * settings.ts – Delegiert Parameter-Änderungen an die aktive Welt.
  *
- * Parameter-ID bestimmt die Ziel-Experience:
- *   - "driftSpeed"             → Underwater World
- *   - "baseSpeed", "fog*"      → Insect World
- *   - alle anderen             → beide (wenn sie gerade aktiv sind)
+ *   "driftSpeed"             → Underwater World
+ *   "baseSpeed", "fog*"      → Insect World
  */
 
 import * as THREE from "three";
