@@ -39,11 +39,10 @@ const PREGEN_RADIUS = 4;
 /** Maximal 4 Chunk-Upgrades pro update()-Aufruf (kleinere Chunks = mehr pro Frame) */
 const QUEUE_ITEMS_PER_UPDATE = 4;
 
-// ── Hilfsfunktion: Welthöhe (sanfte Mulde um den Ursprung) ──
+// ── Hilfsfunktion: Welthöhe (flach, konstant) ──
 
-function worldGroundHeight(x: number, z: number): number {
-  const dist = Math.sqrt(x * x + z * z);
-  return -0.00008 * dist * dist;
+function worldGroundHeight(_x: number, _z: number): number {
+  return 0.5;
 }
 
 // ── ClearRegion (intern) ──

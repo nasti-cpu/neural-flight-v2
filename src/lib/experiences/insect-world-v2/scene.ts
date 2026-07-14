@@ -46,6 +46,8 @@ interface InsectWorldV2State extends ExperienceState {
   tickInterval: number;
   /** Letzte bekannte Blumen-Anzahl (für Pheromon-Nachrüstung) */
   lastFlowerCount: number;
+  /** Dynamischer Horizont-Blocker (Grasblätter) */
+  horizonBlades: THREE.InstancedMesh;
 }
 
 export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
@@ -53,75 +55,52 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   const sky = createSky();
   ctx.scene.add(sky);
 
-  // 2. Gewölbte Riesenscheibe – erzeugt Horizont weit über die Chunks hinaus.
-  // Die per-Chunk-Bodenplatten (grass-manager) liegen darüber und sind feiner.
+  // 2. Flache Riesenscheibe – Boden auf Y=0.5, erstreckt sich überallhin.
   const GROUND_RADIUS = 2000;
-  const GROUND_SEGMENTS = 64;
-  const GROUND_RISE = 6; // Horizont steigt sanft an → verdeckt ferne Städte
-  const groundGeo = new THREE.CircleGeometry(GROUND_RADIUS, GROUND_SEGMENTS);
-  {
-    const pos = groundGeo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i);
-      const y2 = pos.getY(i);
-      const dist = Math.sqrt(x * x + y2 * y2);
-      const t = dist / GROUND_RADIUS;
-      const rise = t * t * GROUND_RISE; // quadratisch: flach in der Mitte, steil am Rand
-      pos.setZ(i, rise + 0.5); // +0.5 = Basis, +rise = Horizont steigt → verdeckt Städte
-    }
-    pos.needsUpdate = true;
-    groundGeo.computeVertexNormals();
-  }
+  const groundGeo = new THREE.CircleGeometry(GROUND_RADIUS, 64);
   const groundPlane = new THREE.Mesh(
     groundGeo,
     new THREE.MeshBasicMaterial({ color: 0x3a6028, side: THREE.DoubleSide }),
   );
   groundPlane.rotation.x = -Math.PI / 2;
+  groundPlane.position.y = 0.5;
   ctx.scene.add(groundPlane);
 
-  // 2b. Gras-Silhouette am Horizontrand – verdeckt Städte in der Ferne
-  {
-    const BLADE_W = 4;
-    const BLADE_H = 18;
-    const RING_COUNT = 1200;
-    const RING_INNER = GROUND_RADIUS * 0.95;
-    const RING_OUTER = GROUND_RADIUS;
-
-    // Zwei gekreuzte Ebenen pro Halm → von jeder Seite sichtbar
-    const bladeGeo = new THREE.PlaneGeometry(BLADE_W, BLADE_H);
-    const bladeMat = new THREE.MeshBasicMaterial({
+  // 2b. Dynamischer Horizont-Blocker – Ring aus Grasblättern, folgt der Kamera.
+  // Verdeckt ferne Städte/Objekte und erzeugt eine raue Graskante am Horizont.
+  const HORIZON_RADIUS = 1800;
+  const HORIZON_COUNT = 1200;
+  const HORIZON_BLADE_H = 20;
+  const HORIZON_BLADE_W = 4;
+  const horizonBlades = (() => {
+    const geo = new THREE.PlaneGeometry(HORIZON_BLADE_W, HORIZON_BLADE_H);
+    const mat = new THREE.MeshBasicMaterial({
       color: 0x3a6028,
       side: THREE.DoubleSide,
     });
-    const ring = new THREE.InstancedMesh(bladeGeo, bladeMat, RING_COUNT * 2);
+    const mesh = new THREE.InstancedMesh(geo, mat, HORIZON_COUNT * 2);
+    mesh.frustumCulled = false;
     const dummy = new THREE.Object3D();
     let idx = 0;
-    for (let i = 0; i < RING_COUNT; i++) {
-      const angle = (i / RING_COUNT) * Math.PI * 2;
-      const r = RING_INNER + Math.random() * (RING_OUTER - RING_INNER);
-      const wx = Math.cos(angle) * r;
-      const wz = Math.sin(angle) * r;
-      const t = r / GROUND_RADIUS;
-      const h = t * t * GROUND_RISE + 0.5;
-      const scaleY = 0.6 + Math.random() * 0.8;
-      const baseY = h;
-
-      // Er Ebene
-      dummy.position.set(wx, baseY + (BLADE_H * scaleY) / 2, wz);
+    for (let i = 0; i < HORIZON_COUNT; i++) {
+      const angle = (i / HORIZON_COUNT) * Math.PI * 2;
+      const scale = 0.5 + Math.random() * 1.0;
+      // Ebene 1
+      dummy.position.set(0, (HORIZON_BLADE_H * scale) / 2, 0);
       dummy.rotation.set(0, angle, 0);
-      dummy.scale.set(1, scaleY, 1);
+      dummy.scale.set(1, scale, 1);
       dummy.updateMatrix();
-      ring.setMatrixAt(idx++, dummy.matrix);
-
-      // Zweite Ebene (90° gedreht) → Plus-Form
+      mesh.setMatrixAt(idx++, dummy.matrix);
+      // Ebene 2 (Plus-Form)
       dummy.rotation.set(0, angle + Math.PI / 2, 0);
       dummy.updateMatrix();
-      ring.setMatrixAt(idx++, dummy.matrix);
+      mesh.setMatrixAt(idx++, dummy.matrix);
     }
-    ring.count = idx;
-    ring.instanceMatrix.needsUpdate = true;
-    ctx.scene.add(ring);
-  }
+    mesh.count = idx;
+    mesh.instanceMatrix.needsUpdate = true;
+    return mesh;
+  })();
+  ctx.scene.add(horizonBlades);
 
   // 3. Blumen vorladen (einmalig, wird von GrassManager wiederverwendet)
   const preloadedFlowers = await preloadFlowers();
@@ -241,6 +220,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     firstPathActivated: false,
     tickInterval: 0,
     lastFlowerCount: 0,
+    horizonBlades,
   };
 }
 
@@ -331,6 +311,13 @@ export function tick(
     s.guidePath.update(ctx.elapsed);
   }
 
+  // Horizont-Blocker folgt der Kamera (XZ), steht immer 1800m entfernt
+  s.horizonBlades.position.set(
+    ctx.camera.position.x,
+    0,
+    ctx.camera.position.z,
+  );
+
   return {
     state: s,
   };
@@ -355,6 +342,9 @@ export function dispose(state: ExperienceState, _scene: THREE.Scene): void {
   _scene.remove(s.groundPlane);
   (s.groundPlane.geometry as THREE.BufferGeometry).dispose();
   (s.groundPlane.material as THREE.Material).dispose();
+  _scene.remove(s.horizonBlades);
+  (s.horizonBlades.geometry as THREE.BufferGeometry).dispose();
+  (s.horizonBlades.material as THREE.Material).dispose();
   _scene.remove(s.grassManager.group);
   _scene.remove(s.bees.group);
   _scene.remove(s.butterflies.group);
