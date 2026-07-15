@@ -8,6 +8,8 @@
 export const CITY_CONFIG = {
 	MODEL: "/models/stadt/around_the_world_map_1.glb",
 	SCALE: 0.0004,
+	/** Vertikaler Offset über dem Boden (Meter) – verhindert Z-Fighting/Flackern */
+	Y_OFFSET: 0.15,
 
 	/** Kreisförmiger Radius ohne Gras/Pflanzen um jede Stadt (in Metern) */
 	CLEAR_RADIUS: 8,
@@ -15,19 +17,19 @@ export const CITY_CONFIG = {
 	// ── Anzahl & Verteilung ──
 	CITY_COUNT: 3,
 	/** Minimaler Abstand zwischen zwei Städten (Meter) */
-	MIN_DISTANCE: 30,
+	MIN_DISTANCE: 70,
 	/** Maximaler Abstand zwischen zwei Städten (Meter) */
-	MAX_DISTANCE: 80,
+	MAX_DISTANCE: 120,
 
 	// ── Spieler-Reichweiten (in Metern) ──
 	/** Bei diesem Abstand wird das Stadt-Modell eingeblendet (≈ Nebelgrenze) */
-	VISIBILITY_RANGE: 40,
+	VISIBILITY_RANGE: 25,
 	/** Bei diesem Abstand gilt eine Stadt als "erreicht" */
-	ARRIVAL_DISTANCE: 15,
+	ARRIVAL_DISTANCE: 12,
 	/**
 	 * Sobald der Spieler diesen Abstand von der letzten besuchten Stadt
 	 * entfernt ist, wird die Leitspur zur nächsten Stadt aktiviert.
 	 * Verhindert den Sofort-Redirect und gibt Zeit zum Erkunden.
 	 */
-	ACTIVATION_DISTANCE: 30,
+	ACTIVATION_DISTANCE: 20,
 } as const;

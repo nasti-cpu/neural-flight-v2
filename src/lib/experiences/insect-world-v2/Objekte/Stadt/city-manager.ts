@@ -136,7 +136,11 @@ export class CityManager {
     if (!this.sharedModel) return;
 
     if (city) {
-      this.modelPivot.position.copy(city.position);
+      this.modelPivot.position.set(
+        city.position.x,
+        city.position.y + CITY_CONFIG.Y_OFFSET,
+        city.position.z,
+      );
       this.modelPivot.rotation.y = city.rotation;
       this.modelPivot.visible = true;
     } else {

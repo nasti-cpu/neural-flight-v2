@@ -15,7 +15,7 @@
 
 /**
  * Die 6 Chunk-Typen unserer Wiese.
- * Jeder bestimmt, was in einem 40×40m-Chunk wächst.
+ * Jeder bestimmt, was in einem 30×30m-Chunk wächst.
  */
 export enum TileType {
   /** Kahle Fläche (kaum Gras, keine Blumen) */
@@ -92,41 +92,40 @@ export interface TileContent {
 /**
  * Konfiguration pro Tile-Typ: Welcher Inhalt generiert wird.
  *
- * FLOWERS_SPARSE → 4 Blumen, weniger Gras (Platz für Blumen)
- * FLOWERS_DENSE → 12 Blumen, noch weniger Gras
- * TALL_GRASS → 8000 Halme, keine Blumen (dichter Bewuchs)
- * EMPTY → fast nichts (Sand/Stein)
+ * FLOWERS_SPARSE → 7 Blumen, weniger Gras (Platz für Blumen)
+ * FLOWERS_DENSE → 17 Blumen, noch weniger Gras
+ * TALL_GRASS → 15800 Halme, keine Blumen (dichter Bewuchs)
+ * EMPTY → 1400 Halme (karge Fläche)
  */
 export const TILE_CONTENT: Record<TileType, TileContent> = {
-  // Gras-Zahlen stark reduziert (~60% weniger):
-  // Aus ~40k/Chunk → ~14k/Chunk. Optisch kein Unterschied
-  // (Nebel + Insektenperspektive), aber ~60% weniger GPU-Last.
+  // Dichte angepasst an 30m-Chunks → gleiche Flächen-Dichte wie 40m-Chunks.
+  // ~20% weniger Gras, ~50% weniger Blumen als vorher → bessere Performance.
   [TileType.EMPTY]: {
-    grassCount: 500,
+    grassCount: 1400,
     flowerCount: 0,
     grassMinHeight: 0.3,
     grassMaxHeight: 0.6,
   },
   [TileType.MEADOW]: {
-    grassCount: 15000,
+    grassCount: 12400,
     flowerCount: 0,
     grassMinHeight: 0.6,
     grassMaxHeight: 1.8,
   },
   [TileType.FLOWERS_SPARSE]: {
-    grassCount: 10000,
-    flowerCount: 15,
+    grassCount: 7900,
+    flowerCount: 7,
     grassMinHeight: 0.6,
     grassMaxHeight: 1.8,
   },
   [TileType.FLOWERS_DENSE]: {
-    grassCount: 6500,
-    flowerCount: 36,
+    grassCount: 5100,
+    flowerCount: 17,
     grassMinHeight: 0.6,
     grassMaxHeight: 1.8,
   },
   [TileType.TALL_GRASS]: {
-    grassCount: 18000,
+    grassCount: 15800,
     flowerCount: 0,
     grassMinHeight: 0.6,
     grassMaxHeight: 1.8,
@@ -146,6 +145,7 @@ export const ALL_TILE_TYPES: TileType[] = Object.values(TileType);
 
 /**
  * Maximale Anzahl Blumen pro Chunk (für Buffer-Allokation).
+ * Aktuell max. 17 Blumen (FLOWERS_DENSE).
  */
 export const MAX_FLOWERS_PER_CHUNK = Math.max(
   ...Object.values(TILE_CONTENT).map((c) => c.flowerCount),

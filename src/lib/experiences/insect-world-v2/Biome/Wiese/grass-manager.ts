@@ -32,12 +32,12 @@ import type { PreloadedFlower } from "../../Objekte/Blumen/blumen";
 
 /** Chunk-Grösse in Metern (20m = feineres Grid, schnellere Ladezeiten) */
 export const CHUNK_SIZE = 30;
-/** Wie viele Chunks um den Spieler herum volle Details haben (2 = 5×5 = 100×100m) */
-const VIEW_RADIUS = 2;
-/** Wie viele Chunks vorab als Ground-Plane existieren (4 = 9×9 = 180×180m) */
-const PREGEN_RADIUS = 4;
-/** Maximal 4 Chunk-Upgrades pro update()-Aufruf (kleinere Chunks = mehr pro Frame) */
-const QUEUE_ITEMS_PER_UPDATE = 4;
+/** Wie viele Chunks um den Spieler herum volle Details haben (1 = 3×3 = 9 Chunks) */
+const VIEW_RADIUS = 1;
+/** Wie viele Chunks vorab als Ground-Plane existieren (3 = 7×7 = 210×210m) */
+const PREGEN_RADIUS = 3;
+/** Maximal 2 Chunk-Upgrades pro update()-Aufruf (weniger pro Frame = smoothere Animation) */
+const QUEUE_ITEMS_PER_UPDATE = 2;
 
 // ── Hilfsfunktion: Welthöhe (flach, konstant) ──
 

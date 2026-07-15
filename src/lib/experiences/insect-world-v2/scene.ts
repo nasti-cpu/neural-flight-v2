@@ -53,8 +53,8 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   const sky = createSky();
   ctx.scene.add(sky);
 
-  // 2. Flache Riesenscheibe – Boden auf Y=0.5, erstreckt sich überallhin.
-  const GROUND_RADIUS = 2000;
+	// 2. Flache Riesenscheibe – Boden auf Y=0.5, erstreckt sich überallhin.
+	const GROUND_RADIUS = 500;
   const groundGeo = new THREE.CircleGeometry(GROUND_RADIUS, 64);
   const groundPlane = new THREE.Mesh(
     groundGeo,
@@ -131,7 +131,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   pheromones.addTrails(pheromoneTargets, ctx.camera.position);
   ctx.scene.add(pheromones.group);
 
-  // 10. Städte (prozedural, 250-400m entfernt, nur 3 Stück)
+	// 10. Städte (prozedural, 50-80m entfernt, nur 3 Stück)
   const cityManager = new CityManager();
   const positions = cityManager.generatePositions(
     CITY_CONFIG.CITY_COUNT,
@@ -141,16 +141,16 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   await cityManager.loadCities(positions, ctx.scene, grassManager);
   console.log(`[City] ${cityManager.cities.length} Städte erzeugt`);
 
-  // 11. GuidePath – erst nach 30m Erkundung aktiv (verzögertes Erscheinen)
-  const guidePath = new CityGuidePath({
-    neonColor: 0x44ffff,
-    dashLength: 0.5,
-    gapLength: 0.3,
-    spriteSizeMin: 1.4,
-    spriteSizeMax: 2.2,
-    spritesPerDash: 1,
-    maxDist: 25,
-  });
+	// 11. GuidePath – erst nach 20m Erkundung aktiv (verzögertes Erscheinen)
+	const guidePath = new CityGuidePath({
+		neonColor: 0x44ffff,
+		dashLength: 1.0,
+		gapLength: 0.6,
+		spriteSizeMin: 1.6,
+		spriteSizeMax: 2.5,
+		spritesPerDash: 1,
+		maxDist: 50,
+	});
   const firstCity = cityManager.getNearestUndiscovered(new THREE.Vector3(0, 2, 0));
   if (firstCity) {
     cityManager.setActiveCity(firstCity);
@@ -158,10 +158,10 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   }
   ctx.scene.add(guidePath.group);
 
-  // ── Atmosphärischer Nebel ──
-  // Density 0.04 = Sichtweite ~30-50m, dann vollständig im Nebel.
-  const fogColor = new THREE.Color("#4a90d9");
-  ctx.scene.fog = new THREE.FogExp2(fogColor, 0.02);
+	// ── Atmosphärischer Nebel ──
+	// Density 0.035 = Sichtweite ~28m, Chunk-Ränder ab 45m unsichtbar.
+	const fogColor = new THREE.Color("#4a90d9");
+	ctx.scene.fog = new THREE.FogExp2(fogColor, 0.035);
 
   // Kamera positionieren (Insektenperspektive ~2m)
   const camera = ctx.camera;
@@ -257,10 +257,10 @@ export function tick(
     }
   }
 
-  // 3. Leitspur aktivieren (nach 30m Erkundung)
-  if (!s.guidePath.isActive && !s.firstPathActivated) {
-    const distFromStart = ctx.camera.position.distanceTo(s.startPosition);
-    if (distFromStart > 30) {
+	// 3. Leitspur aktivieren (nach 20m Erkundung)
+	if (!s.guidePath.isActive && !s.firstPathActivated) {
+		const distFromStart = ctx.camera.position.distanceTo(s.startPosition);
+		if (distFromStart > 20) {
       const target = s.cityManager.getNearestUndiscovered(ctx.camera.position);
       if (target) {
         s.guidePath.setTarget(ctx.camera.position, target.position);
