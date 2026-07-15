@@ -51,7 +51,7 @@ export function createSky(preset: SkyPresetName = "gletscher", power = 2, enable
 	// Kann mit enableFade=false abgeschaltet werden (für Tests).
 	let finalColor = skyColor;
 	if (enableFade) {
-		const horizonFade = positionWorld.normalize().y.abs().oneMinus().pow(5);
+		const horizonFade = positionWorld.normalize().y.abs().oneMinus().pow(4);
 		const fogNode = vec3(FOG_COLOR.r, FOG_COLOR.g, FOG_COLOR.b);
 		finalColor = skyColor.mix(fogNode, horizonFade);
 	}
@@ -86,7 +86,7 @@ export function updateSkyFogColor(skyMesh: THREE.Mesh, color: THREE.Color): void
 	const tRaw = positionWorld.normalize().y.mul(0.5).add(0.5);
 	const t = power > 1 ? tRaw.pow(power) : tRaw;
 	const skyColor = nStopGradient(colorNodes, t);
-	const horizonFade = positionWorld.normalize().y.abs().oneMinus().pow(5);
+	const horizonFade = positionWorld.normalize().y.abs().oneMinus().pow(4);
 	const fogNode = vec3(color.r, color.g, color.b);
 	const finalColor = skyColor.mix(fogNode, horizonFade);
 	mat.colorNode = finalColor;
