@@ -7,7 +7,7 @@
  */
 export const CITY_CONFIG = {
 	MODEL: "/models/stadt/around_the_world_map_1.glb",
-	SCALE: 0.0005,
+	SCALE: 0.0004,
 
 	/** Kreisförmiger Radius ohne Gras/Pflanzen um jede Stadt (in Metern) */
 	CLEAR_RADIUS: 8,
