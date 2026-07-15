@@ -161,7 +161,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   // ── Atmosphärischer Nebel ──
   // Density 0.04 = Sichtweite ~30-50m, dann vollständig im Nebel.
   const fogColor = new THREE.Color("#4a90d9");
-  ctx.scene.fog = new THREE.FogExp2(fogColor, 0.04);
+  ctx.scene.fog = new THREE.FogExp2(fogColor, 0.02);
 
   // Kamera positionieren (Insektenperspektive ~2m)
   const camera = ctx.camera;

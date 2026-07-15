@@ -58,8 +58,8 @@ export class CityGuidePath {
     const dist = _dir.length();
     const hardMax = 400;
     const visibilityBuffer = 15;
-    const len = dist > hardMax ? hardMax : dist - visibilityBuffer;
-    const actualMax = Math.min(this.config.maxDist, len);
+    const idealMax = Math.max(this.config.maxDist, dist - visibilityBuffer);
+    const actualMax = Math.min(idealMax, hardMax);
     if (dist > actualMax) {
       _dir.normalize().multiplyScalar(actualMax);
       to = new THREE.Vector3().copy(from).add(_dir);

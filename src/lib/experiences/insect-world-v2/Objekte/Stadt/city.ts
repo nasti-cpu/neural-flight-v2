@@ -7,7 +7,7 @@
  */
 export const CITY_CONFIG = {
 	MODEL: "/models/stadt/around_the_world_map_1.glb",
-	SCALE: 0.00025,
+	SCALE: 0.0005,
 
 	/** Kreisförmiger Radius ohne Gras/Pflanzen um jede Stadt (in Metern) */
 	CLEAR_RADIUS: 8,
@@ -15,9 +15,9 @@ export const CITY_CONFIG = {
 	// ── Anzahl & Verteilung ──
 	CITY_COUNT: 3,
 	/** Minimaler Abstand zwischen zwei Städten (Meter) */
-	MIN_DISTANCE: 250,
+	MIN_DISTANCE: 30,
 	/** Maximaler Abstand zwischen zwei Städten (Meter) */
-	MAX_DISTANCE: 400,
+	MAX_DISTANCE: 80,
 
 	// ── Spieler-Reichweiten (in Metern) ──
 	/** Bei diesem Abstand wird das Stadt-Modell eingeblendet (≈ Nebelgrenze) */
