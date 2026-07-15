@@ -29,7 +29,7 @@ export type SkyPresetName = keyof typeof SKY_PRESETS;
 // Nebelfarbe als Konstante (muss mit scene.ts übereinstimmen)
 const FOG_COLOR = new THREE.Color("#4a90d9");
 
-export function createSky(preset: SkyPresetName = "gletscher", power = 2): THREE.Mesh {
+export function createSky(preset: SkyPresetName = "gletscher", power = 2, enableFade = true): THREE.Mesh {
 	const hexColors = SKY_PRESETS[preset] as unknown as number[];
 
 	const radius = 500;
@@ -48,9 +48,13 @@ export function createSky(preset: SkyPresetName = "gletscher", power = 2): THREE
 	// Horizont-Fade: Je flacher der Blickwinkel (normal.y ≈ 0),
 	// desto mehr wird in Nebelfarbe überblendet.
 	// Der Himmel "verschwindet" so am Horizont im Nebel → runder Horizont.
-	const horizonFade = positionWorld.normalize().y.abs().oneMinus().pow(4);
-	const fogNode = vec3(FOG_COLOR.r, FOG_COLOR.g, FOG_COLOR.b);
-	const finalColor = skyColor.mix(fogNode, horizonFade);
+	// Kann mit enableFade=false abgeschaltet werden (für Tests).
+	let finalColor = skyColor;
+	if (enableFade) {
+		const horizonFade = positionWorld.normalize().y.abs().oneMinus().pow(4);
+		const fogNode = vec3(FOG_COLOR.r, FOG_COLOR.g, FOG_COLOR.b);
+		finalColor = skyColor.mix(fogNode, horizonFade);
+	}
 
 	const mat = new THREE.MeshBasicNodeMaterial();
 	mat.colorNode = finalColor;

@@ -143,7 +143,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 
   // 11. Große Pheromon-Leitspur zur nächsten Stadt (500m Reichweite)
   const guidePath = new CityGuidePath({
-    neonColor: 0xff66ff,
+    neonColor: 0x44ffff,
     dashLength: 0.8,
     gapLength: 0.4,
     spriteSizeMin: 0.8,

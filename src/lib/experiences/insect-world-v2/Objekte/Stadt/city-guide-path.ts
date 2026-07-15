@@ -24,7 +24,7 @@ export interface GuidePathConfig {
 }
 
 const DEFAULTS: Required<GuidePathConfig> = {
-  neonColor: 0xff66ff,
+  neonColor: 0x44ffff,
   dashLength: 0.8,
   gapLength: 0.4,
   spriteSizeMin: 0.8,

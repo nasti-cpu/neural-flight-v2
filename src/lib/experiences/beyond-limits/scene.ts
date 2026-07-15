@@ -211,7 +211,7 @@ export function tick(
 				s._tunnelOpacity = 0.95;
 				s._tunnelFadeOut = false;
 				s.tunnel.mesh.visible = true;
-				s.tunnel.mesh.material.opacity = 0.95;
+				(s.tunnel.mesh.material as THREE.MeshBasicNodeMaterial).opacity = 0.95;
 				_startTransition(s);
 				return { state: s };
 			}
@@ -233,7 +233,7 @@ export function tick(
 				s._tunnelOpacity = 0.95;
 				s._tunnelFadeOut = false;
 				s.tunnel.mesh.visible = true;
-				s.tunnel.mesh.material.opacity = 0.95;
+				(s.tunnel.mesh.material as THREE.MeshBasicNodeMaterial).opacity = 0.95;
 				_startTransition(s);
 			}
 			return _tickActiveWorld(s, ctx);
@@ -295,7 +295,7 @@ export function tick(
 				}
 			}
 
-			s.tunnel.mesh.material.opacity = Math.max(0, s._tunnelOpacity);
+			(s.tunnel.mesh.material as THREE.MeshBasicNodeMaterial).opacity = Math.max(0, s._tunnelOpacity);
 			return { state: s };
 		}
 
