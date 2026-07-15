@@ -131,7 +131,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   pheromones.addTrails(pheromoneTargets, ctx.camera.position);
   ctx.scene.add(pheromones.group);
 
-  // 10. Städte auf Chunk-Grid (400–500m Abstand, CITY-Tile = kein Gras/Blumen)
+  // 10. Städte (prozedural, 250-400m entfernt, nur 3 Stück)
   const cityManager = new CityManager();
   const positions = cityManager.generatePositions(
     CITY_CONFIG.CITY_COUNT,
@@ -141,16 +141,21 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   await cityManager.loadCities(positions, ctx.scene, grassManager);
   console.log(`[City] ${cityManager.cities.length} Städte erzeugt`);
 
-  // 11. Große Pheromon-Leitspur zur nächsten Stadt (500m Reichweite)
+  // 11. GuidePath – erst nach 30m Erkundung aktiv (verzögertes Erscheinen)
   const guidePath = new CityGuidePath({
     neonColor: 0x44ffff,
-    dashLength: 0.8,
-    gapLength: 0.4,
-    spriteSizeMin: 1.0,
-    spriteSizeMax: 1.8,
-    spritesPerDash: 2,
-    maxDist: 500,
+    dashLength: 0.5,
+    gapLength: 0.3,
+    spriteSizeMin: 1.4,
+    spriteSizeMax: 2.2,
+    spritesPerDash: 1,
+    maxDist: 200,
   });
+  const firstCity = cityManager.getNearestUndiscovered(new THREE.Vector3(0, 2, 0));
+  if (firstCity) {
+    cityManager.setActiveCity(firstCity);
+    console.log(`[City] Erste Stadt ${firstCity.index} bei`, firstCity.position);
+  }
   ctx.scene.add(guidePath.group);
 
   // ── Atmosphärischer Nebel ──
@@ -224,17 +229,27 @@ export function tick(
     s.grassManager.update(ctx.camera.position, ctx.delta * 3);
   }
 
-  // ── CityManager: Lock-Logik (sichtbar bis besucht + >100m) ──
-  s.cityManager.update(s.grassManager, ctx.camera.position);
-
-  // ── Große Pheromon-Leitspur zur nächsten Stadt ──
+  // ── Stadt- & Leitsystem (ohne Sofort-Redirect) ──
   const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);
   const last = s.cityManager.lastVisitedCity;
 
   if (nearest) {
     const distToNearest = ctx.camera.position.distanceTo(nearest.position);
+    const distFromLast = last
+      ? ctx.camera.position.distanceTo(last.position)
+      : Infinity;
 
-    // Ankunft an einer Stadt
+    // 1. Modell-Steuerung: Zeige die Stadt, wenn nah dran,
+    //    sonst das Modell an der zuletzt besuchten Stadt lassen.
+    if (distToNearest < CITY_CONFIG.VISIBILITY_RANGE) {
+      s.cityManager.setActiveCity(nearest);
+    } else if (last) {
+      s.cityManager.setActiveCity(last);
+    } else {
+      s.cityManager.setActiveCity(nearest);
+    }
+
+    // 2. Ankunft an einer Stadt (→ besucht markieren, Trail löschen)
     if (distToNearest < CITY_CONFIG.ARRIVAL_DISTANCE && !nearest.visited) {
       s.cityManager.markVisited(nearest);
       s.guidePath.clear();
@@ -242,7 +257,7 @@ export function tick(
     }
   }
 
-  // Leitspur aktivieren (nach 30m Erkundung)
+  // 3. Leitspur aktivieren (nach 30m Erkundung)
   if (!s.guidePath.isActive && !s.firstPathActivated) {
     const distFromStart = ctx.camera.position.distanceTo(s.startPosition);
     if (distFromStart > 30) {

@@ -17,6 +17,8 @@ export interface GuidePathConfig {
   neonColor?: number;
   dashLength?: number;
   gapLength?: number;
+  pathHeightMin?: number;
+  pathHeightMax?: number;
   spriteSizeMin?: number;
   spriteSizeMax?: number;
   spritesPerDash?: number;
@@ -25,12 +27,14 @@ export interface GuidePathConfig {
 
 const DEFAULTS: Required<GuidePathConfig> = {
   neonColor: 0x44ffff,
-  dashLength: 0.8,
-  gapLength: 0.4,
-  spriteSizeMin: 1.0,
-  spriteSizeMax: 1.8,
-  spritesPerDash: 2,
-  maxDist: 400,
+  dashLength: 1.2,
+  gapLength: 0.6,
+  pathHeightMin: 0.5,
+  pathHeightMax: 1.8,
+  spriteSizeMin: 0.6,
+  spriteSizeMax: 1.2,
+  spritesPerDash: 3,
+  maxDist: 150,
 };
 
 export class CityGuidePath {
