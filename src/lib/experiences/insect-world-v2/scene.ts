@@ -146,9 +146,9 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     neonColor: 0x44ffff,
     dashLength: 0.8,
     gapLength: 0.4,
-    spriteSizeMin: 0.8,
-    spriteSizeMax: 1.6,
-    spritesPerDash: 4,
+    spriteSizeMin: 1.0,
+    spriteSizeMax: 1.8,
+    spritesPerDash: 2,
     maxDist: 500,
   });
   ctx.scene.add(guidePath.group);

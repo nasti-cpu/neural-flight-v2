@@ -31,7 +31,7 @@ import type { PreloadedFlower } from "../../Objekte/Blumen/blumen";
 // ── Konstanten ──
 
 /** Chunk-Grösse in Metern (20m = feineres Grid, schnellere Ladezeiten) */
-export const CHUNK_SIZE = 20;
+export const CHUNK_SIZE = 30;
 /** Wie viele Chunks um den Spieler herum volle Details haben (2 = 5×5 = 100×100m) */
 const VIEW_RADIUS = 2;
 /** Wie viele Chunks vorab als Ground-Plane existieren (4 = 9×9 = 180×180m) */
