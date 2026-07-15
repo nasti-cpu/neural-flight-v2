@@ -149,7 +149,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     spriteSizeMin: 1.4,
     spriteSizeMax: 2.2,
     spritesPerDash: 1,
-    maxDist: 100,
+    maxDist: 50,
   });
   const firstCity = cityManager.getNearestUndiscovered(new THREE.Vector3(0, 2, 0));
   if (firstCity) {
