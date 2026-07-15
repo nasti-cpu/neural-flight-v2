@@ -201,14 +201,14 @@ export function tick(
   // Der Spieler sieht keinen Unterschied, aber die CPU spart ~50%.
   s.tickInterval++;
 
-  // Bienen-Animation – Schwarm folgt der Kamera (cameraPosition = folgen)
-  if (s.tickInterval % 3 === 0) {
-    s.bees.update(ctx.elapsed, ctx.delta, ctx.camera.position);
-  }
-  // Schmetterlings-Animation – Schwarm folgt der Kamera
-  if (s.tickInterval % 3 === 0) {
-    s.butterflies.update(ctx.elapsed, ctx.delta, ctx.camera.position);
-  }
+	// Bienen-Animation – Schwarm folgt der Kamera (jeden 2. Frame)
+	if (s.tickInterval % 2 === 0) {
+		s.bees.update(ctx.elapsed, ctx.delta, ctx.camera.position);
+	}
+	// Schmetterlings-Animation – Schwarm folgt der Kamera (jeden 2. Frame)
+	if (s.tickInterval % 2 === 0) {
+		s.butterflies.update(ctx.elapsed, ctx.delta, ctx.camera.position);
+	}
   // Pheromon-Spuren-Animation (jeden Frame – nur opacity, billig)
   s.pheromones.update(ctx.elapsed);
   // Neue Spuren für Blumen in neu geladenen Chunks (ohne bestehende zu löschen)
@@ -221,13 +221,12 @@ export function tick(
     s.pheromones.addMissingTrails(targets, s.startPosition);
   }
 
-  // Wiese: Chunks laden/entladen + WFC-Cleanup (nur jeden 3. Frame)
-  // In 3 Frames (~50ms bei 60fps) kann man keine 40m-Chunk-Grenze überschreiten.
-  // Spart ~66% CPU-Last für Chunk-Verwaltung ohne sichtbaren Unterschied.
-  // delta * 3, weil wir 2 von 3 Frames überspringen (Fade läuft trotzdem korrekt)
-  if (s.tickInterval % 3 === 0) {
-    s.grassManager.update(ctx.camera.position, ctx.delta * 3);
-  }
+	// Wiese: Chunks laden/entladen + WFC-Cleanup (jeden 2. Frame)
+	// Bei 30m Chunks reicht 2-Frame-Intervall für flüssiges Laden.
+	// delta * 2, weil wir 1 von 2 Frames überspringen (Fade läuft trotzdem korrekt)
+	if (s.tickInterval % 2 === 0) {
+		s.grassManager.update(ctx.camera.position, ctx.delta * 2);
+	}
 
   // ── Stadt- & Leitsystem (ohne Sofort-Redirect) ──
   const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);

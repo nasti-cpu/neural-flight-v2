@@ -36,8 +36,8 @@ export const CHUNK_SIZE = 30;
 const VIEW_RADIUS = 1;
 /** Wie viele Chunks vorab als Ground-Plane existieren (3 = 7×7 = 210×210m) */
 const PREGEN_RADIUS = 3;
-/** Maximal 2 Chunk-Upgrades pro update()-Aufruf (weniger pro Frame = smoothere Animation) */
-const QUEUE_ITEMS_PER_UPDATE = 2;
+/** Maximal 3 Chunk-Upgrades pro update()-Aufruf (mehr pro Frame = weniger Stau beim Kurvenfliegen) */
+const QUEUE_ITEMS_PER_UPDATE = 3;
 
 // ── Hilfsfunktion: Welthöhe (flach, konstant) ──
 

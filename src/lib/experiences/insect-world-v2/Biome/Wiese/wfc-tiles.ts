@@ -98,34 +98,34 @@ export interface TileContent {
  * EMPTY → 1400 Halme (karge Fläche)
  */
 export const TILE_CONTENT: Record<TileType, TileContent> = {
-  // Dichte angepasst an 30m-Chunks → gleiche Flächen-Dichte wie 40m-Chunks.
-  // ~20% weniger Gras, ~50% weniger Blumen als vorher → bessere Performance.
+  // Dichte angepasst an 30m-Chunks → ~20% weniger Gras für bessere Performance.
+  // Gras-Reduktion bei Kurvenflieg verhindert Ruckler.
   [TileType.EMPTY]: {
-    grassCount: 1400,
+    grassCount: 1100,
     flowerCount: 0,
     grassMinHeight: 0.3,
     grassMaxHeight: 0.6,
   },
   [TileType.MEADOW]: {
-    grassCount: 12400,
+    grassCount: 10000,
     flowerCount: 0,
     grassMinHeight: 0.6,
     grassMaxHeight: 1.8,
   },
   [TileType.FLOWERS_SPARSE]: {
-    grassCount: 7900,
+    grassCount: 6500,
     flowerCount: 7,
     grassMinHeight: 0.6,
     grassMaxHeight: 1.8,
   },
   [TileType.FLOWERS_DENSE]: {
-    grassCount: 5100,
+    grassCount: 4200,
     flowerCount: 17,
     grassMinHeight: 0.6,
     grassMaxHeight: 1.8,
   },
   [TileType.TALL_GRASS]: {
-    grassCount: 15800,
+    grassCount: 13000,
     flowerCount: 0,
     grassMinHeight: 0.6,
     grassMaxHeight: 1.8,
