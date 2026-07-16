@@ -24,6 +24,7 @@ import {
 
 import { createRiftPortal, type RiftPortal } from "$lib/portal/portalRift";
 import { createPortalTunnel, type PortalTunnel } from "$lib/portal/portalTunnel";
+import { disposeKeyboard } from "$lib/three/keyboard";
 
 // ── Konstanten ──
 const T_PORTAL_APPEAR = 290;     // s – aktive Zeit bevor Portal erscheint
@@ -356,6 +357,8 @@ export function dispose(state: ExperienceState, scene: THREE.Scene): void {
 	if (listener) {
 		listener.parent?.remove(listener);
 	}
+
+	disposeKeyboard();
 }
 
 // ── Audio-Volume setzen (beide Welten) ──

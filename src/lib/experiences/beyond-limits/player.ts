@@ -10,6 +10,15 @@ import * as THREE from "three/webgpu";
 import type { ExperienceState } from "../types";
 import { updatePlayer as uwUpdatePlayer } from "../underwater-world-v5/scene";
 import { getWorldHeight } from "../insect-world-v2/Biome/Wiese/grass-manager";
+import { isKeyDown } from "../../three/keyboard";
+import { pollGamepad } from "../../three/gamepad";
+
+// ── Keyboard-Steuerung (WASD) ──
+const KB_LERP = 0.1;          // Smoothing-Faktor für Tastatur-Input (sanftes Ein-/Ausfliegen)
+const KB_PITCH_ANGLE = 30;    // max ° die W/S die Nase kippen
+const KB_ROLL_ANGLE = 30;     // max ° die A/D das Roll geben
+let _kbPitch = 0;             // aktueller smoothed keyboard pitch offset
+let _kbRoll = 0;              // aktueller smoothed keyboard roll offset
 
 // ── Insect-World-Player (Pitch = vertikal, wie Underwater) ──
 const INSECT_BASE_SPEED = 1;
@@ -74,13 +83,41 @@ export function updatePlayer(
 
 	if (stage === 2) return; // Transition
 
+	// ── Tastatur-Input (WASD + Pfeiltasten) ──
+	const kbTargetPitch = isKeyDown("KeyW") || isKeyDown("ArrowUp")   ? -KB_PITCH_ANGLE
+	                    : isKeyDown("KeyS") || isKeyDown("ArrowDown") ?  KB_PITCH_ANGLE : 0;
+	const kbTargetRoll  = isKeyDown("KeyA") || isKeyDown("ArrowLeft") ? -KB_ROLL_ANGLE
+	                    : isKeyDown("KeyD") || isKeyDown("ArrowRight")?  KB_ROLL_ANGLE : 0;
+
+	// ── Gamepad-Input (linker Stick) ──
+	const gp = pollGamepad();
+	const gpTargetPitch = gp.pitch * KB_PITCH_ANGLE;
+	const gpTargetRoll  = gp.roll  * KB_ROLL_ANGLE;
+
+	// Stärkerer Input gewinnt (Tastatur = ±30°, Gamepad = analog -30..+30)
+	const targetPitch = Math.abs(gpTargetPitch) > Math.abs(kbTargetPitch)
+	                  ? gpTargetPitch : kbTargetPitch;
+	const targetRoll  = Math.abs(gpTargetRoll) > Math.abs(kbTargetRoll)
+	                  ? gpTargetRoll : kbTargetRoll;
+
+	_kbPitch += (targetPitch - _kbPitch) * KB_LERP;
+	_kbRoll  += (targetRoll  - _kbRoll)  * KB_LERP;
+
+	const mergedPitch = orientation.pitch + _kbPitch;
+	const mergedRoll  = orientation.roll  + _kbRoll;
+
 	if (world === 0 && s.underwaterState) {
-		return uwUpdatePlayer(orientation, speed, s.underwaterState as ExperienceState, delta);
+		return uwUpdatePlayer(
+			{ pitch: mergedPitch, roll: mergedRoll },
+			speed,
+			s.underwaterState as ExperienceState,
+			delta,
+		);
 	}
 
 	if (world === 1 && s.insectState) {
 		return _insectUpdatePlayer(
-			{ pitch: orientation.pitch, roll: -orientation.roll },
+			{ pitch: mergedPitch, roll: -mergedRoll },
 			speed,
 			s.insectState as ExperienceState,
 			delta,
