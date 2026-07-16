@@ -35,8 +35,8 @@ const DEFAULTS: Required<GuidePathConfig> = {
   neonColor: 0x44ffff,
   dashLength: 1.2,
   gapLength: 0.6,
-  pathHeightMin: 1.5,
-  pathHeightMax: 3.5,
+  pathHeightMin: 1.0,
+  pathHeightMax: 2.5,
   spriteSizeMin: 0.6,
   spriteSizeMax: 1.2,
   spritesPerDash: 3,
@@ -62,14 +62,14 @@ export class CityGuidePath {
     this.clear();
 
     // Dynamische Pfad-Länge:
-    // - Reicht bis 15m vor die Stadt (dann ist die Stadt klar sichtbar)
-    // - Mindestens config.maxDist (Default 150m)
+    // - Reicht nur halb zur Stadt (löst sich im Nebel auf, kein endlos-Effekt)
+    // - Mindestens config.maxDist
     // - Maximal 350m (= ~875 Sprites, Performance-Obergrenze)
     const _dir = new THREE.Vector3().copy(to).sub(from);
     const dist = _dir.length();
     const hardMax = 350;
     const visibilityBuffer = 15;
-    const idealMax = Math.max(this.config.maxDist, dist - visibilityBuffer);
+    const idealMax = Math.max(this.config.maxDist, (dist - visibilityBuffer) * 0.5);
     const actualMax = Math.min(idealMax, hardMax);
     if (dist > actualMax) {
       _dir.normalize().multiplyScalar(actualMax);
@@ -191,7 +191,6 @@ export class CityGuidePath {
       opacity: 1.0,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
-      fog: false,
     });
 
     for (let d = 0; d < numDashes; d++) {

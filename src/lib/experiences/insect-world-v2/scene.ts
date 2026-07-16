@@ -145,8 +145,8 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     neonColor: 0x44ffff,
     dashLength: 0.5,
     gapLength: 0.3,
-    spriteSizeMin: 3.0,
-    spriteSizeMax: 5.0,
+    spriteSizeMin: 1.5,
+    spriteSizeMax: 2.5,
     spritesPerDash: 1,
     maxDist: 70,
   });
