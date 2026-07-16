@@ -223,6 +223,11 @@ export function tick(
   const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);
   const last = s.cityManager.lastVisitedCity;
 
+  // Merker: wurde die Spur in genau diesem Frame aktiviert?
+  // Sonst würde die Ankunfts-Prüfung (Schritt 2) die Spur sofort löschen,
+  // bevor sie je gerendert wurde (Stadt in 30m + Aktivierung bei 30m).
+  let pathActivatedThisFrame = false;
+
   if (nearest) {
     const distToNearest = ctx.camera.position.distanceTo(nearest.position);
     const distFromLast = last
@@ -241,38 +246,44 @@ export function tick(
       // Ganz am Start → Modell an erster Stadt (auch wenn im Nebel)
       s.cityManager.setActiveCity(nearest);
     }
-
-    // 2. Ankunft an einer Stadt (→ besucht markieren, Trail löschen,
-    //    KEIN Redirect zur nächsten Stadt!)
-    if (distToNearest < CITY_CONFIG.ARRIVAL_DISTANCE && !nearest.visited) {
-      s.cityManager.markVisited(nearest);
-      s.guidePath.clear();
-      console.log(`[City] Stadt ${nearest.index} erreicht`);
-    }
   }
 
-  // 3. Erste Leitspur aktivieren (nach 3m Erkundung – Stadt ist nur 30-80m entfernt)
+  // 3. Erste Leitspur aktivieren (nach 30m Erkundung)
   if (!s.guidePath.isActive && !s.firstPathActivated) {
     const distFromStart = ctx.camera.position.distanceTo(s.startPosition);
-    if (distFromStart > 3) {
+    if (distFromStart > 30) {
       const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);
       if (nearest) {
         s.guidePath.setTarget(ctx.camera.position, nearest.position);
         s.firstPathActivated = true;
+        pathActivatedThisFrame = true;
         console.log(`[City] Erste Leitspur zu Stadt ${nearest.index} aktiviert`);
       }
     }
   }
 
-  // 4. GuidePath reaktivieren (nach Stadtbesuch, erst nach ausreichender Erkundung)
+  // 4. GuidePath reaktivieren (30m nach Stadtbesuch, dann nächste Stadt)
   if (!s.guidePath.isActive && s.firstPathActivated && last) {
     const distFromLast = ctx.camera.position.distanceTo(last.position);
     if (distFromLast > CITY_CONFIG.ACTIVATION_DISTANCE) {
       const next = s.cityManager.getNearestUndiscovered(ctx.camera.position);
       if (next) {
         s.guidePath.setTarget(ctx.camera.position, next.position);
+        pathActivatedThisFrame = true;
         console.log(`[City] Leitspur zu Stadt ${next.index} aktiviert`);
       }
+    }
+  }
+
+  // 2. Ankunft an einer Stadt (→ besucht markieren, Trail löschen)
+  // Nur wenn die Spur NICHT in genau diesem Frame aktiviert wurde,
+  // damit sie mindestens einen Frame sichtbar bleibt.
+  if (nearest) {
+    const distToNearest = ctx.camera.position.distanceTo(nearest.position);
+    if (!pathActivatedThisFrame && distToNearest < CITY_CONFIG.ARRIVAL_DISTANCE && !nearest.visited) {
+      s.cityManager.markVisited(nearest);
+      s.guidePath.clear();
+      console.log(`[City] Stadt ${nearest.index} erreicht`);
     }
   }
 
