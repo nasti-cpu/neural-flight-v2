@@ -1,6 +1,7 @@
 <script lang="ts">
 import { onMount, onDestroy } from "svelte";
 import { initWorld, disposeWorld } from "$lib/experiments/experiment-12/welt/underwaterWorld";
+import TestNav from "$lib/components/TestNav.svelte";
 
 let container: HTMLDivElement;
 

@@ -14,6 +14,7 @@ import { onMount, onDestroy } from "svelte";
 import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+	import TestNav from "$lib/components/TestNav.svelte";
 import {
   COLOR_THEMES,
   applyTheme,
