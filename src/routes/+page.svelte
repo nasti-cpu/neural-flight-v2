@@ -58,6 +58,16 @@ interface ExperienceOption {
 const catalogExperiences = listExperiences();
 
 const experienceOptions: ExperienceOption[] = [
+	{
+		id: "testseiten",
+		name: "Testseiten",
+		description: "15 Three.js-Experimente durchstöbern",
+		author: "Team",
+		version: "1.0.0",
+		paramCount: 15,
+		icon: Bug,
+		disabled: false,
+	},
 	...catalogExperiences.map((exp) => ({
 		id: exp.id,
 		name: exp.name,
@@ -115,6 +125,10 @@ let selectedExperience = $state("");
 
 function handleExperienceSelect(value: string | undefined): void {
 	if (!value) return;
+	if (value === "testseiten") {
+		window.location.href = "/test";
+		return;
+	}
 	selectedExperience = value;
 	setActiveExperienceId(value);
 }
