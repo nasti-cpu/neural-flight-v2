@@ -99,6 +99,8 @@
 		position: fixed;
 		inset: 0;
 		overflow: hidden;
+		max-width: none;
+		padding: 0;
 	}
 
 	canvas {

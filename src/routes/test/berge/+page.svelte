@@ -47,5 +47,23 @@ onDestroy(() => {
 </script>
 
 <svelte:head><title>Gletscher Himmel | ICAROS VR</title></svelte:head>
-<canvas bind:this={canvas} style="display:block;width:100vw;height:100vh"></canvas>
+<div class="container">
+	<canvas bind:this={canvas}></canvas>
+</div>
 <TestNav currentSlug="berge" />
+
+<style>
+	.container {
+		position: fixed;
+		inset: 0;
+		overflow: hidden;
+		max-width: none;
+		padding: 0;
+	}
+
+	canvas {
+		display: block;
+		width: 100%;
+		height: 100%;
+	}
+</style>

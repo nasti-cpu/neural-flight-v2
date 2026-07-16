@@ -162,9 +162,6 @@
 				heightBaseMin: 0.3,
 				heightBaseMax: 0.8,
 				heightRange: 0.2,
-				flowerTargets: visibleFlowerPositions,
-				hoverDuration: 1.5,
-				heightAboveFlower: 1.0,
 			});
 			scene.add(bees.group);
 
@@ -180,9 +177,6 @@
 				heightBaseMin: 0.8,
 				heightBaseMax: 1.5,
 				heightRange: 0.4,
-				flowerTargets: visibleFlowerPositions,
-				hoverDuration: 2.0,
-				heightAboveFlower: 2.0,
 			});
 			scene.add(butterflies.group);
 
@@ -191,9 +185,10 @@
 			// Animationsloop
 			const clock = new THREE.Clock();
 			function animate() {
-				const elapsed = clock.getElapsedTime();
-				bees.update(elapsed);
-				butterflies.update(elapsed);
+				const delta = clock.getDelta();
+				const elapsed = clock.elapsedTime;
+				bees.update(elapsed, delta);
+				butterflies.update(elapsed, delta);
 				controls.update();
 				renderer.render(scene, camera);
 				animationId = requestAnimationFrame(animate);
@@ -236,6 +231,8 @@
 		position: fixed;
 		inset: 0;
 		overflow: hidden;
+		max-width: none;
+		padding: 0;
 		font-family: system-ui, -apple-system, sans-serif;
 	}
 

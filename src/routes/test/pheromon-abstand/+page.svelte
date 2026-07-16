@@ -545,12 +545,14 @@ laut Projekt-Vorgabe. */
 <TestNav currentSlug="pheromon-abstand" />
 
 <style>
-    .container {
-        position: fixed;
-        inset: 0;
-        overflow: hidden;
-        font-family: system-ui, sans-serif;
-    }
+	.container {
+		position: fixed;
+		inset: 0;
+		overflow: hidden;
+		max-width: none;
+		padding: 0;
+		font-family: system-ui, sans-serif;
+	}
     canvas {
         display: block;
         width: 100%;

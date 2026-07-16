@@ -98,9 +98,6 @@
 				heightBaseMin: 0.8,
 				heightBaseMax: 1.5,
 				heightRange: 0.4,
-				flowerTargets: flowerPositions,
-				hoverDuration: 2.0,
-				heightAboveFlower: 2.0,
 			});
 			scene.add(butterflies.group);
 			console.log("[Schmetterlinge] Schmetterlinge geladen");
@@ -108,8 +105,9 @@
 			// Animationsloop
 			const clock = new THREE.Clock();
 			function animate() {
-				const elapsed = clock.getElapsedTime();
-				butterflies.update(elapsed);
+				const delta = clock.getDelta();
+				const elapsed = clock.elapsedTime;
+				butterflies.update(elapsed, delta);
 				controls.update();
 				renderer.render(scene, camera);
 				animationId = requestAnimationFrame(animate);
@@ -157,6 +155,8 @@
 		position: fixed;
 		inset: 0;
 		overflow: hidden;
+		max-width: none;
+		padding: 0;
 		font-family: system-ui, -apple-system, sans-serif;
 	}
 

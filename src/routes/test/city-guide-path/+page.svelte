@@ -646,6 +646,8 @@
 		position: fixed;
 		inset: 0;
 		overflow: hidden;
+		max-width: none;
+		padding: 0;
 		font-family: system-ui, -apple-system, sans-serif;
 	}
 	canvas {

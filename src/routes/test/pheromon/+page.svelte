@@ -139,7 +139,7 @@
 <TestNav currentSlug="pheromon" />
 
 <style>
-	.container { position: fixed; inset: 0; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
+	.container { position: fixed; inset: 0; overflow: hidden; max-width: none; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
 	canvas { display: block; width: 100%; height: 100%; }
 	.ui-overlay { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; z-index: 10; }
 	.ui-overlay h1 { color: white; font-size: 1.2rem; font-weight: 600; text-shadow: 0 2px 8px rgba(0,0,0,0.4); margin: 0 0 4px; }

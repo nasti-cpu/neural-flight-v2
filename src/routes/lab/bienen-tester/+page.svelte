@@ -88,9 +88,10 @@ onMount(async () => {
 	// Animationsschleife
 	const clock = new THREE.Clock();
 	renderer.setAnimationLoop(() => {
-		const elapsed = clock.getElapsedTime();
+		const delta = clock.getDelta();
+		const elapsed = clock.elapsedTime;
 		if (meadow) meadow.tick(elapsed);
-		if (bees) bees.update(elapsed);
+		if (bees) bees.update(elapsed, delta);
 		controls.update();
 		renderer.render(scene, camera);
 	});

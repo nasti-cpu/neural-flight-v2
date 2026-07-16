@@ -102,9 +102,6 @@
 				heightBaseMin: 0.2,
 				heightBaseMax: 0.5,
 				heightRange: 0.15,
-				flowerTargets: flowerPositions,
-				hoverDuration: 1.5,
-				heightAboveFlower: 1.0,
 			});
 			scene.add(bees.group);
 			console.log("[V2] Bienen geladen");
@@ -117,8 +114,9 @@
 			const clock = new THREE.Clock();
 			function animate(time: number) {
 				fpsMonitor.update(time);
-				const elapsed = clock.getElapsedTime();
-				bees.update(elapsed);
+				const delta = clock.getDelta();
+				const elapsed = clock.elapsedTime;
+				bees.update(elapsed, delta);
 				controls.update();
 				renderer.render(scene, camera);
 				animationId = requestAnimationFrame(animate);
@@ -168,6 +166,8 @@
 		position: fixed;
 		inset: 0;
 		overflow: hidden;
+		max-width: none;
+		padding: 0;
 		font-family: system-ui, -apple-system, sans-serif;
 	}
 
