@@ -145,10 +145,10 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     neonColor: 0x44ffff,
     dashLength: 0.5,
     gapLength: 0.3,
-    spriteSizeMin: 1.5,
-    spriteSizeMax: 2.5,
+    spriteSizeMin: 1.4,
+    spriteSizeMax: 2.2,
     spritesPerDash: 1,
-    maxDist: 70,
+    maxDist: 25,
   });
   const firstCity = cityManager.getNearestUndiscovered(new THREE.Vector3(0, 2, 0));
   if (firstCity) {
