@@ -173,6 +173,7 @@ export class CityGuidePath {
       opacity: 1.0,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
+      depthTest: false,
     });
 
     for (let d = 0; d < numDashes; d++) {
