@@ -251,10 +251,10 @@ export function tick(
     }
   }
 
-  // 3. Erste Leitspur aktivieren (nach 30m Erkundung, nicht sofort beim Start)
+  // 3. Erste Leitspur aktivieren (nach 3m Erkundung – Stadt ist nur 30-80m entfernt)
   if (!s.guidePath.isActive && !s.firstPathActivated) {
     const distFromStart = ctx.camera.position.distanceTo(s.startPosition);
-    if (distFromStart > 30) {
+    if (distFromStart > 3) {
       const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);
       if (nearest) {
         s.guidePath.setTarget(ctx.camera.position, nearest.position);
