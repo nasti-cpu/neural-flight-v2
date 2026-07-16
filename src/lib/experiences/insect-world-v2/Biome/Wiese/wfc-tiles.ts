@@ -14,8 +14,8 @@
  */
 
 /**
- * Die 6 Chunk-Typen unserer Wiese.
- * Jeder bestimmt, was in einem 30×30m-Chunk wächst.
+ * Die 5 Chunk-Typen unserer Wiese.
+ * Jeder bestimmt, was in einem 80×80m-Chunk wächst.
  */
 export enum TileType {
   /** Kahle Fläche (kaum Gras, keine Blumen) */
@@ -28,8 +28,6 @@ export enum TileType {
   FLOWERS_DENSE = "flowers_dense",
   /** Hohes Gras (keine Blumen) */
   TALL_GRASS = "tall_grass",
-  /** Stadt-Chunk – kein Gras, keine Blumen, nur Boden */
-  CITY = "city",
 }
 
 /**
@@ -47,7 +45,6 @@ export const ADJACENCY_RULES: Record<TileType, TileType[]> = {
     TileType.FLOWERS_SPARSE,
     TileType.FLOWERS_DENSE,
     TileType.TALL_GRASS,
-    TileType.CITY,
   ],
   [TileType.FLOWERS_SPARSE]: [
     TileType.MEADOW,
@@ -56,7 +53,6 @@ export const ADJACENCY_RULES: Record<TileType, TileType[]> = {
   ],
   [TileType.FLOWERS_DENSE]: [TileType.FLOWERS_SPARSE, TileType.FLOWERS_DENSE],
   [TileType.TALL_GRASS]: [TileType.EMPTY, TileType.MEADOW, TileType.TALL_GRASS],
-  [TileType.CITY]: [TileType.MEADOW],
 };
 
 /**
@@ -71,7 +67,6 @@ export const TILE_WEIGHTS: Record<TileType, number> = {
   [TileType.FLOWERS_SPARSE]: 7,
   [TileType.FLOWERS_DENSE]: 3,
   [TileType.TALL_GRASS]: 4,
-  [TileType.CITY]: 0.1,
 };
 
 /**
@@ -92,49 +87,44 @@ export interface TileContent {
 /**
  * Konfiguration pro Tile-Typ: Welcher Inhalt generiert wird.
  *
- * FLOWERS_SPARSE → 7 Blumen, weniger Gras (Platz für Blumen)
- * FLOWERS_DENSE → 17 Blumen, noch weniger Gras
- * TALL_GRASS → 15800 Halme, keine Blumen (dichter Bewuchs)
- * EMPTY → 1400 Halme (karge Fläche)
+ * FLOWERS_SPARSE → 4 Blumen, weniger Gras (Platz für Blumen)
+ * FLOWERS_DENSE → 12 Blumen, noch weniger Gras
+ * TALL_GRASS → 8000 Halme, keine Blumen (dichter Bewuchs)
+ * EMPTY → fast nichts (Sand/Stein)
  */
 export const TILE_CONTENT: Record<TileType, TileContent> = {
-  // Dichte angepasst an 30m-Chunks → ~20% weniger Gras für bessere Performance.
-  // Gras-Reduktion bei Kurvenflieg verhindert Ruckler.
+  // Gras-Zahlen stark reduziert (~60% weniger):
+  // Aus ~40k/Chunk → ~14k/Chunk. Optisch kein Unterschied
+  // (Nebel + Insektenperspektive), aber ~60% weniger GPU-Last.
   [TileType.EMPTY]: {
-    grassCount: 1100,
+    grassCount: 500,
     flowerCount: 0,
     grassMinHeight: 0.3,
     grassMaxHeight: 0.6,
   },
   [TileType.MEADOW]: {
-    grassCount: 10000,
+    grassCount: 15000,
     flowerCount: 0,
     grassMinHeight: 0.6,
     grassMaxHeight: 1.8,
   },
   [TileType.FLOWERS_SPARSE]: {
-    grassCount: 6500,
-    flowerCount: 7,
+    grassCount: 10000,
+    flowerCount: 15,
     grassMinHeight: 0.6,
     grassMaxHeight: 1.8,
   },
   [TileType.FLOWERS_DENSE]: {
-    grassCount: 4200,
-    flowerCount: 17,
+    grassCount: 6500,
+    flowerCount: 36,
     grassMinHeight: 0.6,
     grassMaxHeight: 1.8,
   },
   [TileType.TALL_GRASS]: {
-    grassCount: 13000,
+    grassCount: 18000,
     flowerCount: 0,
-    grassMinHeight: 0.6,
-    grassMaxHeight: 1.8,
-  },
-  [TileType.CITY]: {
-    grassCount: 0,
-    flowerCount: 0,
-    grassMinHeight: 0,
-    grassMaxHeight: 0,
+    grassMinHeight: 1.2,
+    grassMaxHeight: 2.5,
   },
 };
 
@@ -145,7 +135,6 @@ export const ALL_TILE_TYPES: TileType[] = Object.values(TileType);
 
 /**
  * Maximale Anzahl Blumen pro Chunk (für Buffer-Allokation).
- * Aktuell max. 17 Blumen (FLOWERS_DENSE).
  */
 export const MAX_FLOWERS_PER_CHUNK = Math.max(
   ...Object.values(TILE_CONTENT).map((c) => c.flowerCount),

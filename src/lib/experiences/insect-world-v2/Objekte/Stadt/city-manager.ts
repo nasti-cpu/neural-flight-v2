@@ -1,11 +1,10 @@
 /**
  * insect-world-v2 — CityManager.
  * Verwaltet mehrere prozedural gespawnte Städte:
- * - Generiert zufällige Positionen mit Mindestabstand (250–400m)
+ * - Generiert zufällige Positionen mit Mindestabstand (200–300m)
  * - Lädt das Stadt-Modell EINMAL und platziert es per Pivot an der aktiven Stadt
  *   (KEIN clone(true) – spart ~80% GPU-Speicher und Draw Calls)
  * - Registriert kreisförmige Clear-Regionen im GrassManager
- * - Erzwingt MEADOW-Tile für den Chunk unter der Stadt (kein EMPTY)
  * - Trackt welche Städte bereits entdeckt wurden
  *
  * WebGPU-konform.
@@ -36,6 +35,11 @@ export class CityManager {
   private modelPivot: THREE.Group;
 
   constructor() {
+    /**
+     * Pivot-Gruppe, die das einmal geladene Modell hält.
+     * Wird an die Position + Rotation der aktiven Stadt verschoben.
+     * Standardmäßig unsichtbar – setActiveCity() schaltet sie ein.
+     */
     this.modelPivot = new THREE.Group();
     this.modelPivot.visible = false;
   }
@@ -55,11 +59,13 @@ export class CityManager {
     while (positions.length < count && attempts < maxAttempts) {
       attempts++;
 
+      // Zufällige Position im Kreis um den Ursprung
       const angle = Math.random() * Math.PI * 2;
       const dist = minDistance + Math.random() * (maxDistance - minDistance);
       const x = Math.cos(angle) * dist;
       const z = Math.sin(angle) * dist;
 
+      // Prüfen ob weit genug von anderen Städten entfernt
       let tooClose = false;
       for (const pos of positions) {
         const d = Math.sqrt(
@@ -83,37 +89,42 @@ export class CityManager {
    * Lädt das Stadt-Modell EINMAL und registriert alle Städte als Datenpunkte.
    * Das Modell wird NICHT geklont – es hängt im modelPivot und wird
    * per setActiveCity() an die aktuelle Ziel-Stadt verschoben.
+   * Spart ~80% GPU-Speicher und Draw Calls (5× Klone → 1× Modell).
    *
-   * Registriert ausserdem Clear-Regionen im GrassManager pro Stadt
-   * (Kreis 8m) und erzwingt MEADOW-Tile für den Chunk unter der Stadt
-   * (kein EMPTY direkt neben der Stadt).
+   * Registriert ausserdem Clear-Regionen im GrassManager pro Stadt.
+   * Wenn das Modell nicht geladen werden kann, funktionieren Guide-Path
+   * und City-Logik trotzdem (nur die 3D-Ansicht fehlt).
    */
   async loadCities(
     positions: THREE.Vector3[],
     scene: THREE.Scene,
     grassManager: GrassManager,
   ): Promise<void> {
+    // Modell laden (einmalig – wird im modelPivot referenziert)
     const model = await this.loadModel();
     this.sharedModel = model;
 
     if (model) {
+      // Zentriertes + skaliertes Modell in den Pivot hängen
       this.modelPivot.add(model);
+      // Pivot in die Szene (wird per setActiveCity positioniert)
       scene.add(this.modelPivot);
     }
 
     for (let i = 0; i < positions.length; i++) {
       const pos = positions[i];
 
+      // Position auf Geländehöhe setzen
       const groundY = getWorldHeight(pos.x, pos.z);
 
-      // Kreis-Clear-Region (8m Radius) – kein Gras/Blumen um die Stadt
+      // Clear-Region registrieren (Kreis) – auch ohne Modell
       grassManager.addCircleClearRegion(
         pos.x,
         pos.z,
         CITY_CONFIG.CLEAR_RADIUS,
       );
 
-      // Chunk unter der Stadt auf MEADOW erzwingen (kein EMPTY)
+      // WFC-Tile für diesen Chunk auf MEADOW zwingen (kein EMPTY unter der Stadt!)
       const chunkGX = Math.floor(pos.x / CHUNK_SIZE);
       const chunkGZ = Math.floor(pos.z / CHUNK_SIZE);
       grassManager.forceTileType(chunkGX, chunkGZ, TileType.MEADOW);
@@ -122,6 +133,7 @@ export class CityManager {
         position: new THREE.Vector3(pos.x, groundY, pos.z),
         visited: false,
         index: i,
+        /** Jede Stadt bekommt eine eigene Rotation für Abwechslung */
         rotation: Math.random() * Math.PI * 2,
       });
     }
@@ -136,11 +148,7 @@ export class CityManager {
     if (!this.sharedModel) return;
 
     if (city) {
-      this.modelPivot.position.set(
-        city.position.x,
-        city.position.y + CITY_CONFIG.Y_OFFSET,
-        city.position.z,
-      );
+      this.modelPivot.position.copy(city.position);
       this.modelPivot.rotation.y = city.rotation;
       this.modelPivot.visible = true;
     } else {
@@ -148,6 +156,7 @@ export class CityManager {
     }
   }
 
+  /** Gibt die nächste unbesuchte Stadt zurück (oder null). */
   getNearestUndiscovered(from: THREE.Vector3): CityInstance | null {
     let nearest: CityInstance | null = null;
     let nearestDist = Infinity;
@@ -164,18 +173,23 @@ export class CityManager {
     return nearest;
   }
 
+  /** Markiert eine Stadt als besucht + speichert sie als lastVisitedCity. */
   markVisited(city: CityInstance): void {
     city.visited = true;
     this.lastVisitedCity = city;
   }
 
+  /** Anzahl der entdeckten Städte. */
   get discoveredCount(): number {
     return this.cities.filter((c) => c.visited).length;
   }
 
+  /** Gibt alle Ressourcen frei. */
   dispose(scene: THREE.Scene): void {
+    // modelPivot aus Szene entfernen
     scene.remove(this.modelPivot);
 
+    // Einmal geladenes Modell aufräumen (Geometrien + Materialien)
     if (this.sharedModel) {
       this.sharedModel.traverse((child) => {
         if (child instanceof THREE.Mesh) {
@@ -192,6 +206,10 @@ export class CityManager {
     this.cities.length = 0;
   }
 
+  /**
+   * Lädt das GLB einmalig, zentriert es und skaliert es.
+   * Das Ergebnis wird in sharedModel gespeichert und NICHT geklont.
+   */
   private loadModel(): Promise<THREE.Group | null> {
     if (!this.modelPromise) {
       this.modelPromise = new Promise((resolve) => {
@@ -199,8 +217,11 @@ export class CityManager {
           CITY_CONFIG.MODEL,
           (gltf) => {
             const model = gltf.scene;
+
+            // Einmalig skalieren (früher pro clone)
             model.scale.setScalar(CITY_CONFIG.SCALE);
 
+            // Einmalig zentrieren (GLB-internen Offset ausgleichen)
             const box = new THREE.Box3().setFromObject(model);
             const center = new THREE.Vector3();
             box.getCenter(center);

@@ -44,8 +44,6 @@ interface InsectWorldV2State extends ExperienceState {
   firstPathActivated: boolean;
   /** Zählt Frames für verzögertes Update (Bienen/Schmetterlinge/WFC) */
   tickInterval: number;
-  /** Letzte bekannte Blumen-Anzahl (für Pheromon-Nachrüstung) */
-  lastFlowerCount: number;
 }
 
 export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
@@ -53,15 +51,14 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   const sky = createSky();
   ctx.scene.add(sky);
 
-	// 2. Flache Riesenscheibe – Boden auf Y=0.5, erstreckt sich überallhin.
-	const GROUND_RADIUS = 500;
-  const groundGeo = new THREE.CircleGeometry(GROUND_RADIUS, 64);
+  // 2. Statische Grundplatte (verhindert leere Welt beim Umdrehen)
+  // Liegt unter den per-Chunk-Bodenplatten und ist immer sichtbar.
   const groundPlane = new THREE.Mesh(
-    groundGeo,
-    new THREE.MeshBasicMaterial({ color: 0x3a6028, side: THREE.DoubleSide }),
+    new THREE.PlaneGeometry(500, 500),
+    new THREE.MeshBasicMaterial({ color: 0x3a6028 }),
   );
   groundPlane.rotation.x = -Math.PI / 2;
-  groundPlane.position.y = 0.5;
+  groundPlane.position.y = -5; // tief genug, nie über der Terrain-Oberfläche
   ctx.scene.add(groundPlane);
 
   // 3. Blumen vorladen (einmalig, wird von GrassManager wiederverwendet)
@@ -92,33 +89,33 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   // Fade erst NACH dem ersten Update aktivieren → nur Bewegungslade-Chunks fade
   grassManager.setFadeDuration(0.5);
 
-  // 7. Bienen – Schwarm folgt der Kamera (fieldRadius klein = nah am Spieler)
+  // 7. Bienen (langsam, zufällige Wegpunkte, +10cm höher)
   const bees = await createBees(beeGlbUrl, {
     count: 10,
     scale: 0.04,
-    fieldRadius: 30,
-    flyRadiusMin: 3,
-    flyRadiusMax: 10,
-    speedMin: 2.0,
-    speedMax: 4.0,
+    fieldRadius: 200,
+    flyRadiusMin: 1,
+    flyRadiusMax: 3,
+    speedMin: 1.2,
+    speedMax: 2.5,
     heightBaseMin: 0.9,
     heightBaseMax: 1.6,
-    heightRange: 0.4,
+    heightRange: 0.2,
   });
   ctx.scene.add(bees.group);
 
-  // 8. Schmetterlinge – Schwarm folgt der Kamera
+  // 8. Schmetterlinge (langsam, zufällige Wegpunkte, +10cm höher)
   const butterflies = await createButterflies(butterflyGlbUrl, {
     count: 6,
     scale: 0.036,
-    fieldRadius: 30,
-    flyRadiusMin: 3,
-    flyRadiusMax: 12,
-    speedMin: 1.5,
-    speedMax: 3.0,
+    fieldRadius: 200,
+    flyRadiusMin: 1,
+    flyRadiusMax: 4,
+    speedMin: 0.8,
+    speedMax: 1.8,
     heightBaseMin: 1.3,
     heightBaseMax: 2.3,
-    heightRange: 0.6,
+    heightRange: 0.4,
   });
   ctx.scene.add(butterflies.group);
 
@@ -131,7 +128,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   pheromones.addTrails(pheromoneTargets, ctx.camera.position);
   ctx.scene.add(pheromones.group);
 
-	// 10. Städte (prozedural, 50-80m entfernt, nur 3 Stück)
+  // 10. Städte (prozedural, 250-400m entfernt, nur 3 Stück)
   const cityManager = new CityManager();
   const positions = cityManager.generatePositions(
     CITY_CONFIG.CITY_COUNT,
@@ -139,29 +136,32 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     CITY_CONFIG.MAX_DISTANCE,
   );
   await cityManager.loadCities(positions, ctx.scene, grassManager);
+
+  // Das Modell ist im modelPivot und wird erst per setActiveCity() sichtbar
   console.log(`[City] ${cityManager.cities.length} Städte erzeugt`);
 
-	// 11. GuidePath – erst nach 20m Erkundung aktiv (verzögertes Erscheinen)
-	const guidePath = new CityGuidePath({
-		neonColor: 0x44ffff,
-		dashLength: 1.0,
-		gapLength: 0.6,
-		spriteSizeMin: 1.6,
-		spriteSizeMax: 2.5,
-		spritesPerDash: 1,
-		maxDist: 50,
-	});
+  // 11. GuidePath – erst nach 30m Erkundung aktiv (verzögertes Erscheinen)
+  const guidePath = new CityGuidePath({
+    neonColor: 0x44ffff,
+    dashLength: 0.5,
+    gapLength: 0.3,
+    spriteSizeMin: 1.4,
+    spriteSizeMax: 2.2,
+    spritesPerDash: 1,
+    maxDist: 200,
+  });
   const firstCity = cityManager.getNearestUndiscovered(new THREE.Vector3(0, 2, 0));
   if (firstCity) {
+    // Stadt-Modell positionieren, aber Leitspur noch nicht aktivieren
     cityManager.setActiveCity(firstCity);
     console.log(`[City] Erste Stadt ${firstCity.index} bei`, firstCity.position);
   }
   ctx.scene.add(guidePath.group);
 
-	// ── Atmosphärischer Nebel ──
-	// Density 0.035 = Sichtweite ~28m, Chunk-Ränder ab 45m unsichtbar.
-	const fogColor = new THREE.Color("#4a90d9");
-	ctx.scene.fog = new THREE.FogExp2(fogColor, 0.035);
+  // ── Atmosphärischer Nebel ──
+  // Density 0.04 = Sichtweite ~30-50m, dann vollständig im Nebel.
+  const fogColor = new THREE.Color("#4a90d9");
+  ctx.scene.fog = new THREE.FogExp2(fogColor, 0.04);
 
   // Kamera positionieren (Insektenperspektive ~2m)
   const camera = ctx.camera;
@@ -186,7 +186,6 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     startPosition,
     firstPathActivated: false,
     tickInterval: 0,
-    lastFlowerCount: 0,
   };
 }
 
@@ -201,32 +200,24 @@ export function tick(
   // Der Spieler sieht keinen Unterschied, aber die CPU spart ~50%.
   s.tickInterval++;
 
-	// Bienen-Animation – Schwarm folgt der Kamera (jeden 2. Frame)
-	if (s.tickInterval % 2 === 0) {
-		s.bees.update(ctx.elapsed, ctx.delta, ctx.camera.position);
-	}
-	// Schmetterlings-Animation – Schwarm folgt der Kamera (jeden 2. Frame)
-	if (s.tickInterval % 2 === 0) {
-		s.butterflies.update(ctx.elapsed, ctx.delta, ctx.camera.position);
-	}
+  // Bienen-Animation (jeden 3. Frame)
+  if (s.tickInterval % 3 === 0) {
+    s.bees.update(ctx.elapsed, ctx.delta);
+  }
+  // Schmetterlings-Animation (jeden 3. Frame)
+  if (s.tickInterval % 3 === 0) {
+    s.butterflies.update(ctx.elapsed, ctx.delta);
+  }
   // Pheromon-Spuren-Animation (jeden Frame – nur opacity, billig)
   s.pheromones.update(ctx.elapsed);
-  // Neue Spuren für Blumen in neu geladenen Chunks (ohne bestehende zu löschen)
-  if (s.grassManager.flowerTargets.length !== s.lastFlowerCount) {
-    s.lastFlowerCount = s.grassManager.flowerTargets.length;
-    const targets = s.grassManager.flowerTargets.map((pos, i) => ({
-      position: pos,
-      color: s.grassManager.flowerColors[i] ?? new THREE.Color(0xffffff),
-    }));
-    s.pheromones.addMissingTrails(targets, s.startPosition);
-  }
 
-	// Wiese: Chunks laden/entladen + WFC-Cleanup (jeden 2. Frame)
-	// Bei 30m Chunks reicht 2-Frame-Intervall für flüssiges Laden.
-	// delta * 2, weil wir 1 von 2 Frames überspringen (Fade läuft trotzdem korrekt)
-	if (s.tickInterval % 2 === 0) {
-		s.grassManager.update(ctx.camera.position, ctx.delta * 2);
-	}
+  // Wiese: Chunks laden/entladen + WFC-Cleanup (nur jeden 3. Frame)
+  // In 3 Frames (~50ms bei 60fps) kann man keine 40m-Chunk-Grenze überschreiten.
+  // Spart ~66% CPU-Last für Chunk-Verwaltung ohne sichtbaren Unterschied.
+  // delta * 3, weil wir 2 von 3 Frames überspringen (Fade läuft trotzdem korrekt)
+  if (s.tickInterval % 3 === 0) {
+    s.grassManager.update(ctx.camera.position, ctx.delta * 3);
+  }
 
   // ── Stadt- & Leitsystem (ohne Sofort-Redirect) ──
   const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);
@@ -241,14 +232,18 @@ export function tick(
     // 1. Modell-Steuerung: Zeige die Stadt, wenn nah dran,
     //    sonst das Modell an der zuletzt besuchten Stadt lassen.
     if (distToNearest < CITY_CONFIG.VISIBILITY_RANGE) {
+      // Unbesuchte Stadt in Sichtweite → Modell dorthin schalten
       s.cityManager.setActiveCity(nearest);
     } else if (last) {
+      // Weit weg von unbesuchten Städten → Modell an letzter besuchter Stadt
       s.cityManager.setActiveCity(last);
     } else {
+      // Ganz am Start → Modell an erster Stadt (auch wenn im Nebel)
       s.cityManager.setActiveCity(nearest);
     }
 
-    // 2. Ankunft an einer Stadt (→ besucht markieren, Trail löschen)
+    // 2. Ankunft an einer Stadt (→ besucht markieren, Trail löschen,
+    //    KEIN Redirect zur nächsten Stadt!)
     if (distToNearest < CITY_CONFIG.ARRIVAL_DISTANCE && !nearest.visited) {
       s.cityManager.markVisited(nearest);
       s.guidePath.clear();
@@ -256,20 +251,20 @@ export function tick(
     }
   }
 
-	// 3. Leitspur aktivieren (nach 20m Erkundung)
-	if (!s.guidePath.isActive && !s.firstPathActivated) {
-		const distFromStart = ctx.camera.position.distanceTo(s.startPosition);
-		if (distFromStart > 20) {
-      const target = s.cityManager.getNearestUndiscovered(ctx.camera.position);
-      if (target) {
-        s.guidePath.setTarget(ctx.camera.position, target.position);
+  // 3. Erste Leitspur aktivieren (nach 30m Erkundung, nicht sofort beim Start)
+  if (!s.guidePath.isActive && !s.firstPathActivated) {
+    const distFromStart = ctx.camera.position.distanceTo(s.startPosition);
+    if (distFromStart > 30) {
+      const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);
+      if (nearest) {
+        s.guidePath.setTarget(ctx.camera.position, nearest.position);
         s.firstPathActivated = true;
-        console.log(`[City] Erste Leitspur zu Stadt ${target.index} aktiviert`);
+        console.log(`[City] Erste Leitspur zu Stadt ${nearest.index} aktiviert`);
       }
     }
   }
 
-  // Leitspur reaktivieren nach Stadtbesuch
+  // 4. GuidePath reaktivieren (nach Stadtbesuch, erst nach ausreichender Erkundung)
   if (!s.guidePath.isActive && s.firstPathActivated && last) {
     const distFromLast = ctx.camera.position.distanceTo(last.position);
     if (distFromLast > CITY_CONFIG.ACTIVATION_DISTANCE) {
@@ -281,7 +276,8 @@ export function tick(
     }
   }
 
-  // GuidePath animieren (jeden 2. Frame)
+  // GuidePath animieren (pulsierende Sprites – nur jeden 2. Frame)
+  // Sinus-Puls bei 30Hz vs 60Hz ist visuell identisch, spart 50% CPU.
   if (s.tickInterval % 2 === 0) {
     s.guidePath.update(ctx.elapsed);
   }

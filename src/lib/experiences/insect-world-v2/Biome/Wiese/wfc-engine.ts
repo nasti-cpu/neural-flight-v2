@@ -23,7 +23,7 @@ import {
   ADJACENCY_RULES,
   ALL_TILE_TYPES,
   TILE_WEIGHTS,
-  TileType,
+  type TileType,
 } from "./wfc-tiles";
 
 // ── Hilfsfunktionen ──
@@ -122,15 +122,11 @@ export class WFCEngine {
 
   /**
    * Entfernt alle Zellen außerhalb eines bestimmten Radius.
-   * Vorseeding (z.B. CITY-Tiles für Städte) wird NIEMALS gelöscht,
-   * damit Städte nicht im Gras verschwinden.
+   * Wird aufgerufen, wenn der Spieler sich weit bewegt hat.
    */
   cleanup(playerGX: number, playerGZ: number, radius: number): void {
     const radiusSq = radius * radius;
-    for (const [key, tileType] of this.collapsed) {
-      // Vorseeding (z.B. CITY) niemals löschen
-      if (tileType === TileType.CITY) continue;
-
+    for (const [key] of this.collapsed) {
       const [gxStr, gzStr] = key.split(",");
       const gx = parseInt(gxStr, 10);
       const gz = parseInt(gzStr, 10);

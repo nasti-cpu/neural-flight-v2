@@ -1,17 +1,18 @@
 /**
- * insect-world-v2 — City Guide Path (Pheromon-Leitspur).
+ * insect-world-v2 — City Guide Path.
+ * Ein leuchtender Neon-Pfad (gestrichelt, Glow-Sprites),
+ * der vom Startpunkt zur Stadt führt und dem Gelände folgt.
  *
- * Eine große, weithin sichtbare Leuchtspur aus Neon-Partikeln,
- * die vom Spieler zur nächsten Stadt führt.
- * Sieht aus wie eine Pheromon-Spur: Partikel fließen entlang des Pfads,
- * sind groß und leuchtend, und von weit sichtbar (400m).
- *
- * Nutzt THREE.Sprite (weil Points in WebGPU keine map rendern).
+ * Nutzt THREE.Sprite (nicht Points – Points rendert map in WebGPU nicht).
+ * maxDist begrenzt die Pfad-Länge (Default 150m) – wird von scene.ts
+ * an die tatsächliche Stadt-Entfernung angepasst.
  *
  * WebGPU-konform.
  */
 import * as THREE from "three/webgpu";
 import { getWorldHeight } from "../../Biome/Wiese/grass-manager";
+
+// ── Standard-Konfiguration ──
 
 export interface GuidePathConfig {
   neonColor?: number;
@@ -22,6 +23,11 @@ export interface GuidePathConfig {
   spriteSizeMin?: number;
   spriteSizeMax?: number;
   spritesPerDash?: number;
+  /**
+   * Maximale Pfad-Länge in Metern.
+   * Wird von scene.ts an die Stadt-Entfernung angepasst (400m).
+   * Default 150m für Abwärtskompatibilität.
+   */
   maxDist?: number;
 }
 
@@ -41,6 +47,7 @@ export class CityGuidePath {
   readonly group = new THREE.Group();
   private _active = false;
 
+  /** Ob gerade ein Pfad aktiv (sichtbar) ist */
   get isActive(): boolean { return this._active; }
   private glowTexture: THREE.CanvasTexture;
   private phases: number[] = [];
@@ -54,9 +61,13 @@ export class CityGuidePath {
   setTarget(from: THREE.Vector3, to: THREE.Vector3): void {
     this.clear();
 
+    // Dynamische Pfad-Länge:
+    // - Reicht bis 15m vor die Stadt (dann ist die Stadt klar sichtbar)
+    // - Mindestens config.maxDist (Default 150m)
+    // - Maximal 350m (= ~875 Sprites, Performance-Obergrenze)
     const _dir = new THREE.Vector3().copy(to).sub(from);
     const dist = _dir.length();
-    const hardMax = 400;
+    const hardMax = 350;
     const visibilityBuffer = 15;
     const idealMax = Math.max(this.config.maxDist, dist - visibilityBuffer);
     const actualMax = Math.min(idealMax, hardMax);
@@ -84,13 +95,16 @@ export class CityGuidePath {
     for (const child of this.group.children) {
       if (child instanceof THREE.Sprite && child.material instanceof THREE.SpriteMaterial) {
         const phase = this.phases[idx] ?? 0;
-        // Stärkeres Pulsieren für bessere Sichtbarkeit
-        child.material.opacity = 0.7 + 0.3 * Math.sin(elapsed * 2.0 + phase);
+        child.material.opacity = 0.55 + 0.45 * Math.sin(elapsed * 1.8 + phase);
         idx++;
       }
     }
   }
 
+  /**
+   * Ersetzt die Konfiguration (für A/B-Vergleich im Test).
+   * Nach setConfig() muss setTarget() aufgerufen werden, um den Pfad neu zu bauen.
+   */
   setConfig(config: GuidePathConfig): void {
     this.config = { ...DEFAULTS, ...config };
   }
@@ -99,6 +113,8 @@ export class CityGuidePath {
     this.clear();
     this.glowTexture.dispose();
   }
+
+  // ── Privat ──
 
   private createGlowTexture(): THREE.CanvasTexture {
     const size = 64;
@@ -111,9 +127,9 @@ export class CityGuidePath {
       size / 2, size / 2, size / 2,
     );
     g.addColorStop(0, "rgba(255,255,255,1)");
-    g.addColorStop(0.08, "rgba(255,255,255,0.95)");
-    g.addColorStop(0.2, "rgba(255,255,255,0.7)");
-    g.addColorStop(0.4, "rgba(255,255,255,0.3)");
+    g.addColorStop(0.12, "rgba(255,255,255,0.95)");
+    g.addColorStop(0.3, "rgba(255,255,255,0.6)");
+    g.addColorStop(0.55, "rgba(255,255,255,0.2)");
     g.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, size, size);
@@ -132,12 +148,14 @@ export class CityGuidePath {
     const dz = to.z - from.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
 
-    const midX = (from.x + to.x) / 2 + (Math.random() - 0.5) * dist * 0.1;
-    const midZ = (from.z + to.z) / 2 + (Math.random() - 0.5) * dist * 0.1;
+    const midX = (from.x + to.x) / 2 + (Math.random() - 0.5) * dist * 0.15;
+    const midZ = (from.z + to.z) / 2 + (Math.random() - 0.5) * dist * 0.15;
     const midY =
       (getWorldHeight(from.x, from.z) +
         getWorldHeight(to.x, to.z) +
-        getWorldHeight(midX, midZ)) / 3 + 1.5;
+        getWorldHeight(midX, midZ)) /
+        3 +
+      (this.config.pathHeightMin + this.config.pathHeightMax) / 2;
 
     const ctrlPts = [
       new THREE.Vector3(from.x, from.y, from.z),
@@ -151,13 +169,13 @@ export class CityGuidePath {
       const t = i / numPoints;
       const p = curve.getPoint(t);
       const groundY = getWorldHeight(p.x, p.z);
-      p.y = groundY + 0.8 + Math.sin(t * Math.PI) * 1.2;
+      const heightAbove = this.config.pathHeightMin + Math.sin(t * Math.PI) * (this.config.pathHeightMax - this.config.pathHeightMin);
+      p.y = groundY + heightAbove;
       pts.push(p);
     }
     return pts;
   }
 
-  /** Erzeugt große, weithin sichtbare Neon-Dashes entlang der Kurve. */
   private buildGlowDashes(points: THREE.Vector3[]): void {
     this.phases = [];
 
@@ -184,15 +202,15 @@ export class CityGuidePath {
       const p = curve.getPoint(t);
       const tangent = curve.getTangent(t);
       const groundY = getWorldHeight(p.x, p.z);
-      p.y = groundY + 1.2;
+      p.y = groundY + (this.config.pathHeightMin + this.config.pathHeightMax) / 2;
 
       for (let s = 0; s < this.config.spritesPerDash; s++) {
-        const offset = ((s / this.config.spritesPerDash) - 0.5) * this.config.dashLength;
+        const offset = ((s / this.config.spritesPerDash) - 0.5) * this.config.dashLength * 0.8;
         const pos = new THREE.Vector3().copy(p);
         pos.addScaledVector(tangent, offset);
-        pos.x += (Math.random() - 0.5) * 0.5;
-        pos.z += (Math.random() - 0.5) * 0.5;
-        pos.y += (Math.random() - 0.5) * 0.3;
+        pos.x += (Math.random() - 0.5) * 0.3;
+        pos.z += (Math.random() - 0.5) * 0.3;
+        pos.y += (Math.random() - 0.5) * 0.15;
 
         const sprite = new THREE.Sprite(mat);
         sprite.position.copy(pos);
