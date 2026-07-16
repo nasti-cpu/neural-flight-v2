@@ -33,9 +33,9 @@ import type { PreloadedFlower } from "../../Objekte/Blumen/blumen";
 
 /** Chunk-Grösse in Metern (exportiert für Stadt-Position → Chunk-Koordinaten) */
 export const CHUNK_SIZE = 40;
-const VIEW_RADIUS = 1; // Wie viele Chunks um den Spieler herum geladen werden (1 = 3×3 = 9 Chunks)
-// VIEW_RADIUS=1 lädt Chunks bis 40m Entfernung. Der Nebel (FogExp2, density 0.04)
-// verdeckt bei 40m bereits ~80% → Chunks erscheinen/verschwinden unsichtbar.
+const VIEW_RADIUS = 2; // Wie viele Chunks um den Spieler herum geladen werden (2 = 5×5 = 25 Chunks)
+// VIEW_RADIUS=2 lädt Chunks bis 80m Entfernung. Der Nebel verdeckt bei 80m
+// bereits ~96% → kein sichtbares Nachladen, keine Übelkeit.
 
 // ── Hilfsfunktion: Welthöhe (sanfte Mulde um den Ursprung) ──
 

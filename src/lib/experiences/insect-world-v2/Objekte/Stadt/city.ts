@@ -15,7 +15,7 @@ export const CITY_CONFIG = {
 	// ── Anzahl & Verteilung ──
 	CITY_COUNT: 3,
 	/** Minimaler Abstand zwischen zwei Städten (Meter) */
-	MIN_DISTANCE: 250,
+	MIN_DISTANCE: 200,
 	/** Maximaler Abstand zwischen zwei Städten (Meter) */
 	MAX_DISTANCE: 400,
 
@@ -29,5 +29,5 @@ export const CITY_CONFIG = {
 	 * entfernt ist, wird die Leitspur zur nächsten Stadt aktiviert.
 	 * Verhindert den Sofort-Redirect und gibt Zeit zum Erkunden.
 	 */
-	ACTIVATION_DISTANCE: 30,
+	ACTIVATION_DISTANCE: 20,
 } as const;

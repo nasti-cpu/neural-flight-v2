@@ -140,7 +140,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   // Das Modell ist im modelPivot und wird erst per setActiveCity() sichtbar
   console.log(`[City] ${cityManager.cities.length} Städte erzeugt`);
 
-  // 11. GuidePath – erst nach 30m Erkundung aktiv (verzögertes Erscheinen)
+  // 11. GuidePath – erst nach Erkundung aktiv (verzögertes Erscheinen)
   const guidePath = new CityGuidePath({
     neonColor: 0x44ffff,
     dashLength: 0.5,
@@ -148,7 +148,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     spriteSizeMin: 1.4,
     spriteSizeMax: 2.2,
     spritesPerDash: 1,
-    maxDist: 200,
+    maxDist: 70,
   });
   const firstCity = cityManager.getNearestUndiscovered(new THREE.Vector3(0, 2, 0));
   if (firstCity) {
