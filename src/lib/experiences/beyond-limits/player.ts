@@ -12,6 +12,7 @@ import { updatePlayer as uwUpdatePlayer } from "../underwater-world-v5/scene";
 import { getWorldHeight } from "../insect-world-v2/Biome/Wiese/grass-manager";
 import { isKeyDown } from "../../three/keyboard";
 import { pollGamepad } from "../../three/gamepad";
+import type { FlightPlayer } from "../../three/player";
 
 // ── Keyboard-Steuerung (WASD) ──
 const KB_LERP = 0.1;          // Smoothing-Faktor für Tastatur-Input (sanftes Ein-/Ausfliegen)
@@ -36,8 +37,10 @@ function _insectUpdatePlayer(
 	delta: number,
 ): void {
 	const s = state as Record<string, unknown>;
-	const camera = s.camera as THREE.PerspectiveCamera;
-	if (!camera) return;
+	const player = s.player as FlightPlayer;
+	if (!player) return;
+
+	const rig = player.rig;
 
 	// Pitch smoothn (wie Underwater) – orientation.pitch ist in Grad
 	_smoothPitch += (orientation.pitch - _smoothPitch) * PITCH_LERP;
@@ -48,25 +51,25 @@ function _insectUpdatePlayer(
 	if (speed.brake) moveSpeed *= 0.3;
 
 	// Roll → Yaw (Kurve)
-	camera.rotation.y += orientation.roll * YAW_FACTOR * delta;
+	rig.rotation.y += orientation.roll * YAW_FACTOR * delta;
 
 	// Horizontaler Forward (ohne Pitch)
-	_FWD.set(0, 0, -1).applyQuaternion(camera.quaternion);
+	_FWD.set(0, 0, -1).applyQuaternion(rig.quaternion);
 	_FWD.y = 0;
 	_FWD.normalize();
-	camera.position.addScaledVector(_FWD, moveSpeed * delta);
+	rig.position.addScaledVector(_FWD, moveSpeed * delta);
 
 	// Pitch → vertikale Bewegung (smoothed, als Winkel in Grad)
 	// positive Pitch = nach unten (wie Underwater)
 	const pitchRad = _smoothPitch * THREE.MathUtils.DEG2RAD;
-	camera.position.y += -Math.sin(pitchRad) * moveSpeed * delta;
+	rig.position.y += -Math.sin(pitchRad) * moveSpeed * delta;
 
 	// Boden-Follow + Höhendecke
-	const groundY = getWorldHeight(camera.position.x, camera.position.z);
+	const groundY = getWorldHeight(rig.position.x, rig.position.z);
 	const minY = groundY + 0.5;
 	const maxY = groundY + CEILING_HEIGHT;
-	if (camera.position.y < minY) camera.position.y = minY;
-	if (camera.position.y > maxY) camera.position.y = maxY;
+	if (rig.position.y < minY) rig.position.y = minY;
+	if (rig.position.y > maxY) rig.position.y = maxY;
 }
 
 // ── Delegation ──

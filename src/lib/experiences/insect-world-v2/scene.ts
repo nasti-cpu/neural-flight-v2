@@ -23,10 +23,12 @@ import beeGlbUrl from "./Objekte/Bienen/Bee.glb?url";
 import butterflyGlbUrl from "./Objekte/Schmetterlinge/Beautiful Butterfly.glb?url";
 import bgAudioUrl from "./Meadow-Sound.mp3?url";
 import { loadBackgroundAudio } from "../../three/audio-manager";
+import { FlightPlayer } from "../../three/player";
 
 /** Eigenes State-Interface für insect-world-v2 */
 interface InsectWorldV2State extends ExperienceState {
   camera: THREE.PerspectiveCamera;
+  player: FlightPlayer;
   grassManager: GrassManager;
   bees: BeeSwarm;
   butterflies: ButterflySwarm;
@@ -163,9 +165,19 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   const fogColor = new THREE.Color("#4a90d9");
   ctx.scene.fog = new THREE.FogExp2(fogColor, 0.04);
 
-  // Kamera positionieren (Insektenperspektive ~2m)
-  const camera = ctx.camera;
-  camera.position.set(0, 2, 0);
+  // Kamera mit FlightPlayer-Rig (wie Underwater World, für einheitliche Kamera-Struktur)
+  const player = new FlightPlayer({
+    fov: 75,
+    near: 0.1,
+    far: 800,
+    spawnPosition: { x: 0, y: 2, z: 0 },
+    baseSpeed: 10,
+  });
+  player.rollYawMultiplier = 0;     // kein Banking – yaw wird direkt gesteuert
+  player.minClearance = -1000;       // eigenes Terrain-Following via getWorldHeight
+  ctx.scene.add(player.rig);
+
+  const camera = player.camera;
 
   // 12. Hintergrund-Sound laden und starten (Dauerschleife)
   const bgAudio = await loadBackgroundAudio(camera, bgAudioUrl);
@@ -174,6 +186,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
 
   return {
     camera,
+    player,
     grassManager,
     bees,
     butterflies,
@@ -216,11 +229,11 @@ export function tick(
   // Spart ~66% CPU-Last für Chunk-Verwaltung ohne sichtbaren Unterschied.
   // delta * 3, weil wir 2 von 3 Frames überspringen (Fade läuft trotzdem korrekt)
   if (s.tickInterval % 3 === 0) {
-    s.grassManager.update(ctx.camera.position, ctx.delta * 3);
+    s.grassManager.update(s.player.rig.position, ctx.delta * 3);
   }
 
   // ── Stadt- & Leitsystem (ohne Sofort-Redirect) ──
-  const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);
+  const nearest = s.cityManager.getNearestUndiscovered(s.player.rig.position);
   const last = s.cityManager.lastVisitedCity;
 
   // Merker: wurde die Spur in genau diesem Frame aktiviert?
@@ -229,9 +242,9 @@ export function tick(
   let pathActivatedThisFrame = false;
 
   if (nearest) {
-    const distToNearest = ctx.camera.position.distanceTo(nearest.position);
+    const distToNearest = s.player.rig.position.distanceTo(nearest.position);
     const distFromLast = last
-      ? ctx.camera.position.distanceTo(last.position)
+      ? s.player.rig.position.distanceTo(last.position)
       : Infinity;
 
     // 1. Modell-Steuerung: Zeige die Stadt, wenn nah dran,
@@ -250,11 +263,11 @@ export function tick(
 
   // 3. Erste Leitspur aktivieren (nach 30m Erkundung)
   if (!s.guidePath.isActive && !s.firstPathActivated) {
-    const distFromStart = ctx.camera.position.distanceTo(s.startPosition);
+    const distFromStart = s.player.rig.position.distanceTo(s.startPosition);
     if (distFromStart > 30) {
-      const nearest = s.cityManager.getNearestUndiscovered(ctx.camera.position);
+      const nearest = s.cityManager.getNearestUndiscovered(s.player.rig.position);
       if (nearest) {
-        s.guidePath.setTarget(ctx.camera.position, nearest.position);
+        s.guidePath.setTarget(s.player.rig.position, nearest.position);
         s.firstPathActivated = true;
         pathActivatedThisFrame = true;
         console.log(`[City] Erste Leitspur zu Stadt ${nearest.index} aktiviert`);
@@ -264,11 +277,11 @@ export function tick(
 
   // 4. GuidePath reaktivieren (30m nach Stadtbesuch, dann nächste Stadt)
   if (!s.guidePath.isActive && s.firstPathActivated && last) {
-    const distFromLast = ctx.camera.position.distanceTo(last.position);
+    const distFromLast = s.player.rig.position.distanceTo(last.position);
     if (distFromLast > CITY_CONFIG.ACTIVATION_DISTANCE) {
-      const next = s.cityManager.getNearestUndiscovered(ctx.camera.position);
+      const next = s.cityManager.getNearestUndiscovered(s.player.rig.position);
       if (next) {
-        s.guidePath.setTarget(ctx.camera.position, next.position);
+        s.guidePath.setTarget(s.player.rig.position, next.position);
         pathActivatedThisFrame = true;
         console.log(`[City] Leitspur zu Stadt ${next.index} aktiviert`);
       }
@@ -279,7 +292,7 @@ export function tick(
   // Nur wenn die Spur NICHT in genau diesem Frame aktiviert wurde,
   // damit sie mindestens einen Frame sichtbar bleibt.
   if (nearest) {
-    const distToNearest = ctx.camera.position.distanceTo(nearest.position);
+    const distToNearest = s.player.rig.position.distanceTo(nearest.position);
     if (!pathActivatedThisFrame && distToNearest < CITY_CONFIG.ARRIVAL_DISTANCE && !nearest.visited) {
       s.cityManager.markVisited(nearest);
       s.guidePath.clear();
@@ -297,9 +310,9 @@ export function tick(
   // aktuellen Spieler zur nächsten Stadt bauen → Spur zeigt immer in die
   // richtige Richtung, auch wenn der Spieler seitlich läuft.
   if (s.guidePath.isActive && s.tickInterval % 30 === 0) {
-    const target = s.cityManager.getNearestUndiscovered(ctx.camera.position);
+    const target = s.cityManager.getNearestUndiscovered(s.player.rig.position);
     if (target) {
-      s.guidePath.setTarget(ctx.camera.position, target.position);
+      s.guidePath.setTarget(s.player.rig.position, target.position);
     }
   }
 
@@ -332,4 +345,5 @@ export function dispose(state: ExperienceState, _scene: THREE.Scene): void {
   _scene.remove(s.butterflies.group);
   _scene.remove(s.guidePath.group);
   _scene.remove(s.pheromones.group);
+  _scene.remove(s.player.rig);
 }

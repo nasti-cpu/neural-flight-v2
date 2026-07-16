@@ -401,6 +401,11 @@ function _startTransition(s: BeyondState): void {
 	// Audio der alten Welt sofort stumm
 	_setAudioVolume(s, s.world, 0);
 
+	// Kamera-Weltposition VOR dem Disposen sichern, damit die Tunnel-Effekte
+	// an der richtigen Stelle erscheinen (nicht bei 0,0,0)
+	s.camera.getWorldPosition(s._worldPos);
+	s.camera.getWorldQuaternion(s._worldQuat);
+
 	if (s.world === 0) {
 		if (s.underwaterState) underwaterDispose(s.underwaterState, s.scene);
 		s.underwaterState = null;
@@ -418,6 +423,10 @@ function _startTransition(s: BeyondState): void {
 
 	s.portal.group.visible = false;
 
+	// Dummy-Kamera an der gesicherten Position platzieren → Tunnel erscheint
+	// am letzten Standort des Spielers, nicht bei 0,0,0
+	s.dummyCamera.position.copy(s._worldPos);
+	s.dummyCamera.quaternion.copy(s._worldQuat);
 	s.dummyCamera.fov = 70;
 	s.dummyCamera.near = 0.1;
 	s.dummyCamera.far = 800;
@@ -459,6 +468,7 @@ async function _setupWorldAsync(s: BeyondState, targetWorld: number): Promise<vo
 				renderer: null as any,
 			});
 			s.insectState = iState;
+			s.camera = (iState as any).camera as THREE.PerspectiveCamera;
 		}
 
 		// Neue Welt startet stumm – Audio wird beim Tunnel-Ausblenden eingeblendet
