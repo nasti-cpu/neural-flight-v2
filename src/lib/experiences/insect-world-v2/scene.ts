@@ -293,6 +293,16 @@ export function tick(
     s.guidePath.update(ctx.elapsed);
   }
 
+  // GuidePath folgt dem Spieler: Pfad alle 30 Frames (~0.5s) neu vom
+  // aktuellen Spieler zur nächsten Stadt bauen → Spur zeigt immer in die
+  // richtige Richtung, auch wenn der Spieler seitlich läuft.
+  if (s.guidePath.isActive && s.tickInterval % 30 === 0) {
+    const target = s.cityManager.getNearestUndiscovered(ctx.camera.position);
+    if (target) {
+      s.guidePath.setTarget(ctx.camera.position, target.position);
+    }
+  }
+
   return {
     state: s,
   };
