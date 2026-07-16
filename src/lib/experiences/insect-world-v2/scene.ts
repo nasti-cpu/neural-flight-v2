@@ -68,7 +68,7 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
   const grassManager = new GrassManager(
     {
       fieldSize: 60,
-      grassCount: 14000,
+      grassCount: 10000,
       curvature: 0.0001,
       color: "#5a8a3c",
       groundColor: "#3a6028",
@@ -145,8 +145,8 @@ export async function setup(ctx: SetupContext): Promise<InsectWorldV2State> {
     neonColor: 0x44ffff,
     dashLength: 0.5,
     gapLength: 0.3,
-    spriteSizeMin: 1.4,
-    spriteSizeMax: 2.2,
+    spriteSizeMin: 3.0,
+    spriteSizeMax: 5.0,
     spritesPerDash: 1,
     maxDist: 70,
   });

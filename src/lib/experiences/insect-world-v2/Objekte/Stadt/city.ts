@@ -29,5 +29,5 @@ export const CITY_CONFIG = {
 	 * entfernt ist, wird die Leitspur zur nächsten Stadt aktiviert.
 	 * Verhindert den Sofort-Redirect und gibt Zeit zum Erkunden.
 	 */
-	ACTIVATION_DISTANCE: 20,
+	ACTIVATION_DISTANCE: 30,
 } as const;

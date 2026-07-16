@@ -35,8 +35,8 @@ const DEFAULTS: Required<GuidePathConfig> = {
   neonColor: 0x44ffff,
   dashLength: 1.2,
   gapLength: 0.6,
-  pathHeightMin: 0.5,
-  pathHeightMax: 1.8,
+  pathHeightMin: 1.5,
+  pathHeightMax: 3.5,
   spriteSizeMin: 0.6,
   spriteSizeMax: 1.2,
   spritesPerDash: 3,
@@ -95,7 +95,7 @@ export class CityGuidePath {
     for (const child of this.group.children) {
       if (child instanceof THREE.Sprite && child.material instanceof THREE.SpriteMaterial) {
         const phase = this.phases[idx] ?? 0;
-        child.material.opacity = 0.55 + 0.45 * Math.sin(elapsed * 1.8 + phase);
+        child.material.opacity = 0.75 + 0.25 * Math.sin(elapsed * 1.8 + phase);
         idx++;
       }
     }
@@ -191,6 +191,7 @@ export class CityGuidePath {
       opacity: 1.0,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
+      fog: false,
     });
 
     for (let d = 0; d < numDashes; d++) {
