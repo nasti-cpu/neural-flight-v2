@@ -6,6 +6,7 @@
 	import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 	import { SkyScene, SKY_VARIANTS } from "$lib/experiences/insect-world/Biome/blauer Himmel/sky-test";
 	import { BIENEN } from "$lib/experiences/insect-world/Objekte/Bienen/bienen";
+	import TestNav from "$lib/components/TestNav.svelte";
 
 	let canvas: HTMLCanvasElement;
 	let renderer: THREE.WebGLRenderer;
@@ -177,6 +178,7 @@
 		<p class="hint">Ziehen zum Drehen • Scrollen zum Zoomen</p>
 	</div>
 </div>
+<TestNav currentSlug="bienen" />
 
 <style>
 	.container {

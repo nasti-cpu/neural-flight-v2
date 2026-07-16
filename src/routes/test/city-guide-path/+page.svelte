@@ -17,6 +17,7 @@
 	import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 	import { createSky } from "$lib/experiences/insect-world-v2/Biome/blauerHimmel/sky";
+	import TestNav from "$lib/components/TestNav.svelte";
 
 	type VariantKey = "A" | "B" | "C" | "D" | "E";
 
@@ -638,6 +639,7 @@
 		</p>
 	</div>
 </div>
+<TestNav currentSlug="city-guide-path" />
 
 <style>
 	.container {

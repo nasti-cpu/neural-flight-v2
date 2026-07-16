@@ -3,6 +3,7 @@ import { onMount, onDestroy } from "svelte";
 import { browser } from "$app/environment";
 import * as THREE from "three/webgpu";
 import { createSky } from "$lib/experiences/insect-world-v2/Biome/blauerHimmel/sky";
+	import TestNav from "$lib/components/TestNav.svelte";
 
 let canvas: HTMLCanvasElement;
 let renderer: THREE.WebGPURenderer;
@@ -47,3 +48,4 @@ onDestroy(() => {
 
 <svelte:head><title>Gletscher Himmel | ICAROS VR</title></svelte:head>
 <canvas bind:this={canvas} style="display:block;width:100vw;height:100vh"></canvas>
+<TestNav currentSlug="berge" />

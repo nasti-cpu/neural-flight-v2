@@ -12,6 +12,7 @@
 	import { GrassMeadow } from "$lib/experiences/insect-world/Biome/Wiese/grass-test";
 	import { createSky } from "$lib/three/sky";
 	import { createClouds } from "$lib/three/clouds";
+	import TestNav from "$lib/components/TestNav.svelte";
 
 	let canvas: HTMLCanvasElement;
 	let renderer: THREE.WebGLRenderer;
@@ -396,6 +397,7 @@
 		<p class="hint">Ziehen zum Drehen • Scrollen zum Zoomen</p>
 	</div>
 </div>
+<TestNav currentSlug="erlebnis-low" />
 
 <style>
 	.container {

@@ -162,10 +162,10 @@ const routes = [
 		planned: false,
 	},
 	{
-		path: "/test/erlebnis",
+		path: "/test",
 		icon: Bug,
-		title: "Insect World",
-		description: "Wiese · Blumen · Bienen · Schmetterlinge · Stadt · Pheromone · Facettenauge",
+		title: "Testseiten",
+		description: "15 Three.js-Experimente mit Navigation durchblättern",
 		planned: false,
 	},
 	{

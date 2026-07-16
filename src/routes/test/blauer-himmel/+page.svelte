@@ -4,6 +4,7 @@
 	import * as THREE from "three";
 	import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 	import { SkyScene, SKY_VARIANTS } from "$lib/experiences/insect-world/Biome/blauer Himmel/sky-test";
+	import TestNav from "$lib/components/TestNav.svelte";
 
 	let canvas: HTMLCanvasElement;
 	let renderer: THREE.WebGLRenderer;
@@ -88,6 +89,7 @@
 		<p class="hint">Ziehen zum Drehen • Scrollen zum Zoomen</p>
 	</div>
 </div>
+<TestNav currentSlug="blauer-himmel" />
 
 <style>
 	.container {

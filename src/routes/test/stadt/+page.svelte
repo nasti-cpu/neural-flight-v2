@@ -21,6 +21,7 @@
 	import { CITY_CONFIG as CITY } from "$lib/experiences/insect-world-v2/Objekte/Stadt/city";
 
 	import beeGlbUrl from "$lib/experiences/insect-world-v2/Objekte/Bienen/Bee.glb?url";
+	import TestNav from "$lib/components/TestNav.svelte";
 	import butterflyGlbUrl from "$lib/experiences/insect-world-v2/Objekte/Schmetterlinge/Beautiful Butterfly.glb?url";
 
 	let canvas: HTMLCanvasElement;
@@ -228,6 +229,7 @@
 		<p class="hint">Ziehen zum Drehen • Scrollen zum Zoomen</p>
 	</div>
 </div>
+<TestNav currentSlug="stadt" />
 
 <style>
 	.container {

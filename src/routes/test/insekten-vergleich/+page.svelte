@@ -14,6 +14,8 @@
 	let loading = $state(true);
 	let statusText = $state("Lade …");
 
+	import TestNav from "$lib/components/TestNav.svelte";
+
 	function loadGLB(url: string): Promise<THREE.Group> {
 		return new Promise((resolve, reject) => {
 			new GLTFLoader().load(url, (gltf) => resolve(gltf.scene), () => {}, reject);
@@ -218,6 +220,7 @@
 		<p class="hint">Ziehen zum Drehen • Scrollen zum Zoomen</p>
 	</div>
 </div>
+<TestNav currentSlug="insekten-vergleich" />
 
 <style>
 	.container {

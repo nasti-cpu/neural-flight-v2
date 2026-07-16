@@ -9,6 +9,7 @@
 	import { CITY } from "$lib/experiences/insect-world/Objekte/Stadt/city";
 	import { BIENEN } from "$lib/experiences/insect-world/Objekte/Bienen/bienen";
 	import { SCHMETTERLINGE } from "$lib/experiences/insect-world/Objekte/Schmetterlinge/schmetterlinge";
+	import TestNav from "$lib/components/TestNav.svelte";
 
 	let canvas: HTMLCanvasElement;
 	let renderer: THREE.WebGLRenderer;
@@ -375,6 +376,7 @@
 		<p class="hint">Ziehen zum Drehen • Scrollen zum Zoomen • WASD zum Bewegen</p>
 	</div>
 </div>
+<TestNav currentSlug="wiese-komplett" />
 
 <style>
 	.container {

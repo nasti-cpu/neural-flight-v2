@@ -12,6 +12,7 @@
 	import { BLUMEN } from "$lib/experiences/insect-world/Objekte/Blumen/blumen";
 	import { PheromoneSystem } from "$lib/experiences/insect-world/Sinne/Pheromonspuren/pheromonspuren";
 	import type { FlowerTarget } from "$lib/experiences/insect-world/Sinne/Pheromonspuren/pheromonspuren";
+	import TestNav from "$lib/components/TestNav.svelte";
 	import { CompoundEyeEffect } from "$lib/experiences/insect-world/Objekte/Facettenauge/facettenauge";
 
 	let canvas: HTMLCanvasElement;
@@ -397,6 +398,7 @@
 		<p class="hint">WASD = Bewegen</p>
 	</div>
 </div>
+<TestNav currentSlug="erlebnis" />
 
 <style>
 	.container {

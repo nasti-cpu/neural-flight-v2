@@ -13,6 +13,7 @@
 	import { createSky } from "$lib/experiences/insect-world-v2/Biome/blauerHimmel/sky";
 	import { createMeadow, MEADOW_PRESETS } from "$lib/experiences/insect-world-v2/Biome/Wiese/grass";
 	import { createFlowers } from "$lib/experiences/insect-world-v2/Objekte/Blumen/blumen";
+	import TestNav from "$lib/components/TestNav.svelte";
 	import { createButterflies } from "$lib/experiences/insect-world-v2/Objekte/Schmetterlinge/schmetterlinge";
 
 	import butterflyGlbUrl from "$lib/experiences/insect-world-v2/Objekte/Schmetterlinge/Beautiful Butterfly.glb?url";
@@ -149,6 +150,7 @@
 		<p class="hint">Ziehen zum Drehen • Scrollen zum Zoomen</p>
 	</div>
 </div>
+<TestNav currentSlug="schmetterlinge" />
 
 <style>
 	.container {

@@ -15,6 +15,7 @@
 	import { createMeadow, MEADOW_PRESETS } from "$lib/experiences/insect-world-v2/Biome/Wiese/grass";
 	import { createFlowers } from "$lib/experiences/insect-world-v2/Objekte/Blumen/blumen";
 	import { PheromoneSystem, VARIANTS, type FlowerTarget } from "$lib/experiences/insect-world-v2/Sinne/Pheromonspuren/pheromonspuren";
+	import TestNav from "$lib/components/TestNav.svelte";
 
 	let canvas: HTMLCanvasElement;
 	let renderer: THREE.WebGPURenderer;
@@ -135,6 +136,7 @@
 		</div>
 	</div>
 </div>
+<TestNav currentSlug="pheromon" />
 
 <style>
 	.container { position: fixed; inset: 0; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }

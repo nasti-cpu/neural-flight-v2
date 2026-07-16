@@ -10,6 +10,7 @@
 	import { BIENEN } from "$lib/experiences/insect-world/Objekte/Bienen/bienen";
 	import { SCHMETTERLINGE } from "$lib/experiences/insect-world/Objekte/Schmetterlinge/schmetterlinge";
 	import { CompoundEyeEffect, VARIANTS } from "$lib/experiences/insect-world/Objekte/Facettenauge/facettenauge";
+	import TestNav from "$lib/components/TestNav.svelte";
 
 	let canvas: HTMLCanvasElement;
 	let renderer: THREE.WebGLRenderer;
@@ -405,6 +406,7 @@
 		<p class="hint">Ziehen zum Drehen • Scrollen zum Zoomen • WASD zum Bewegen • ← → für Varianten</p>
 	</div>
 </div>
+<TestNav currentSlug="facettenauge" />
 
 <style>
 	.container {

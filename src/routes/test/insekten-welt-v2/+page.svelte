@@ -18,6 +18,7 @@
 	import { createBees } from "$lib/experiences/insect-world-v2/Objekte/Bienen/bienen";
 
 	import beeGlbUrl from "$lib/experiences/insect-world-v2/Objekte/Bienen/Bee.glb?url";
+	import TestNav from "$lib/components/TestNav.svelte";
 	import { FPSMonitor } from "$lib/experiences/insect-world-v2/Sinne/FPSMonitor";
 
 	let canvas: HTMLCanvasElement;
@@ -160,6 +161,7 @@
 		<p class="hint">Ziehen zum Drehen • Scrollen zum Zoomen</p>
 	</div>
 </div>
+<TestNav currentSlug="insekten-welt-v2" />
 
 <style>
 	.container {

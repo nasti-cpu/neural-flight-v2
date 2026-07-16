@@ -6,6 +6,7 @@
 	import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 	import { GrassMeadow } from "$lib/experiences/insect-world/Biome/Wiese/grass-test";
 	import { SkyScene, SKY_VARIANTS } from "$lib/experiences/insect-world/Biome/blauer Himmel/sky-test";
+	import TestNav from "$lib/components/TestNav.svelte";
 
 	let canvas: HTMLCanvasElement;
 	let renderer: THREE.WebGLRenderer;
@@ -162,6 +163,7 @@
 		<p class="hint">Ziehen zum Drehen • Scrollen zum Zoomen</p>
 	</div>
 </div>
+<TestNav currentSlug="blumen" />
 
 <style>
 	.container {

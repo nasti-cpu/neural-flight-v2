@@ -6,6 +6,7 @@
 
     import { createSky } from "$lib/experiences/insect-world-v2/Biome/blauerHimmel/sky";
     import type { PheromonVariant } from "$lib/experiences/insect-world-v2/Sinne/Pheromonspuren/pheromonspuren";
+	import TestNav from "$lib/components/TestNav.svelte";
 
     // ── Parameter (wie "Leuchtpfad", aber 20–35m Distanz) ──
     const TRAIL_VARIANT: PheromonVariant = {
@@ -541,6 +542,7 @@ laut Projekt-Vorgabe. */
         </p>
     </div>
 </div>
+<TestNav currentSlug="pheromon-abstand" />
 
 <style>
     .container {

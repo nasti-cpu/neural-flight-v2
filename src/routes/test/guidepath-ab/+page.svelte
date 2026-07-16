@@ -15,6 +15,7 @@
 	import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 	import { createSky } from "$lib/experiences/insect-world-v2/Biome/blauerHimmel/sky";
+	import TestNav from "$lib/components/TestNav.svelte";
 	import { CityGuidePath } from "$lib/experiences/insect-world-v2/Objekte/Stadt/city-guide-path";
 	import { getWorldHeight } from "$lib/experiences/insect-world-v2/Biome/Wiese/grass-manager";
 
@@ -247,6 +248,7 @@
 		<p class="hint">🖱️ Ziehen zum Drehen • Scrollen zum Zoomen • Stadt 120m entfernt</p>
 	</div>
 </div>
+<TestNav currentSlug="guidepath-ab" />
 
 <style>
 	.container {
